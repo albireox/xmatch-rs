@@ -9,6 +9,7 @@ classifiers = [
 dynamic = ["version"]
 dependencies = [
     "polars>=1.39.2",
+    "pydantic>=2.12.5",
     "sdsstools>=1.9.7",
 ]
 
@@ -22,12 +23,14 @@ dev = [
 
 [tool.maturin]
 python-source = "python"
+module-name = "xmatch_rs._xmatch_rs_lib"
 profile = "release"
 editable-profile = "release"
 
 [tool.uv]
 package = true
 default-groups = ["dev"]
+cache-keys = [{file = "pyproject.toml"}, {file = "Cargo.toml"}, {file = "**/*.rs"}]
 
 [tool.ruff]
 line-length = 88
@@ -51,6 +54,7 @@ sdss = ["sdsstools"]
 
 [tool.ty.environment]
 python-version = "3.14"
+root = ["python"]
 
 [tool.pytest.ini_options]
 addopts = "--cov xmatch_rs --cov-report xml --cov-report html --cov-report term -W ignore"

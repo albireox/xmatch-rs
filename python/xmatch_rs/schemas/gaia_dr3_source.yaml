@@ -1,615 +1,544 @@
-source: https://gaia.aip.de/metadata/gaiadr3/gaia_source/
-table: gaiadr3.gaia_source
-schema:
+source_url: https://gaia.aip.de/metadata/gaiadr3/gaia_source/
+source_params:
+  format: csv
+  csv_delimiter: ','
+  csv_has_header: true
+  csv_comment_prefix: '#'
+columns:
   solution_id:
     dtype: Int64
-    unit: ''
-    description: 'Solution Identifier'
+    description: Solution Identifier
   designation:
     dtype: String
-    unit: ''
-    description: 'Unique source designation (unique across all Data Releases)'
+    description: Unique source designation (unique across all Data Releases)
   source_id:
     dtype: Int64
-    unit: ''
-    description: 'Unique source identifier (unique within a particular Data Release)'
+    description: Unique source identifier (unique within a particular Data Release)
+    unique: true
+    numerical_unique: true
+    primary_key: true
   random_index:
     dtype: Int64
-    unit: ''
-    description: 'Random index for use when selecting subsets'
+    description: Random index for use when selecting subsets
   ref_epoch:
     dtype: Float64
-    unit: 'yr'
-    description: 'Reference epoch'
+    unit: yr
+    description: Reference epoch
   ra:
     dtype: Float64
-    unit: 'deg'
-    description: 'Right ascension'
+    unit: deg
+    description: Right ascension
   ra_error:
     dtype: Float32
-    unit: 'mas'
-    description: 'Standard error of right ascension'
+    unit: mas
+    description: Standard error of right ascension
   dec:
     dtype: Float64
-    unit: 'deg'
-    description: 'Declination'
+    unit: deg
+    description: Declination
   dec_error:
     dtype: Float32
-    unit: 'mas'
-    description: 'Standard error of declination'
+    unit: mas
+    description: Standard error of declination
   parallax:
     dtype: Float64
-    unit: 'mas'
-    description: 'Parallax'
+    unit: mas
+    description: Parallax
   parallax_error:
     dtype: Float32
-    unit: 'mas'
-    description: 'Standard error of parallax'
+    unit: mas
+    description: Standard error of parallax
   parallax_over_error:
     dtype: Float32
-    unit: ''
-    description: 'Parallax divided by its standard error'
+    description: Parallax divided by its standard error
   pm:
     dtype: Float32
-    unit: 'mas.yr**-1'
-    description: 'Total proper motion'
+    unit: mas.yr**-1
+    description: Total proper motion
   pmra:
     dtype: Float64
-    unit: 'mas.yr**-1'
-    description: 'Proper motion in right ascension direction'
+    unit: mas.yr**-1
+    description: Proper motion in right ascension direction
   pmra_error:
     dtype: Float32
-    unit: 'mas.yr**-1'
-    description: 'Standard error of proper motion in right ascension direction'
+    unit: mas.yr**-1
+    description: Standard error of proper motion in right ascension direction
   pmdec:
     dtype: Float64
-    unit: 'mas.yr**-1'
-    description: 'Proper motion in declination direction'
+    unit: mas.yr**-1
+    description: Proper motion in declination direction
   pmdec_error:
     dtype: Float32
-    unit: 'mas.yr**-1'
-    description: 'Standard error of proper motion in declination direction'
+    unit: mas.yr**-1
+    description: Standard error of proper motion in declination direction
   ra_dec_corr:
     dtype: Float32
-    unit: ''
-    description: 'Correlation between right ascension and declination'
+    description: Correlation between right ascension and declination
   ra_parallax_corr:
     dtype: Float32
-    unit: ''
-    description: 'Correlation between right ascension and parallax'
+    description: Correlation between right ascension and parallax
   ra_pmra_corr:
     dtype: Float32
-    unit: ''
-    description: 'Correlation between right ascension and proper motion in right ascension'
+    description: Correlation between right ascension and proper motion in right ascension
   ra_pmdec_corr:
     dtype: Float32
-    unit: ''
-    description: 'Correlation between right ascension and proper motion in declination'
+    description: Correlation between right ascension and proper motion in declination
   dec_parallax_corr:
     dtype: Float32
-    unit: ''
-    description: 'Correlation between declination and parallax'
+    description: Correlation between declination and parallax
   dec_pmra_corr:
     dtype: Float32
-    unit: ''
-    description: 'Correlation between declination and proper motion in right ascension'
+    description: Correlation between declination and proper motion in right ascension
   dec_pmdec_corr:
     dtype: Float32
-    unit: ''
-    description: 'Correlation between declination and proper motion in declination'
+    description: Correlation between declination and proper motion in declination
   parallax_pmra_corr:
     dtype: Float32
-    unit: ''
-    description: 'Correlation between parallax and proper motion in right ascension'
+    description: Correlation between parallax and proper motion in right ascension
   parallax_pmdec_corr:
     dtype: Float32
-    unit: ''
-    description: 'Correlation between parallax and proper motion in declination'
+    description: Correlation between parallax and proper motion in declination
   pmra_pmdec_corr:
     dtype: Float32
-    unit: ''
-    description: 'Correlation between proper motion in right ascension and proper motion in declination'
+    description: Correlation between proper motion in right ascension and proper motion in declination
   astrometric_n_obs_al:
     dtype: Int16
-    unit: ''
-    description: 'Total number of observations in the along-scan (AL) direction'
+    description: Total number of observations in the along-scan (AL) direction
   astrometric_n_obs_ac:
     dtype: Int16
-    unit: ''
-    description: 'Total number of observations in the across-scan (AC) direction'
+    description: Total number of observations in the across-scan (AC) direction
   astrometric_n_good_obs_al:
     dtype: Int16
-    unit: ''
-    description: 'Number of good observations in the along-scan (AL) direction'
+    description: Number of good observations in the along-scan (AL) direction
   astrometric_n_bad_obs_al:
     dtype: Int16
-    unit: ''
-    description: 'Number of bad observations in the along-scan (AL) direction'
+    description: Number of bad observations in the along-scan (AL) direction
   astrometric_gof_al:
     dtype: Float32
-    unit: ''
-    description: 'Goodness of fit statistic of model wrt along-scan observations'
+    description: Goodness of fit statistic of model wrt along-scan observations
   astrometric_chi2_al:
     dtype: Float32
-    unit: ''
-    description: 'AL chi-square value'
+    description: AL chi-square value
   astrometric_excess_noise:
     dtype: Float32
-    unit: 'mas'
-    description: 'Excess noise of the source'
+    unit: mas
+    description: Excess noise of the source
   astrometric_excess_noise_sig:
     dtype: Float32
-    unit: ''
-    description: 'Significance of excess noise'
+    description: Significance of excess noise
   astrometric_params_solved:
-    dtype: Int16
-    unit: ''
-    description: 'Which parameters have been solved for?'
+    dtype: Int8
+    description: Which parameters have been solved for?
   astrometric_primary_flag:
     dtype: Boolean
-    unit: ''
-    description: 'Primary or secondary'
+    description: Primary or seconday
   nu_eff_used_in_astrometry:
     dtype: Float32
-    unit: 'um**-1'
-    description: 'Effective wavenumber of the source used in the astrometric solution'
+    unit: um**-1
+    description: Effective wavenumber of the source used in the astrometric solution
   pseudocolour:
     dtype: Float32
-    unit: 'um**-1'
-    description: 'Astrometrically estimated pseudocolour of the source'
+    unit: um**-1
+    description: Astrometrically estimated pseudocolour of the source
   pseudocolour_error:
     dtype: Float32
-    unit: 'um**-1'
-    description: 'Standard error of the pseudocolour of the source'
+    unit: um**-1
+    description: Standard error of the pseudocolour of the source
   ra_pseudocolour_corr:
     dtype: Float32
-    unit: ''
-    description: 'Correlation between right ascension and pseudocolour'
+    description: Correlation between right ascension and pseudocolour
   dec_pseudocolour_corr:
     dtype: Float32
-    unit: ''
-    description: 'Correlation between declination and pseudocolour'
+    description: Correlation between declination and pseudocolour
   parallax_pseudocolour_corr:
     dtype: Float32
-    unit: ''
-    description: 'Correlation between parallax and pseudocolour'
+    description: Correlation between parallax and pseudocolour
   pmra_pseudocolour_corr:
     dtype: Float32
-    unit: ''
-    description: 'Correlation between proper motion in right ascension and pseudocolour'
+    description: Correlation between proper motion in right asension and pseudocolour
   pmdec_pseudocolour_corr:
     dtype: Float32
-    unit: ''
-    description: 'Correlation between proper motion in declination and pseudocolour'
+    description: Correlation between proper motion in declination and pseudocolour
   astrometric_matched_transits:
     dtype: Int16
-    unit: ''
-    description: 'Matched FOV transits used in the AGIS solution'
+    description: Matched FOV transits used in the AGIS solution
   visibility_periods_used:
     dtype: Int16
-    unit: ''
-    description: 'Number of visibility periods used in Astrometric solution'
+    description: Number of visibility periods used in Astrometric solution
   astrometric_sigma5d_max:
     dtype: Float32
-    unit: 'mas'
-    description: 'The longest semi-major axis of the 5-d error ellipsoid'
+    unit: mas
+    description: The longest semi-major axis of the 5-d error ellipsoid
   matched_transits:
     dtype: Int16
-    unit: ''
-    description: 'The number of transits matched to this source'
+    description: The number of transits matched to this source
   new_matched_transits:
     dtype: Int16
-    unit: ''
-    description: 'The number of transits newly incorporated into an existing source in the current cycle'
+    description: The number of transits newly incorporated into an existing source in the current cycle
   matched_transits_removed:
     dtype: Int16
-    unit: ''
-    description: 'The number of transits removed from an existing source in the current cycle'
+    description: The number of transits removed from an existing source in the current cycle
   ipd_gof_harmonic_amplitude:
     dtype: Float32
-    unit: ''
-    description: 'Amplitude of the IPD GoF versus position angle of scan'
+    description: Amplitude of the IPD GoF versus position angle of scan
   ipd_gof_harmonic_phase:
     dtype: Float32
-    unit: 'deg'
-    description: 'Phase of the IPD GoF versus position angle of scan'
+    unit: deg
+    description: Phase of the IPD GoF versus position angle of scan
   ipd_frac_multi_peak:
-    dtype: Int16
-    unit: ''
-    description: 'Percent of successful-IPD windows with more than one peak'
+    dtype: Int8
+    description: Percent of successful-IPD windows with more than one peak
   ipd_frac_odd_win:
-    dtype: Int16
-    unit: ''
-    description: 'Percent of transits with truncated windows or multiple gate'
+    dtype: Int8
+    description: Percent of transits with truncated windows or multiple gate
   ruwe:
     dtype: Float32
-    unit: ''
-    description: 'Renormalised unit weight error'
+    description: Renormalised unit weight error
   scan_direction_strength_k1:
     dtype: Float32
-    unit: ''
-    description: 'Degree of concentration of scan directions across the source'
+    description: Degree of concentration of scan directions across the source
   scan_direction_strength_k2:
     dtype: Float32
-    unit: ''
-    description: 'Degree of concentration of scan directions across the source'
+    description: Degree of concentration of scan directions across the source
   scan_direction_strength_k3:
     dtype: Float32
-    unit: ''
-    description: 'Degree of concentration of scan directions across the source'
+    description: Degree of concentration of scan directions across the source
   scan_direction_strength_k4:
     dtype: Float32
-    unit: ''
-    description: 'Degree of concentration of scan directions across the source'
+    description: Degree of concentration of scan directions across the source
   scan_direction_mean_k1:
     dtype: Float32
-    unit: 'deg'
-    description: 'Mean position angle of scan directions across the source'
+    unit: deg
+    description: Mean position angle of scan directions across the source
   scan_direction_mean_k2:
     dtype: Float32
-    unit: 'deg'
-    description: 'Mean position angle of scan directions across the source'
+    unit: deg
+    description: Mean position angle of scan directions across the source
   scan_direction_mean_k3:
     dtype: Float32
-    unit: 'deg'
-    description: 'Mean position angle of scan directions across the source'
+    unit: deg
+    description: Mean position angle of scan directions across the source
   scan_direction_mean_k4:
     dtype: Float32
-    unit: 'deg'
-    description: 'Mean position angle of scan directions across the source'
+    unit: deg
+    description: Mean position angle of scan directions across the source
   duplicated_source:
     dtype: Boolean
-    unit: ''
-    description: 'Source with multiple source identifiers'
+    description: Source with multiple source identifiers
   phot_g_n_obs:
     dtype: Int16
-    unit: ''
-    description: 'Number of observations contributing to G photometry'
+    description: Number of observations contributing to G photometry
   phot_g_mean_flux:
     dtype: Float64
-    unit: 'electron.s**-1'
-    description: 'G-band mean flux'
+    unit: "'electron'.s**-1"
+    description: G-band mean flux
   phot_g_mean_flux_error:
     dtype: Float32
-    unit: 'electron.s**-1'
-    description: 'Error on G-band mean flux'
+    unit: "'electron'.s**-1"
+    description: Error on G-band mean flux
   phot_g_mean_flux_over_error:
     dtype: Float32
-    unit: ''
-    description: 'G-band mean flux divided by its error'
+    description: G-band mean flux divided by its error
   phot_g_mean_mag:
     dtype: Float32
-    unit: 'mag'
-    description: 'G-band mean magnitude'
+    unit: mag
+    description: G-band mean magnitude
   phot_bp_n_obs:
     dtype: Int16
-    unit: ''
-    description: 'Number of observations contributing to BP photometry'
+    description: Number of observations contributing to BP photometry
   phot_bp_mean_flux:
     dtype: Float64
-    unit: 'electron.s**-1'
-    description: 'Integrated BP mean flux'
+    unit: "'electron'.s**-1"
+    description: Integrated BP mean flux
   phot_bp_mean_flux_error:
     dtype: Float32
-    unit: 'electron.s**-1'
-    description: 'Error on the integrated BP mean flux'
+    unit: "'electron'.s**-1"
+    description: Error on the integrated BP mean flux
   phot_bp_mean_flux_over_error:
     dtype: Float32
-    unit: ''
-    description: 'Integrated BP mean flux divided by its error'
+    description: Integrated BP mean flux divided by its error
   phot_bp_mean_mag:
     dtype: Float32
-    unit: 'mag'
-    description: 'Integrated BP mean magnitude'
+    unit: mag
+    description: Integrated BP mean magnitude
   phot_rp_n_obs:
     dtype: Int16
-    unit: ''
-    description: 'Number of observations contributing to RP photometry'
+    description: Number of observations contributing to RP photometry
   phot_rp_mean_flux:
     dtype: Float64
-    unit: 'electron.s**-1'
-    description: 'Integrated RP mean flux'
+    unit: "'electron'.s**-1"
+    description: Integrated RP mean flux
   phot_rp_mean_flux_error:
     dtype: Float32
-    unit: 'electron.s**-1'
-    description: 'Error on the integrated RP mean flux'
+    unit: "'electron'.s**-1"
+    description: Error on the integrated RP mean flux
   phot_rp_mean_flux_over_error:
     dtype: Float32
-    unit: ''
-    description: 'Integrated RP mean flux divided by its error'
+    description: Integrated RP mean flux divided by its error
   phot_rp_mean_mag:
     dtype: Float32
-    unit: 'mag'
-    description: 'Integrated RP mean magnitude'
+    unit: mag
+    description: Integrated RP mean magnitude
   phot_bp_rp_excess_factor:
     dtype: Float32
-    unit: ''
-    description: 'BP/RP excess factor'
+    description: BP/RP excess factor
   phot_bp_n_contaminated_transits:
     dtype: Int16
-    unit: ''
-    description: 'Number of BP contaminated transits'
+    description: Number of BP contaminated transits
   phot_bp_n_blended_transits:
     dtype: Int16
-    unit: ''
-    description: 'Number of BP blended transits'
+    description: Number of BP blended transits
   phot_rp_n_contaminated_transits:
     dtype: Int16
-    unit: ''
-    description: 'Number of RP contaminated transits'
+    description: Number of RP contaminated transits
   phot_rp_n_blended_transits:
     dtype: Int16
-    unit: ''
-    description: 'Number of RP blended transits'
+    description: Number of RP blended transits
   phot_proc_mode:
-    dtype: Int16
-    unit: ''
-    description: 'Photometry processing mode'
+    dtype: Int8
+    description: Photometry processing mode
   bp_rp:
     dtype: Float32
-    unit: 'mag'
-    description: 'BP - RP colour'
+    unit: mag
+    description: BP - RP colour
   bp_g:
     dtype: Float32
-    unit: 'mag'
-    description: 'BP - G colour'
+    unit: mag
+    description: BP - G colour
   g_rp:
     dtype: Float32
-    unit: 'mag'
-    description: 'G - RP colour'
+    unit: mag
+    description: G - RP colour
   radial_velocity:
     dtype: Float32
-    unit: 'km.s**-1'
-    description: 'Radial velocity'
+    unit: km.s**-1
+    description: Radial velocity
   radial_velocity_error:
     dtype: Float32
-    unit: 'km.s**-1'
-    description: 'Radial velocity error'
+    unit: km.s**-1
+    description: Radial velocity error
   rv_method_used:
-    dtype: Int16
-    unit: ''
-    description: 'Method used to obtain the radial velocity'
+    dtype: Int8
+    description: Method used to obtain the radial velocity
   rv_nb_transits:
     dtype: Int16
-    unit: ''
-    description: 'Number of transits used to compute the radial velocity'
+    description: Number of transits used to compute the radial velocity
   rv_nb_deblended_transits:
     dtype: Int16
-    unit: ''
-    description: 'Number of valid transits that have undergone deblending'
+    description: Number of valid transits that have undergone deblending
   rv_visibility_periods_used:
     dtype: Int16
-    unit: ''
-    description: 'Number of visibility periods used to estimate the radial velocity'
+    description: Number of visibility periods used to estimate the radial velocity
   rv_expected_sig_to_noise:
     dtype: Float32
-    unit: ''
-    description: 'Expected signal to noise ratio in the combination of the spectra used to obtain the radial velocity'
+    description: Expected signal to noise ratio in the combination of the spectra used to obtain the radial velocity
   rv_renormalised_gof:
     dtype: Float32
-    unit: ''
-    description: 'Radial velocity renormalised goodness of fit'
+    description: Radial velocity renormalised goodness of fit
   rv_chisq_pvalue:
     dtype: Float32
-    unit: ''
-    description: 'P-value for constancy based on a chi-squared criterion'
+    description: P-value for constancy based on a chi-squared criterion
   rv_time_duration:
     dtype: Float32
-    unit: 'd'
-    description: 'Time coverage of the radial velocity time series'
+    unit: d
+    description: Time coverage of the radial velocity time series
   rv_amplitude_robust:
     dtype: Float32
-    unit: 'km.s**-1'
-    description: 'Total amplitude in the radial velocity time series after outlier removal'
+    unit: km.s**-1
+    description: Total amplitude in the radial velocity time series after outlier removal
   rv_template_teff:
     dtype: Float32
-    unit: 'K'
-    description: 'Teff of the template used to compute the radial velocity'
+    unit: K
+    description: Teff of the template used to compute the radial velocity
   rv_template_logg:
     dtype: Float32
-    unit: 'log(cm.s**-2)'
-    description: 'Logg of the template used to compute the radial velocity'
+    unit: log(cm.s**-2)
+    description: Logg of the template used to compute the radial velocity
   rv_template_fe_h:
     dtype: Float32
-    unit: 'dex'
-    description: '[Fe/H] of the template used to compute the radial velocity'
+    unit: "'dex'"
+    description: '[Fe/H] of the template used to compute the radial velocityy'
   rv_atm_param_origin:
     dtype: Int16
-    unit: ''
-    description: 'Origin of the atmospheric parameters associated to the template'
+    description: Origin of the atmospheric parameters associated to the template
   vbroad:
     dtype: Float32
-    unit: 'km.s**-1'
-    description: 'Spectral line broadening parameter'
+    unit: km.s**-1
+    description: Spectral line broadening parameter
   vbroad_error:
     dtype: Float32
-    unit: 'km.s**-1'
-    description: 'Uncertainty on the spectral line broadening'
+    unit: km.s**-1
+    description: Uncertainty on the spectral line broadening
   vbroad_nb_transits:
     dtype: Int16
-    unit: ''
-    description: 'Number of transits used to compute vbroad'
+    description: Number of transits used to compute vbroad
   grvs_mag:
     dtype: Float32
-    unit: 'mag'
-    description: 'Integrated Grvs magnitude'
+    unit: mag
+    description: Integrated Grvs magnitude
   grvs_mag_error:
     dtype: Float32
-    unit: 'mag'
-    description: 'Grvs magnitude uncertainty'
+    unit: mag
+    description: Grvs magnitude uncertainty
   grvs_mag_nb_transits:
     dtype: Int16
-    unit: ''
-    description: 'Number of transits used to compute Grvs'
+    description: Number of transits used to compute Grvs
   rvs_spec_sig_to_noise:
     dtype: Float32
-    unit: ''
-    description: 'Signal to noise ratio in the mean RVS spectrum'
+    description: Signal to noise ratio in the mean RVS spectrum
   phot_variable_flag:
     dtype: String
-    unit: ''
-    description: 'Photometric variability flag'
+    description: Photometric variability flag
   l:
     dtype: Float64
-    unit: 'deg'
-    description: 'Galactic longitude'
+    unit: deg
+    description: Galactic longitude
   b:
     dtype: Float64
-    unit: 'deg'
-    description: 'Galactic latitude'
+    unit: deg
+    description: Galactic latitude
   ecl_lon:
     dtype: Float64
-    unit: 'deg'
-    description: 'Ecliptic longitude'
+    unit: deg
+    description: Ecliptic longitude
   ecl_lat:
     dtype: Float64
-    unit: 'deg'
-    description: 'Ecliptic latitude'
+    unit: deg
+    description: Ecliptic latitude
   in_qso_candidates:
     dtype: Boolean
-    unit: ''
-    description: 'Flag indicating the availability of additional information in the QsoCandidates table'
+    description: Flag indicating the availability of additional information in the QSO candidates table
   in_galaxy_candidates:
     dtype: Boolean
-    unit: ''
-    description: 'Flag indicating the availability of additional information in the GalaxyCandidates table'
+    description: Flag indicating the availability of additional information in the galaxy candidates table
   non_single_star:
     dtype: Int16
-    unit: ''
-    description: 'Flag indicating the availability of additional information in the various Non-Single Star tables'
+    description: Flag indicating the availability of additional information in the various Non-Single Star tables
   has_xp_continuous:
     dtype: Boolean
-    unit: ''
-    description: 'Flag indicating the availability of mean BP/RP spectrum in continuous representation for this source'
+    description: Flag indicating the availability of mean BP/RP spectrum in continuous representation for this source
   has_xp_sampled:
     dtype: Boolean
-    unit: ''
-    description: 'Flag indicating the availability of mean BP/RP spectrum in sampled form for this source'
+    description: Flag indicating the availability of mean BP/RP spectrum in sampled form for this source
   has_rvs:
     dtype: Boolean
-    unit: ''
-    description: 'Flag indicating the availability of mean RVS spectrum for this source'
+    description: Flag indicating the availability of mean RVS spectrum for this source
   has_epoch_photometry:
     dtype: Boolean
-    unit: ''
-    description: 'Flag indicating the availability of epoch photometry for this source'
+    description: Flag indicating the availability of epoch photometry for this source
   has_epoch_rv:
     dtype: Boolean
-    unit: ''
-    description: 'Flag indicating the availability of epoch radial velocity for this source'
+    description: Flag indicating the availability of epoch radial velocity for this source
   has_mcmc_gspphot:
     dtype: Boolean
-    unit: ''
-    description: 'Flag indicating the availability of GSP-Phot MCMC samples for this source'
+    description: Flag indicating the availability of GSP-Phot MCMC samples for this source
   has_mcmc_msc:
     dtype: Boolean
-    unit: ''
-    description: 'Flag indicating the availability of MSC MCMC samples for this source'
+    description: Flag indicating the availability of MSC MCMC samples for this source
   in_andromeda_survey:
     dtype: Boolean
-    unit: ''
-    description: 'Flag indicating that the source is present in the Gaia Andromeda Photometric Survey (GAPS)'
+    description: Flag indicating that the source is present in the Gaia Andromeda Photometric Survey (GAPS)
   classprob_dsc_combmod_quasar:
     dtype: Float32
-    unit: ''
     description: 'Probability from DSC-Combmod of being a quasar (data used: BP/RP spectrum, photometry, astrometry)'
   classprob_dsc_combmod_galaxy:
     dtype: Float32
-    unit: ''
     description: 'Probability from DSC-Combmod of being a galaxy (data used: BP/RP spectrum, photometry, astrometry)'
   classprob_dsc_combmod_star:
     dtype: Float32
-    unit: ''
     description: 'Probability from DSC-Combmod of being a single star (but not a white dwarf) (data used: BP/RP spectrum, photometry, astrometry)'
   teff_gspphot:
     dtype: Float32
-    unit: 'K'
-    description: 'Effective temperature from GSP-Phot Aeneas best library using BP/RP spectra'
+    unit: K
+    description: Effective temperature from GSP-Phot Aeneas best library using BP/RP spectra
   teff_gspphot_lower:
     dtype: Float32
-    unit: 'K'
-    description: 'Lower confidence level (16%) of effective temperature from GSP-Phot Aeneas best library using BP/RP spectra'
+    unit: K
+    description: Lower confidence level (16%) of effective temperature from GSP-Phot Aeneas best library using BP/RP spectra
   teff_gspphot_upper:
     dtype: Float32
-    unit: 'K'
-    description: 'Upper confidence level (84%) of effective temperature from GSP-Phot Aeneas best library using BP/RP spectra'
+    unit: K
+    description: Upper confidence level (84%) of effective temperature from GSP-Phot Aeneas best library using BP/RP spectra
   logg_gspphot:
     dtype: Float32
-    unit: 'log(cm.s**-2)'
-    description: 'Surface gravity from GSP-Phot Aeneas best library using BP/RP spectra'
+    unit: log(cm.s**-2)
+    description: Surface gravity from GSP-Phot Aeneas best library using BP/RP spectra
   logg_gspphot_lower:
     dtype: Float32
-    unit: 'log(cm.s**-2)'
-    description: 'Lower confidence level (16%) of surface gravity from GSP-Phot Aeneas best library using BP/RP spectra'
+    unit: log(cm.s**-2)
+    description: Lower confidence level (16%) of surface gravity from GSP-Phot Aeneas best library using BP/RP spectra
   logg_gspphot_upper:
     dtype: Float32
-    unit: 'log(cm.s**-2)'
-    description: 'Upper confidence level (84%) of surface gravity from GSP-Phot Aeneas best library using BP/RP spectra'
+    unit: log(cm.s**-2)
+    description: Upper confidence level (84%) of surface gravity from GSP-Phot Aeneas best library using BP/RP spectra
   mh_gspphot:
     dtype: Float32
-    unit: 'dex'
-    description: 'Iron abundance from GSP-Phot Aeneas best library using BP/RP spectra'
+    unit: "'dex'"
+    description: Iron abundance from GSP-Phot Aeneas best library using BP/RP spectra
   mh_gspphot_lower:
     dtype: Float32
-    unit: 'dex'
-    description: 'Lower confidence level (16%) of iron abundance from GSP-Phot Aeneas best library using BP/RP spectra'
+    unit: "'dex'"
+    description: Lower confidence level (16%) of iron abundance from GSP-Phot Aeneas best library using BP/RP spectra
   mh_gspphot_upper:
     dtype: Float32
-    unit: 'dex'
-    description: 'Upper confidence level (84%) of iron abundance from GSP-Phot Aeneas best library using BP/RP spectra'
+    unit: "'dex'"
+    description: Upper confidence level (84%) of iron abundance from GSP-Phot Aeneas best library using BP/RP spectra
   distance_gspphot:
     dtype: Float32
-    unit: 'pc'
-    description: 'Distance from GSP-Phot Aeneas best library using BP/RP spectra'
+    unit: pc
+    description: Distance from GSP-Phot Aeneas best library using BP/RP spectra
   distance_gspphot_lower:
     dtype: Float32
-    unit: 'pc'
-    description: 'Lower confidence level (16%) of distance from GSP-Phot Aeneas best library using BP/RP spectra'
+    unit: pc
+    description: Lower confidence level (16%) of distance from GSP-Phot Aeneas best library using BP/RP spectra
   distance_gspphot_upper:
     dtype: Float32
-    unit: 'pc'
-    description: 'Upper confidence level (84%) of distance from GSP-Phot Aeneas best library using BP/RP spectra'
+    unit: pc
+    description: Upper confidence level (84%) of distance from GSP-Phot Aeneas best library using BP/RP spectra
   azero_gspphot:
     dtype: Float32
-    unit: 'mag'
-    description: 'Monochromatic extinction A0 at 547.7nm from GSP-Phot Aeneas best library using BP/RP spectra'
+    unit: mag
+    description: Monochromatic extinction $A_0$ at 547.7nm from GSP-Phot Aeneas best library using BP/RP spectra
   azero_gspphot_lower:
     dtype: Float32
-    unit: 'mag'
-    description: 'Lower confidence level (16%) of monochromatic extinction A0 at 547.7nm from GSP-Phot Aeneas best library using BP/RP spectra'
+    unit: mag
+    description: Lower confidence level (16%) of monochromatic extinction $A_0$ at 547.7nm from GSP-Phot Aeneas best library using BP/RP spectra
   azero_gspphot_upper:
     dtype: Float32
-    unit: 'mag'
-    description: 'Upper confidence level (84%) of monochromatic extinction A0 at 547.7nm from GSP-Phot Aeneas best library using BP/RP spectra'
+    unit: mag
+    description: Upper confidence level (84%) of monochromatic extinction $A_0$ at 547.7nm from GSP-Phot Aeneas best library using BP/RP spectra
   ag_gspphot:
     dtype: Float32
-    unit: 'mag'
-    description: 'Extinction in G band from GSP-Phot Aeneas best library using BP/RP spectra'
+    unit: mag
+    description: Extinction in G band from GSP-Phot Aeneas best library using BP/RP spectra
   ag_gspphot_lower:
     dtype: Float32
-    unit: 'mag'
-    description: 'Lower confidence level (16%) of extinction in G band from GSP-Phot Aeneas best library using BP/RP spectra'
+    unit: mag
+    description: Lower confidence level (16%) of extinction in G band from GSP-Phot Aeneas best library using BP/RP spectra
   ag_gspphot_upper:
     dtype: Float32
-    unit: 'mag'
-    description: 'Upper confidence level (84%) of extinction in G band from GSP-Phot Aeneas best library using BP/RP spectra'
+    unit: mag
+    description: Upper confidence level (84%) of extinction in G band from GSP-Phot Aeneas best library using BP/RP spectra
   ebpminrp_gspphot:
     dtype: Float32
-    unit: 'mag'
-    description: 'Reddening E(GBP - GRP) from GSP-Phot Aeneas best library using BP/RP spectra'
+    unit: mag
+    description: "Reddening $E(G_{\\rm BP} - G_{\\rm RP})$ from GSP-Phot Aeneas best library using BP/RP spectra"
   ebpminrp_gspphot_lower:
     dtype: Float32
-    unit: 'mag'
-    description: 'Lower confidence level (16%) of reddening E(GBP - GRP) from GSP-Phot Aeneas best library using BP/RP spectra'
+    unit: mag
+    description: "Lower confidence level (16%) of reddening  $E(G_{\\rm BP} - G_{\\rm RP})$ from GSP-Phot Aeneas best library using BP/RP spectra"
   ebpminrp_gspphot_upper:
     dtype: Float32
-    unit: 'mag'
-    description: 'Upper confidence level (84%) of reddening E(GBP - GRP) from GSP-Phot Aeneas best library using BP/RP spectra'
+    unit: mag
+    description: "Upper confidence level (84%) of reddening  $E(G_{\\rm BP} - G_{\\rm RP})$ from GSP-Phot Aeneas best library using BP/RP spectra"
   libname_gspphot:
     dtype: String
-    unit: ''
-    description: 'Name of library that achieves the highest mean log-posterior in MCMC samples and was used to derive GSP-Phot parameters in this table'
-  pos:
-    dtype: String
-    unit: '[rad, rad]'
-    description: 'The point position of a source (ra, dec) in radian'
+    description: Name of library that achieves the highest mean log-posterior in MCMC samples and was used to derive GSP-Phot parameters in this table
+  healpix_5:
+    dtype: UInt64
+    description: HEALPix index at depth 5 (NSIDE = 32)
+    xmatch_column: true
+  healpix_19:
+    dtype: UInt64
+    description: HEALPix index at depth 19 (NSIDE = 524288)
+    xmatch_column: true

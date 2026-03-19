@@ -1,13 +1,42 @@
-use pyo3::prelude::*;
+/*
+ *  @Author: José Sánchez-Gallego (gallegoj@uw.edu)
+ *  @Date: 2026-03-18
+ *  @Filename: lib.rs
+ *  @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
+ */
 
-/// A Python module implemented in Rust.
-#[pymodule]
-mod xmatch_rs {
-    use pyo3::prelude::*;
+use pyo3::{prelude::*, py_run};
 
-    /// Formats the sum of two numbers as string.
-    #[pyfunction]
-    fn sum_as_string(a: usize, b: usize) -> PyResult<String> {
-        Ok((a + b).to_string())
-    }
+pub mod healpix;
+pub mod polars_expressions;
+
+/// Converts RA and Dec to HEALPix pixel.
+#[pyfunction]
+fn ra_dec_to_healpix(ra: f64, dec: f64, depth: u8) -> PyResult<u64> {
+    Ok(healpix::ra_dec_to_healpix(ra, dec, depth))
+}
+
+/// Returns the area of a HEALPix pixel at the given depth in square degrees or steradians.
+#[pyfunction]
+fn healpix_pixel_area(depth: u8, degrees: bool) -> PyResult<f64> {
+    Ok(healpix::healpix_pixel_area(depth, degrees))
+}
+
+// Define the Python module
+#[pymodule(name = "_xmatch_rs_lib")]
+fn xmatch_rs_pymodule(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let xmatch_rs_healpix = PyModule::new(_py, "healpix")?;
+
+    xmatch_rs_healpix.add_function(wrap_pyfunction!(ra_dec_to_healpix, &xmatch_rs_healpix)?)?;
+    xmatch_rs_healpix.add_function(wrap_pyfunction!(healpix_pixel_area, &xmatch_rs_healpix)?)?;
+
+    py_run!(
+        _py,
+        xmatch_rs_healpix,
+        "import sys; sys.modules['xmatch_rs._xmatch_rs_lib.healpix'] = xmatch_rs_healpix"
+    );
+
+    m.add_submodule(&xmatch_rs_healpix)?;
+
+    Ok(())
 }

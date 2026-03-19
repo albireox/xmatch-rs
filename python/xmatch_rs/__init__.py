@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-import rich
+import rich.console
 
 
-console = rich.Console()
+console = rich.console.Console()
