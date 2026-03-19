@@ -24,6 +24,8 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
+from sdsstools.logger import SDSSLogger, get_logger
+
 from xmatch_rs import console
 from xmatch_rs.expressions import get_healpix
 from xmatch_rs.schema import Schema
@@ -52,12 +54,12 @@ def convert_csv_to_parquet(
     add_row_index_column: bool = False,
     row_index_column_name: str = "id",
     apply_callback: Callable[[polars.LazyFrame], polars.LazyFrame] | None = None,
-    parallelise: bool = True,
+    parallelise: bool = False,
     n_workers: int | None = None,
-    verbose: bool = False,
     scan_csv_kwargs: dict | None = None,
     sink_parquet_kwargs: dict | None = None,
-    show_progress: bool = True,
+    show_progress: bool = False,
+    log: SDSSLogger | None = None,
 ) -> None:
     """Converts CSV files to Parquet format using the provided schema.
 
@@ -124,8 +126,6 @@ def convert_csv_to_parquet(
         ``"direct"``.
     n_workers
         The number of workers to use for parallelisation.
-    verbose
-        Whether to print verbose output.
     scan_csv_kwargs
         Additional keyword arguments to pass to `polars.scan_csv`.
     sink_parquet_kwargs
@@ -133,8 +133,17 @@ def convert_csv_to_parquet(
     show_progress
         Whether to show a progress bar during the conversion. Only applicable
         if ``mode`` is ``"direct"``.
+    log
+        An optional logger to use for logging messages during the conversion.
 
     """
+
+    log = log or get_logger(
+        "xmatch_rs.convert",
+        use_rich_handler=True,
+        log_level=100,
+    )
+    log.rich_console = console
 
     # Retrieve the schema if a path or name is provided.
     if not isinstance(schema, Schema):
@@ -173,9 +182,9 @@ def convert_csv_to_parquet(
         if source_params.csv_comment_prefix is not None:
             scan_csv_kwargs["comment_prefix"] = source_params.csv_comment_prefix
     else:
-        console.print(
-            "[yellow]No source_params found in schema. Using default "
-            "parameters for reading CSV files.[/]"
+        log.warning(
+            "No source_params found in schema. Using default "
+            "parameters for reading CSV files."
         )
 
     # Set values for scan_csv_kwargs.
@@ -184,11 +193,10 @@ def convert_csv_to_parquet(
     if "null_values" not in scan_csv_kwargs:
         scan_csv_kwargs["null_values"] = ["null", "", "NULL"]
 
-    console.print(f"[blue]Converting {len(csv_files)} CSV files to Parquet ... [/]")
+    log.info(f"Converting {len(csv_files)} CSV files to Parquet ...")
 
-    if verbose:
-        if schema.schema_file:
-            console.print(f"[bright_black]Using schema file: {schema.schema_file!s}[/]")
+    if schema.schema_file:
+        log.debug(f"Using schema file: {schema.schema_file!s}")
 
     output_dir = pathlib.Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -291,7 +299,7 @@ def convert_csv_to_parquet(
 
         lf.sink_parquet(partition_by, **sink_parquet_kwargs)
 
-    console.print(f"[green]Conversion complete. Parquet files saved to {output_dir!s}.")
+    log.info(f"Conversion complete. Parquet files saved to {output_dir!s}.")
 
 
 def _convert_csv_to_parquet_direct(

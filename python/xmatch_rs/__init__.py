@@ -10,5 +10,10 @@ from __future__ import annotations
 
 import rich.console
 
+from sdsstools import get_logger
+
 
 console = rich.console.Console()
+
+log = get_logger("xmatch_rs", use_rich_handler=True)
+log.rich_console = console
