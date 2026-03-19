@@ -293,6 +293,7 @@ def convert_csv_to_parquet(
         partition_by = polars.PartitionBy(
             output_dir,
             key=partition_key,
+            include_key=True if partition_key is not None else None,
             max_rows_per_file=partition_max_rows_per_file,
             approximate_bytes_per_file=partition_approximate_bytes_per_file,
         )
