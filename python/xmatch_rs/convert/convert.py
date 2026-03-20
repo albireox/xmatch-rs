@@ -163,8 +163,7 @@ def convert_csv_to_parquet(
         schema = Schema(schema)
 
     polars_schema = schema.get_polars_schema(
-        exclude_xmatch_columns=True,
-        use_source_columns=True,
+        source_columns=True,
     )
 
     # Prepare the list of CSV files to convert.
@@ -197,7 +196,7 @@ def convert_csv_to_parquet(
     else:
         scan_csv_kwargs["schema"] = polars_schema
 
-    source_params = schema.schema.source_params
+    source_params = schema.schema.source_catalogue_params
     if source_params is not None:
         if source_params.format != "csv":
             raise ValueError("Schema for catalogue has source_params.format != 'csv'.")
@@ -444,11 +443,11 @@ def _process_lazy_frame(
     lf_columns = lf.collect_schema().names()
     for lf_col in lf_columns:
         for sch_col, sch_col_data in schema_columns.items():
-            source = sch_col_data.source
-            source_col_name = (source.column_name if source else None) or sch_col
-            if lf_col == source_col_name and source:
-                cast_to = source.cast_to
-                if cast_to and source.dtype:
+            source_cat = sch_col_data.source_catalogue_params
+            source_col = (source_cat.column_name if source_cat else None) or sch_col
+            if lf_col == source_col and source_cat:
+                cast_to = source_cat.cast_to
+                if cast_to and source_cat.dtype:
                     cast_to_dtype = get_polars_dtype_from_string(cast_to)
                     lf = lf.with_columns(polars.col(lf_col).cast(cast_to_dtype))
 

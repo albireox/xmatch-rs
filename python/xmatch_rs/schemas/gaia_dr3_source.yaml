@@ -1,5 +1,5 @@
 source_url: https://gaia.aip.de/metadata/gaiadr3/gaia_source/
-source_params:
+source_catalogue_params:
   format: csv
   csv_delimiter: ','
   csv_has_header: true
@@ -14,9 +14,10 @@ columns:
   source_id:
     dtype: Int64
     description: Unique source identifier (unique within a particular Data Release)
-    unique: true
-    numerical_unique: true
-    primary_key: true
+    database_params:
+      unique: true
+      numerical_unique: true
+      primary_key: true
   random_index:
     dtype: Int64
     description: Random index for use when selecting subsets
@@ -537,8 +538,8 @@ columns:
   healpix_4:
     dtype: UInt64
     description: HEALPix index at depth 4 (NSIDE = 16)
-    xmatch_column: true
+    is_source_column: false
   healpix_19:
     dtype: UInt64
     description: HEALPix index at depth 19 (NSIDE = 524288)
-    xmatch_column: true
+    is_source_column: false

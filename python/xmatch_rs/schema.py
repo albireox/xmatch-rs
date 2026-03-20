@@ -40,8 +40,8 @@ class SchemaModel(BaseModel):
         Field(description="Any comments about the catalogue."),
     ] = None
 
-    source_params: Annotated[
-        SourceParamsModel | None,
+    source_catalogue_params: Annotated[
+        SourceCatalogueParamsModel | None,
         Field(description="Parameters to read the original source data."),
     ] = None
 
@@ -53,20 +53,20 @@ class SchemaModel(BaseModel):
         ),
     ]
 
-    def exclude_xmatch_columns(self) -> SchemaModel:
-        """Returns an instance of the schema without extra columns.."""
+    def get_source_columns(self) -> SchemaModel:
+        """Returns an instance of the schema with only source columns."""
 
         clone = self.model_copy(deep=True)
         clone.columns = {
             column_name: column_data
             for column_name, column_data in clone.columns.items()
-            if not column_data.xmatch_column
+            if column_data.is_source_column
         }
 
         return clone
 
 
-class SourceParamsModel(BaseModel):
+class SourceCatalogueParamsModel(BaseModel):
     """Model representing the parameters to read the original source data."""
 
     format: Annotated[
@@ -103,56 +103,7 @@ class SourceParamsModel(BaseModel):
     ] = None
 
 
-class ColumnModel(BaseModel):
-    """Model representing a column in the schema."""
-
-    dtype: Annotated[
-        str,
-        Field(
-            description="The data type of the column. This should be a string "
-            "that can be converted to a Polars data type."
-        ),
-    ]
-
-    unit: Annotated[str | None, Field(description="The unit of the column.")] = None
-
-    description: Annotated[
-        str | None,
-        Field(
-            description="A description of the column. This is optional but recommended."
-        ),
-    ] = None
-
-    unique: Annotated[
-        bool,
-        Field(description="Whether the values in the column are unique."),
-    ] = False
-
-    numerical_unique: Annotated[
-        bool,
-        Field(description="Whether the values in the column are unique and numerical."),
-    ] = False
-
-    primary_key: Annotated[
-        bool,
-        Field(description="Whether this column is the primary key for the catalogue."),
-    ] = False
-
-    xmatch_column: Annotated[
-        bool,
-        Field(
-            description="Whether this is a column added during the xmatch process, "
-            "such as HEALPix indices."
-        ),
-    ] = False
-
-    source: Annotated[
-        SourceColumnModel | None,
-        Field(description="Parameters of the column in the original source data."),
-    ] = None
-
-
-class SourceColumnModel(BaseModel):
+class SourceCatalogueParamsColumnModel(BaseModel):
     """Model representing the parameters of a column in the original source data."""
 
     column_name: Annotated[
@@ -178,6 +129,64 @@ class SourceColumnModel(BaseModel):
     ] = None
 
 
+class DatabaseParamsModel(BaseModel):
+    """Model representing database constraints and other parameters for a column."""
+
+    unique: Annotated[
+        bool,
+        Field(description="Whether the values in the column are unique."),
+    ] = False
+
+    numerical_unique: Annotated[
+        bool,
+        Field(description="Whether the values in the column are unique and numerical."),
+    ] = False
+
+    primary_key: Annotated[
+        bool,
+        Field(description="Whether this column is the primary key for the catalogue."),
+    ] = False
+
+
+class ColumnModel(BaseModel):
+    """Model representing a column in the schema."""
+
+    dtype: Annotated[
+        str,
+        Field(
+            description="The data type of the column. This should be a string "
+            "that can be converted to a Polars data type."
+        ),
+    ]
+
+    unit: Annotated[str | None, Field(description="The unit of the column.")] = None
+
+    description: Annotated[
+        str | None,
+        Field(
+            description="A description of the column. This is optional but recommended."
+        ),
+    ] = None
+
+    database_params: Annotated[
+        DatabaseParamsModel,
+        Field(description="Database constraints and other parameters."),
+    ] = DatabaseParamsModel()
+
+    is_source_column: Annotated[
+        bool,
+        Field(
+            description="Whether this is a column is part of the source catalogue or "
+            "was added during the xmatch process, such as HEALPix indices."
+        ),
+    ] = True
+
+    source_catalogue_params: Annotated[
+        SourceCatalogueParamsColumnModel | None,
+        Field(description="Parameters of the column in the original source data."),
+    ] = None
+
+
 class Schema:
     """Class representing a schema for a catalogue.
 
@@ -198,7 +207,7 @@ class Schema:
         else:
             raise ValueError("Schema must be a path to a schema file or a dictionary")
 
-        self.schema = SchemaModel(**self._raw_schema)
+        self.schema: SchemaModel = SchemaModel(**self._raw_schema)
 
     def read_schema(
         self,
@@ -233,40 +242,60 @@ class Schema:
 
         return schema_data, schema_path
 
-    def to_dict(self, exclude_xmatch_columns: bool = False) -> dict:
-        """Returns the schema as a dictionary."""
+    def to_dict(self, only_source_columns: bool = False) -> dict:
+        """Returns the schema as a dictionary.
+
+        Parameters
+        ----------
+        only_source_columns
+            If ``True``, only returns the columns that are part of the source
+            catalogue.
+
+        """
 
         schema = self.schema
-        if exclude_xmatch_columns:
-            schema = schema.exclude_xmatch_columns()
+        if only_source_columns:
+            schema = schema.get_source_columns()
 
-        return schema.dict()
+        return schema.model_dump()
 
     def get_polars_schema(
         self,
-        exclude_xmatch_columns: bool = False,
-        use_source_columns: bool = False,
+        source_columns: bool = False,
     ) -> dict[str, polars.DataType]:
-        """Returns the schema as a dictionary of column names and Polars data types."""
+        """Returns the schema as a dictionary of column names and Polars data types.
+
+        Parameters
+        ----------
+        source_columns
+            If ``True``, only returns the columns that are part of the source
+            catalogue. The data types of these columns are taken from the
+            ``source_catalogue.dtype`` field if present, otherwise the ``dtype``
+            field.
+
+        """
 
         schema = self.schema
-        if exclude_xmatch_columns:
-            schema = schema.exclude_xmatch_columns()
+        if source_columns:
+            schema = schema.get_source_columns()
 
-        if not use_source_columns:
-            return {
-                column_name: get_polars_dtype_from_string(column_data.dtype)
-                for column_name, column_data in schema.columns.items()
-            }
-        else:
             pl_sch: dict[str, polars.DataType] = {}
 
             for c_name, c_data in schema.columns.items():
-                if c_data.source:
-                    c_name_source = c_data.source.column_name or c_name
-                    dtype_source = c_data.source.dtype or c_data.dtype
-                    pl_sch[c_name_source] = get_polars_dtype_from_string(dtype_source)
-                else:
-                    pl_sch[c_name] = get_polars_dtype_from_string(c_data.dtype)
+                if c_data.is_source_column:
+                    if c_data.source_catalogue_params:
+                        cat_params = c_data.source_catalogue_params
+                        cat_name_source = cat_params.column_name or c_name
+                        dtype_source = cat_params.dtype or c_data.dtype
+                        polars_dtype = get_polars_dtype_from_string(dtype_source)
+                        pl_sch[cat_name_source] = polars_dtype
+                    else:
+                        polars_dtype = get_polars_dtype_from_string(c_data.dtype)
+                        pl_sch[c_name] = polars_dtype
 
             return pl_sch
+
+        return {
+            column_name: get_polars_dtype_from_string(column_data.dtype)
+            for column_name, column_data in schema.columns.items()
+        }
