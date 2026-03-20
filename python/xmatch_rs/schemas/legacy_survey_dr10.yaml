@@ -1,11 +1,7 @@
 source_url: https://www.legacysurvey.org/dr10/files/#sweep-brickmin-brickmax-fits
 comments:
-  'This catalogue includes the standard fields from the Legacy Survey DR10
-  sweep
-
-  catalogue, plus computed columns ls_id, gaia_dr2_source_id, and gaia_dr3_source_id.
-
-  '
+  This catalogue includes the standard fields from the Legacy Survey DR10
+  sweep catalogue, plus computed columns ls_id, gaia_dr2_source_id, and gaia_dr3_source_id.
 source_params:
   format: csv
   csv_delimiter: ','
