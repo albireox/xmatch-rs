@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import glob
 import multiprocessing
 import pathlib
 from functools import partial
@@ -27,21 +28,30 @@ from rich.progress import (
 from sdsstools.logger import SDSSLogger, get_logger
 
 from xmatch_rs import console
+from xmatch_rs.convert.callbacks import callbacks
 from xmatch_rs.expressions import get_healpix
 from xmatch_rs.schema import Schema
-from xmatch_rs.tools import lazy_frame_row_count
+from xmatch_rs.tools import (
+    get_polars_dtype_from_string,
+    is_glob_pattern,
+    lazy_frame_row_count,
+)
 
 
 __all__: list[str] = ["convert_csv_to_parquet"]
 
 
+CALLBACK_FUNC_T = Callable[[polars.LazyFrame], polars.LazyFrame]
+APPLY_CALLBACK_T = CALLBACK_FUNC_T | str
+
+
 def convert_csv_to_parquet(
-    csv_files: Sequence[str | pathlib.Path] | str | pathlib.Path,
+    csv_files: list[str | pathlib.Path] | str | pathlib.Path,
     output_dir: str | pathlib.Path,
     schema: Schema | str | pathlib.Path | dict,
     allow_extra_columns: bool = False,
     mode: Literal["direct", "partition"] = "direct",
-    partition_key: str | Sequence[str] | None = None,
+    partition_key: str | list[str] | None = None,
     partition_max_rows_per_file: int | None = None,
     partition_approximate_bytes_per_file: int | Literal["auto"] | None = 1000_000_000,
     add_healpix_columns: bool = False,
@@ -53,7 +63,7 @@ def convert_csv_to_parquet(
     dec_column_unit: Literal["degrees", "radians"] = "degrees",
     add_row_index_column: bool = False,
     row_index_column_name: str = "id",
-    apply_callback: Callable[[polars.LazyFrame], polars.LazyFrame] | None = None,
+    apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None = None,
     parallelise: bool = False,
     n_workers: int | None = None,
     scan_csv_kwargs: dict | None = None,
@@ -68,7 +78,8 @@ def convert_csv_to_parquet(
     csv_files
         A sequence of paths to the CSV files to convert to Parquet. Can also be
         a single path to a CSV file or a directory containing CSV files, in which
-        scase all CSV files in the directory will be converted.
+        case all CSV files in the directory will be converted. Glob patters are
+        supported.
     output_dir
         The directory where the converted Parquet files will be saved.
     schema
@@ -120,7 +131,9 @@ def convert_csv_to_parquet(
         a single argument, a :obj:`polars.LazyFrame` object, and return the
         same frame after applying the transformations. The function is called once
         for each CSV file in ``"direct"`` mode, and once for the entire dataset
-        in ``"partition"`` mode.
+        in ``"partition"`` mode. Alternatively, the callback function can be
+        a string representing one of the predefined callbacks provided by
+        ``xmatch_rs``.
     parallelise
         Whether to parallelise the conversion. Only applicable if ``mode`` is
         ``"direct"``.
@@ -149,26 +162,40 @@ def convert_csv_to_parquet(
     if not isinstance(schema, Schema):
         schema = Schema(schema)
 
-    schema_dtypes = schema.get_dtypes(exclude_xmatch_columns=True)
+    polars_schema = schema.get_polars_schema(
+        exclude_xmatch_columns=True,
+        use_source_columns=True,
+    )
 
     # Prepare the list of CSV files to convert.
     if isinstance(csv_files, (str, pathlib.Path)):
-        csv_path = pathlib.Path(csv_files)
-        if csv_path.is_dir():
-            csv_files = list(csv_path.glob("*.csv"))
+        csv_files = [csv_files]
+
+    csv_files_tmp: list[pathlib.Path | str] = []
+    for file in csv_files:
+        if is_glob_pattern(file):
+            for matched_file in glob.glob(str(file)):
+                csv_files_tmp.append(matched_file)
         else:
-            csv_files = [csv_path]
-    else:
-        csv_files = [pathlib.Path(file_) for file_ in csv_files]
+            path = pathlib.Path(file)
+            if path.is_dir():
+                for matched_file in path.glob("*.csv*"):
+                    csv_files_tmp.append(matched_file)
+            else:
+                csv_files_tmp.append(path)
+    csv_paths = [pathlib.Path(ff) for ff in csv_files_tmp]
+
+    if len(csv_paths) == 0:
+        raise ValueError("No CSV files found to convert.")
 
     # Prepare the scan and sink kwargs with some defaults.
     scan_csv_kwargs = scan_csv_kwargs or {}
     sink_parquet_kwargs = sink_parquet_kwargs or {}
 
     if allow_extra_columns:
-        scan_csv_kwargs["schema_overrides"] = schema_dtypes
+        scan_csv_kwargs["schema_overrides"] = polars_schema
     else:
-        scan_csv_kwargs["schema"] = schema_dtypes
+        scan_csv_kwargs["schema"] = polars_schema
 
     source_params = schema.schema.source_params
     if source_params is not None:
@@ -193,7 +220,7 @@ def convert_csv_to_parquet(
     if "null_values" not in scan_csv_kwargs:
         scan_csv_kwargs["null_values"] = ["null", "", "NULL"]
 
-    log.info(f"Converting {len(csv_files)} CSV files to Parquet ...")
+    log.info(f"Converting {len(csv_paths)} CSV files to Parquet ...")
 
     if schema.schema_file:
         log.debug(f"Using schema file: {schema.schema_file!s}")
@@ -202,8 +229,6 @@ def convert_csv_to_parquet(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if mode == "direct":
-        proc = multiprocessing.get_context("spawn")
-
         pbar = Progress(
             TextColumn("[progress.description]{task.description}"),
             BarColumn(bar_width=None),
@@ -214,10 +239,32 @@ def convert_csv_to_parquet(
             expand=True,
             auto_refresh=True,
         )
-        pbar_task = pbar.add_task("Converting CSV to Parquet ...", total=len(csv_files))
+        pbar_task = pbar.add_task("Converting CSV to Parquet ...", total=len(csv_paths))
 
         if show_progress:
             pbar.start()
+
+        _imap_partial = partial(
+            _convert_csv_to_parquet_direct,
+            output_dir=output_dir,
+            schema=schema,
+            allow_extra_columns=allow_extra_columns,
+            scan_csv_kwargs=scan_csv_kwargs,
+            sink_parquet_kwargs=sink_parquet_kwargs,
+            add_healpix_columns=add_healpix_columns,
+            healpix_depths=healpix_depths,
+            healpix_column_name=healpix_column_name,
+            ra_column=ra_column,
+            dec_column=dec_column,
+            ra_column_unit=ra_column_unit,
+            dec_column_unit=dec_column_unit,
+            add_row_index_column=add_row_index_column,
+            row_index_column_name=row_index_column_name,
+            apply_callback=apply_callback,
+        )
+
+        if n_workers == 1:
+            parallelise = False
 
         if parallelise:
             if add_row_index_column:
@@ -226,57 +273,29 @@ def convert_csv_to_parquet(
                     "the conversion in direct mode."
                 )
 
-            _imap_partial = partial(
-                _convert_csv_to_parquet_direct,
-                output_dir=output_dir,
-                allow_extra_columns=allow_extra_columns,
-                scan_csv_kwargs=scan_csv_kwargs,
-                sink_parquet_kwargs=sink_parquet_kwargs,
-                add_healpix_columns=add_healpix_columns,
-                healpix_depths=healpix_depths,
-                healpix_column_name=healpix_column_name,
-                ra_column=ra_column,
-                dec_column=dec_column,
-                ra_column_unit=ra_column_unit,
-                dec_column_unit=dec_column_unit,
-                apply_callback=apply_callback,
-            )
+            proc = multiprocessing.get_context("spawn")
+            if n_workers is None:
+                n_workers = proc.cpu_count()
 
-            with proc.Pool(n_workers if parallelise else 1) as pool:
-                for _ in pool.imap_unordered(_imap_partial, csv_files):
+            with proc.Pool(n_workers) as pool:
+                for _ in pool.imap_unordered(_imap_partial, csv_paths):
                     pbar.advance(pbar_task)
 
         else:
             row_index_start = 1
-            for csv_file in sorted(csv_files):
-                n_rows = _convert_csv_to_parquet_direct(
-                    csv_file=csv_file,
-                    output_dir=output_dir,
-                    allow_extra_columns=allow_extra_columns,
-                    scan_csv_kwargs=scan_csv_kwargs,
-                    sink_parquet_kwargs=sink_parquet_kwargs,
-                    add_healpix_columns=add_healpix_columns,
-                    healpix_depths=healpix_depths,
-                    healpix_column_name=healpix_column_name,
-                    ra_column=ra_column,
-                    dec_column=dec_column,
-                    ra_column_unit=ra_column_unit,
-                    dec_column_unit=dec_column_unit,
-                    add_row_index_column=add_row_index_column,
-                    row_index_column_name=row_index_column_name,
-                    row_index_start=row_index_start,
-                    apply_callback=apply_callback,
-                )
+            for csv_file in sorted(csv_paths):
+                n_rows = _imap_partial(csv_file, row_index_start=row_index_start)
                 row_index_start += n_rows
                 pbar.advance(pbar_task)
 
         pbar.stop()
 
     elif mode == "partition":
-        lf = polars.scan_csv(csv_files, **scan_csv_kwargs)
+        lf = polars.scan_csv([str(ff) for ff in csv_files], **scan_csv_kwargs)
 
         lf = _process_lazy_frame(
             lf,
+            schema,
             ra_column=ra_column,
             dec_column=dec_column,
             ra_column_unit=ra_column_unit,
@@ -300,12 +319,16 @@ def convert_csv_to_parquet(
 
         lf.sink_parquet(partition_by, **sink_parquet_kwargs)
 
+    else:
+        raise ValueError("Invalid mode. Must be 'direct' or 'partition'.")
+
     log.info(f"Conversion complete. Parquet files saved to {output_dir!s}.")
 
 
 def _convert_csv_to_parquet_direct(
-    csv_file: pathlib.Path,
+    csv_file: pathlib.Path | str,
     output_dir: pathlib.Path,
+    schema: Schema,
     allow_extra_columns: bool = False,
     scan_csv_kwargs: dict | None = None,
     sink_parquet_kwargs: dict | None = None,
@@ -319,9 +342,11 @@ def _convert_csv_to_parquet_direct(
     add_row_index_column: bool = False,
     row_index_column_name: str = "id",
     row_index_start: int = 1,
-    apply_callback: Callable[[polars.LazyFrame], polars.LazyFrame] | None = None,
+    apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None = None,
 ) -> int:
     """Converts a single CSV file to Parquet format using the provided schema."""
+
+    csv_file = pathlib.Path(csv_file)
 
     scan_csv_kwargs = scan_csv_kwargs or {}
     sink_parquet_kwargs = sink_parquet_kwargs or {}
@@ -329,6 +354,7 @@ def _convert_csv_to_parquet_direct(
     lf = polars.scan_csv(csv_file, **scan_csv_kwargs)
     lf = _process_lazy_frame(
         lf,
+        schema,
         ra_column=ra_column,
         dec_column=dec_column,
         ra_column_unit=ra_column_unit,
@@ -342,7 +368,12 @@ def _convert_csv_to_parquet_direct(
         apply_callback=apply_callback,
     )
 
-    output_file = output_dir / (csv_file.stem + ".parquet")
+    if ".csv.gz" in csv_file.name:
+        stem = csv_file.name[:-7]
+    else:
+        stem = csv_file.stem
+
+    output_file = output_dir / (stem + ".parquet")
     lf.sink_parquet(output_file, **sink_parquet_kwargs)
 
     return lazy_frame_row_count(lf)
@@ -350,6 +381,7 @@ def _convert_csv_to_parquet_direct(
 
 def _process_lazy_frame(
     lf: polars.LazyFrame,
+    schema: Schema,
     ra_column: str = "ra",
     dec_column: str = "dec",
     ra_column_unit: Literal["degrees", "hours", "radians"] = "degrees",
@@ -360,7 +392,7 @@ def _process_lazy_frame(
     add_row_index_column: bool = False,
     row_index_column_name: str = "id",
     row_index_start: int = 1,
-    apply_callback: Callable[[polars.LazyFrame], polars.LazyFrame] | None = None,
+    apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None = None,
 ) -> polars.LazyFrame:
     """Processes a lazy frame, including calculating the HEALPix column."""
 
@@ -407,8 +439,34 @@ def _process_lazy_frame(
             offset=row_index_start,
         )
 
-    if apply_callback:
-        lf = apply_callback(lf)
+    # Apply any casting to the source columns as defined in the schema.
+    schema_columns = schema.schema.columns
+    lf_columns = lf.collect_schema().names()
+    for lf_col in lf_columns:
+        for sch_col, sch_col_data in schema_columns.items():
+            source = sch_col_data.source
+            source_col_name = (source.column_name if source else None) or sch_col
+            if lf_col == source_col_name and source:
+                cast_to = source.cast_to
+                if cast_to and source.dtype:
+                    cast_to_dtype = get_polars_dtype_from_string(cast_to)
+                    lf = lf.with_columns(polars.col(lf_col).cast(cast_to_dtype))
+
+    if apply_callback is not None:
+        if not isinstance(apply_callback, (list, tuple)):
+            apply_callback = [apply_callback]
+
+        for callback_func in apply_callback:
+            if isinstance(callback_func, str):
+                if callback_func not in callbacks:
+                    raise ValueError(
+                        f"Callback function '{callback_func}' is not defined. "
+                        f"Available callbacks: {list(callbacks.keys())}"
+                    )
+
+                lf = callbacks[callback_func](lf)
+            else:
+                lf = callback_func(lf)  # ty:ignore[call-non-callable]
 
     return lf
 

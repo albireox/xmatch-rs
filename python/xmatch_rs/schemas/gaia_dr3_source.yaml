@@ -534,9 +534,9 @@ columns:
   libname_gspphot:
     dtype: String
     description: Name of library that achieves the highest mean log-posterior in MCMC samples and was used to derive GSP-Phot parameters in this table
-  healpix_5:
+  healpix_4:
     dtype: UInt64
-    description: HEALPix index at depth 5 (NSIDE = 32)
+    description: HEALPix index at depth 4 (NSIDE = 16)
     xmatch_column: true
   healpix_19:
     dtype: UInt64

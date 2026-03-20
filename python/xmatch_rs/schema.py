@@ -12,6 +12,7 @@ import pathlib
 
 from typing import Annotated
 
+import polars
 from pydantic import BaseModel, Field
 
 from sdsstools import read_yaml_file
@@ -27,12 +28,17 @@ XMATCH_RS_ROOT = pathlib.Path(xmatch_rs.__file__).parent
 
 
 class SchemaModel(BaseModel):
-    """Pydantic model representing a schema file."""
+    """Model representing a schema file."""
 
     source_url: Annotated[
         str | None,
         Field(description="A URL to the original source of the data."),
     ]
+
+    comments: Annotated[
+        str | None,
+        Field(description="Any comments about the catalogue."),
+    ] = None
 
     source_params: Annotated[
         SourceParamsModel | None,
@@ -61,7 +67,7 @@ class SchemaModel(BaseModel):
 
 
 class SourceParamsModel(BaseModel):
-    """Pydantic model representing the parameters to read the original source data."""
+    """Model representing the parameters to read the original source data."""
 
     format: Annotated[
         str,
@@ -98,7 +104,7 @@ class SourceParamsModel(BaseModel):
 
 
 class ColumnModel(BaseModel):
-    """Pydantic model representing a column in the schema."""
+    """Model representing a column in the schema."""
 
     dtype: Annotated[
         str,
@@ -139,6 +145,37 @@ class ColumnModel(BaseModel):
             "such as HEALPix indices."
         ),
     ] = False
+
+    source: Annotated[
+        SourceColumnModel | None,
+        Field(description="Parameters of the column in the original source data."),
+    ] = None
+
+
+class SourceColumnModel(BaseModel):
+    """Model representing the parameters of a column in the original source data."""
+
+    column_name: Annotated[
+        str | None,
+        Field(description="The name of the column in the original source data."),
+    ] = None
+
+    dtype: Annotated[
+        str | None,
+        Field(
+            description="The data type of the column in the original source data. "
+            "Must be a string that can be converted to a Polars data type."
+        ),
+    ] = None
+
+    cast_to: Annotated[
+        str | None,
+        Field(
+            description="If the column in the original source data needs to be cast "
+            "to a different data type, this field specifies the target data type. "
+            "Must be a string that can be converted to a Polars data type."
+        ),
+    ] = None
 
 
 class Schema:
@@ -205,15 +242,31 @@ class Schema:
 
         return schema.dict()
 
-    def get_dtypes(self, exclude_xmatch_columns: bool = False) -> dict[str, str]:
-        """Returns a dictionary of column names and their data types."""
+    def get_polars_schema(
+        self,
+        exclude_xmatch_columns: bool = False,
+        use_source_columns: bool = False,
+    ) -> dict[str, polars.DataType]:
+        """Returns the schema as a dictionary of column names and Polars data types."""
 
         schema = self.schema
-
         if exclude_xmatch_columns:
             schema = schema.exclude_xmatch_columns()
 
-        return {
-            column_name: get_polars_dtype_from_string(column_data.dtype)
-            for column_name, column_data in schema.columns.items()
-        }
+        if not use_source_columns:
+            return {
+                column_name: get_polars_dtype_from_string(column_data.dtype)
+                for column_name, column_data in schema.columns.items()
+            }
+        else:
+            pl_sch: dict[str, polars.DataType] = {}
+
+            for c_name, c_data in schema.columns.items():
+                if c_data.source:
+                    c_name_source = c_data.source.column_name or c_name
+                    dtype_source = c_data.source.dtype or c_data.dtype
+                    pl_sch[c_name_source] = get_polars_dtype_from_string(dtype_source)
+                else:
+                    pl_sch[c_name] = get_polars_dtype_from_string(c_data.dtype)
+
+            return pl_sch
