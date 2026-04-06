@@ -42,7 +42,7 @@ jobs:
 
       - name: Test with pytest
         run: |
-          uv run pytest
+          pytest
 
       # - name: Upload coverage to Codecov
       #   uses: codecov/codecov-action@v5
