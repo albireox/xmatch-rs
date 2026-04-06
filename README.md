@@ -1,2 +1,3 @@
 # xmatch-rs
-Astronomical catalogue cross-matching
+
+Astronomical catalogue cross-matching.

@@ -10,10 +10,14 @@ from __future__ import annotations
 
 import rich.console
 
-from sdsstools import get_logger
+from sdsstools import get_logger, get_package_version
 
+
+NAME = "xmatch_rs"
 
 console = rich.console.Console()
 
 log = get_logger("xmatch_rs", use_rich_handler=True)
 log.rich_console = console
+
+__version__ = get_package_version(package_name=NAME)

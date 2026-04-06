@@ -20,6 +20,22 @@ dev = [
     "ruff>=0.15.6",
     "ty>=0.0.23",
 ]
+docs = [
+    "furo>=2025.12.19",
+    "myst-parser>=2.0.0",
+    "nox>=2025.11.12",
+    "sphinx-autobuild>=2021.3.14",
+    "sphinx-copybutton>=0.4.0",
+    "sphinx-autodoc-typehints>=1.23.2",
+    "sphinx_inline_tabs>=2025.12.21.14",
+]
+test = [
+    "pytest>=5.2.2",
+    "pytest-asyncio>=0.10.0",
+    "pytest-cov>=2.8.1",
+    "pytest-mock>=1.13.0",
+    "pytest-sugar>=0.9.2",
+]
 
 [tool.maturin]
 python-source = "python"
@@ -29,7 +45,7 @@ editable-profile = "release"
 
 [tool.uv]
 package = true
-default-groups = ["dev"]
+default-groups = ["dev", "docs", "test"]
 cache-keys = [{file = "pyproject.toml"}, {file = "Cargo.toml"}, {file = "**/*.rs"}]
 
 [tool.ruff]
@@ -65,7 +81,6 @@ asyncio_default_fixture_loop_scope = "function"
 branch = true
 include = ["python/xmatch_rs/*"]
 omit = [
-    "*/__init__.py",
     "python/xmatch_rs/__main__.py",
     "python/xmatch_rs/exceptions.py"
 ]
