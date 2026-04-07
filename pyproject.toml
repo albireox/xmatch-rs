@@ -41,7 +41,7 @@ test = [
 python-source = "python"
 module-name = "xmatch_rs._xmatch_rs_lib"
 profile = "release"
-editable-profile = "dev"
+editable-profile = "release"
 
 [tool.uv]
 package = true

@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-def ra_dec_to_healpix(ra: float, dec: float, depth: int) -> int:
+def ra_dec_to_healpix(ra: float, dec: float, order: int) -> int:
     """Converts RA and Dec to HEALPix pixel index.
 
     Parameters
@@ -17,14 +17,14 @@ def ra_dec_to_healpix(ra: float, dec: float, depth: int) -> int:
         Right Ascension in degrees.
     dec
         Declination in degrees.
-    depth
-        HEALPix depth/order (0 to 29).
+    order
+        HEALPix order/order (0 to 29).
 
     Returns
     -------
     int
         HEALPix pixel index corresponding to the given RA and Dec
-        at the specified depth.
+        at the specified order.
 
     """
 

@@ -26,11 +26,13 @@ PolarsDataType: TypeAlias = Union[DataType, DataTypeClass]
 LIB = Path(__file__).parent
 
 
-def get_healpix(ra: IntoExprColumn, dec: IntoExprColumn, *, depth: int) -> polars.Expr:
+def get_healpix(ra: IntoExprColumn, dec: IntoExprColumn, *, order: int) -> polars.Expr:
+    """Computes the HEALPix index for given RA and Dec columns at a specified order."""
+
     return register_plugin_function(
         args=[ra, dec],
         plugin_path=LIB,
         function_name="get_healpix",
         is_elementwise=True,
-        kwargs={"depth": depth},
+        kwargs={"order": order},
     )

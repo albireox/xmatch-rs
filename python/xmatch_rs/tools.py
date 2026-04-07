@@ -8,15 +8,23 @@
 
 from __future__ import annotations
 
+import glob
 import pathlib
+import re
 
 import polars
+
+import sdsstools.logger
+
+from xmatch_rs import console
 
 
 __all__: list[str] = [
     "lazy_frame_row_count",
     "get_polars_dtype_from_string",
     "is_glob_pattern",
+    "get_xmatch_rs_logger",
+    "parse_path",
 ]
 
 
@@ -64,3 +72,68 @@ def is_glob_pattern(path_string: str | pathlib.Path) -> bool:
         return True
 
     return False
+
+
+def get_xmatch_rs_logger(
+    name: str = "xmatch_rs",
+    use_rich_handler: bool = True,
+    log_level: int = 100,
+) -> sdsstools.logger.SDSSLogger:
+    """Returns a Polars logger with the specified name."""
+
+    log = sdsstools.logger.get_logger(
+        name,
+        use_rich_handler=use_rich_handler,
+        log_level=log_level,
+    )
+
+    if use_rich_handler:
+        log.rich_console = console
+
+    return log
+
+
+def parse_path(
+    path: list[str | pathlib.Path] | str | pathlib.Path,
+    extension: str | None = None,
+) -> list[pathlib.Path]:
+    """Parses a path, with glob pattern support, and returns a list of files.
+
+    Parameters
+    ----------
+    path
+        The path to parse. Can be a string or a pathlib.Path object. Can include glob
+        patterns.
+    extension
+        If provided, only files with this extension will be returned. Matched as
+        a regular expression against the file name.
+
+    Returns
+    -------
+    list[pathlib.Path]
+        A list of Path objects representing the files that match the input path.
+
+    """
+
+    if isinstance(path, (str, pathlib.Path)):
+        path = [path]
+
+    path_tmp: list[pathlib.Path | str] = []
+    for file in path:
+        if is_glob_pattern(file):
+            for matched_file in glob.glob(str(file)):
+                path_tmp.append(matched_file)
+        else:
+            path = pathlib.Path(file)
+            if path.is_dir():
+                for matched_file in path.glob("**/*.*"):
+                    path_tmp.append(matched_file)
+            else:
+                path_tmp.append(path)
+
+    paths = [pathlib.Path(ff) for ff in path_tmp]
+
+    if extension is not None:
+        paths = [ff for ff in paths if re.match(rf".*{extension}$", ff.name)]
+
+    return paths

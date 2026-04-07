@@ -21,3 +21,6 @@ log = get_logger("xmatch_rs", use_rich_handler=True)
 log.rich_console = console
 
 __version__ = get_package_version(package_name=NAME)
+
+
+from .hats import HATS

@@ -11,7 +11,7 @@ from __future__ import annotations
 import polars
 
 
-__all__ = ["callbacks"]
+__all__ = ["callbacks", "lowercase_column_names"]
 
 
 def lowercase_column_names(lf: polars.LazyFrame) -> polars.LazyFrame:

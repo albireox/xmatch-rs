@@ -14,10 +14,10 @@ use super::healpix;
 
 #[derive(Deserialize)]
 struct GetHEALPixKwargs {
-    depth: u8,
+    order: u8,
 }
 
-/// Polars expression to compute HEALPix index from RA and Dec for a given depth.
+/// Polars expression to compute HEALPix index from RA and Dec for a given order.
 #[polars_expr(output_type=UInt64)]
 fn get_healpix(inputs: &[Series], kwargs: GetHEALPixKwargs) -> PolarsResult<Series> {
     let ra: &Float64Chunked = inputs[0].f64()?;
@@ -27,7 +27,7 @@ fn get_healpix(inputs: &[Series], kwargs: GetHEALPixKwargs) -> PolarsResult<Seri
         broadcast_binary_elementwise(ra, dec, |ra: Option<f64>, dec: Option<f64>| {
             match (ra, dec) {
                 (Some(ra), Some(dec)) => {
-                    Some(healpix::ra_dec_to_healpix(ra, dec, kwargs.depth) as u64)
+                    Some(healpix::ra_dec_to_healpix(ra, dec, kwargs.order) as u64)
                 }
                 _ => None,
             }
