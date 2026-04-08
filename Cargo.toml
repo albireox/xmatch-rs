@@ -14,3 +14,4 @@ polars = { version = "0.53.0", features = ["lazy", "default", "object", "parquet
 pyo3 = { version = "0.27.0", features = ["extension-module", "abi3-py39"] }
 pyo3-polars = { version = "0.26.0", features = ["derive", "lazy"] }
 serde = { version = "1", features = ["derive"] }
+zlib-rs = { version = "0.6.3" }
