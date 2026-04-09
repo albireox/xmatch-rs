@@ -49,9 +49,9 @@ class HATS:
     @classmethod
     def convert_to_hats(
         cls,
-        path: list[str | pathlib.Path] | str | pathlib.Path,
-        schema: Schema | str | pathlib.Path | dict,
+        data_path: list[str | pathlib.Path] | str | pathlib.Path,
         output_path: str | pathlib.Path,
+        schema: Schema | str | pathlib.Path | dict | None = None,
         format: Literal["csv", "parquet"] | None = None,
         hats_initial_order: int = 6,
         hats_max_order: int | None = None,
@@ -60,6 +60,8 @@ class HATS:
         partition_approximate_bytes_per_file: int | Literal["auto"] | None = None,
         apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None = None,
         convert_kwargs: dict | None = None,
+        preserve_progress: bool = True,
+        show_progress: bool = True,
         log: sdsstools.logger.SDSSLogger | None = None,
         quiet: bool = False,
     ) -> HATS:
@@ -67,13 +69,15 @@ class HATS:
 
         Parameters
         ----------
-        path
+        data_path
             The path(s) to the input dataset. Can be a single path or a list of paths.
-        schema
-            The schema of the input dataset. Can be a Schema object, a path to a schema
-            file, or a dictionary representing the schema.
         output_path
             The path where the output HATS dataset will be saved.
+        schema
+            The schema of the input dataset. Can be a Schema object, a path to a schema
+            file, or a dictionary representing the schema. If the schema is not set,
+            the function will look for the ``_convert.yaml`` file in the output
+            directory and, if it exists, will read the schema from there.
         format
             The format of the output files. If not provided, it will be inferred from
             the files in ``path``.
@@ -97,6 +101,13 @@ class HATS:
             and return a modified LazyFrame.
         convert_kwargs
             Additional keyword arguments to pass to the conversion function.
+        preserve_progress
+            If ``True``, will try to skip steps that have already been completed.
+            Otherwise, will run all the steps of the conversion process.
+        show_progress
+            Track conversion progress and show a progress bar. Progress tracking
+            can be inaccurate. For the initial pixelation, in particular, the estimate
+            will only be accurate if the input data is approximately all-sky.
         log
             An optional logger to use for logging the conversion process.
         quiet
@@ -110,7 +121,7 @@ class HATS:
         """
 
         convert_to_hats(
-            path=path,
+            data_path=data_path,
             schema=schema,
             output_path=output_path,
             format=format,
@@ -121,6 +132,8 @@ class HATS:
             partition_approximate_bytes_per_file=partition_approximate_bytes_per_file,
             apply_callback=apply_callback,
             convert_kwargs=convert_kwargs,
+            preserve_progress=preserve_progress,
+            show_progress=show_progress,
             log=log,
             quiet=quiet,
         )
