@@ -11,34 +11,38 @@ from __future__ import annotations
 import pathlib
 import time
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
+from rich.console import Console
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
     Progress,
+    SpinnerColumn,
     TextColumn,
-    TimeRemainingColumn,
 )
 
-from xmatch_rs import console
 from xmatch_rs.convert.models import ConvertToHATSModel
 
 
 if TYPE_CHECKING:
-    from xmatch_rs.convert.models import PhaseProgressModel
+    from rich.console import Console
+
+    from xmatch_rs.convert.models import PhaseModel
 
 
-__all__: list[str] = ["monitor_progress", "get_phase", "get_n_pixels_written"]
+__all__: list[str] = ["monitor_phase_progress", "get_phase", "get_n_pixels_written"]
 
 
-def monitor_progress(
+def monitor_phase_progress(
     output_path: pathlib.Path | str,
     phase_name: str,
     show_progress: bool = True,
     interval: float = 10,
+    console: Console | None = None,
     order: int | None = None,
     progress_bar_description: str | None = None,
+    completion_callback: Callable[[], bool] | None = None,
 ) -> None:
     """Monitors the progress of the conversion and updates the progress model.
 
@@ -66,24 +70,25 @@ def monitor_progress(
     console
         An optional Rich console to use for the progress bar. If not provided,
         a new console will be created.
+    completion_callback
+        An optional callback function that will be called after each progress check.
+        If the function returns True, the phase is marked done and the loop ends.
 
     """
 
     output_path = pathlib.Path(output_path)
-    cmodel, phase = get_phase(output_path, phase_name)
+    _, phase = get_phase(output_path, phase_name)
 
-    n_required = phase.tiles_required
+    n_required = 12 * (2**order) ** 2 if order else None
 
     if show_progress:
         pbar = Progress(
+            SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
-            BarColumn(bar_width=None),
+            BarColumn(),
             MofNCompleteColumn(),
-            TimeRemainingColumn(),
             console=console,
             transient=True,
-            expand=True,
-            auto_refresh=True,
         )
         pbar_task = pbar.add_task(
             progress_bar_description or f"Phase {phase.name}",
@@ -100,16 +105,14 @@ def monitor_progress(
 
         if phase.complete:
             if pbar and pbar_task:
-                pbar.update(pbar_task, completed=phase.tiles_required or 1)
+                pbar.update(pbar_task, completed=n_required or 1)
                 pbar.stop()
             break
 
         # If we are not monitoring the output directory,
         # we can just read the progress from the _convert.yaml file.
         if not order:
-            n_processed = phase.tiles_processed
-            if pbar is not None and pbar_task is not None and n_processed is not None:
-                pbar.update(pbar_task, completed=n_processed, refresh=True)
+            pass
 
         else:
             # Otherwise, we need to monitor the output directory and determine
@@ -118,7 +121,12 @@ def monitor_progress(
             if pbar is not None and pbar_task is not None:
                 pbar.update(pbar_task, completed=n_processed, refresh=True)
 
-            cmodel.update_phase(phase_name, tiles_processed=n_processed)
+        if completion_callback and completion_callback():
+            cmodel.update_phase(phase_name, complete=True, write=True)
+            if pbar and pbar_task:
+                pbar.update(pbar_task, completed=n_required or 1)
+                pbar.stop()
+            break
 
         time.sleep(interval)
 
@@ -126,7 +134,7 @@ def monitor_progress(
 def get_phase(
     output_path: pathlib.Path | str,
     phase_name: str,
-) -> tuple[ConvertToHATSModel, PhaseProgressModel]:
+) -> tuple[ConvertToHATSModel, PhaseModel]:
     """Returns the progress model for a given phase name."""
 
     model = ConvertToHATSModel.read(output_path)

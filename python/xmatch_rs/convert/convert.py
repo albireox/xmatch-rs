@@ -10,10 +10,9 @@ from __future__ import annotations
 
 import multiprocessing
 import pathlib
-import re
 from functools import partial
 
-from typing import TYPE_CHECKING, Callable, Iterable, Literal, Mapping, Sequence
+from typing import TYPE_CHECKING, Iterable, Literal, Mapping, Sequence
 
 import numpy
 import polars
@@ -25,18 +24,8 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
-from sdsstools import Timer, read_yaml_file
-from sdsstools.logger import SDSSLogger
-
 from xmatch_rs import console
 from xmatch_rs.convert.callbacks import callbacks
-from xmatch_rs.convert.models import (
-    ConvertToHATSModel,
-    PhaseProgressModel,
-    ProgressModel,
-)
-from xmatch_rs.convert.progress import monitor_progress
-from xmatch_rs.convert.providers import get_hats_file_provider
 from xmatch_rs.expressions import get_healpix
 from xmatch_rs.schema import Schema
 from xmatch_rs.tools import (
@@ -48,264 +37,17 @@ from xmatch_rs.tools import (
 
 
 if TYPE_CHECKING:
-    from xmatch_rs.convert.models import ConvertToHATSModel
+    from polars._utils.async_ import _GeventDataFrameResult
 
+    from sdsstools.logger import SDSSLogger
 
-__all__: list[str] = ["convert_csv_to_parquet", "convert_to_parquet"]
+    from xmatch_rs.types import APPLY_CALLBACK_T, DATA_PATH_T, FILE_PATH_PROVIDER_T
 
-
-CALLBACK_FUNC_T = Callable[[polars.LazyFrame], polars.LazyFrame]
-APPLY_CALLBACK_T = CALLBACK_FUNC_T | str
-
-FILE_PATH_PROVIDER_T = Callable[[polars.FileProviderArgs], pathlib.Path]
-
-
-def convert_to_hats(
-    data_path: list[str | pathlib.Path] | str | pathlib.Path,
-    output_path: str | pathlib.Path,
-    schema: Schema | str | pathlib.Path | dict | None = None,
-    format: Literal["csv", "parquet"] | None = None,
-    hats_initial_order: int = 6,
-    hats_max_order: int | None = None,
-    hats_max_rows_per_pixel: int | None = None,
-    partition_max_rows_per_file: int | None = None,
-    partition_approximate_bytes_per_file: int | Literal["auto"] | None = None,
-    apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None = None,
-    convert_kwargs: dict | None = None,
-    preserve_progress: bool = True,
-    show_progress: bool = True,
-    log: SDSSLogger | None = None,
-    quiet: bool = False,
-) -> None:
-    """Converts a dataset to the HATS format.
-
-    Parameters
-    ----------
-    data_path
-        The path(s) to the dataset to be converted to HATS.
-        Can be a single path or a list of paths.
-    output_path
-        The path where the output HATS dataset will be saved.
-    schema
-        The schema of the input dataset. Can be a Schema object, a path to a schema
-        file, or a dictionary representing the schema. If the schema is not set,
-        the function will look for the ``_convert.yaml`` file in the output
-        directory and, if it exists, will read the schema from there.
-    format
-        The format of the output files. If not provided, it will be inferred from
-        the files in ``data_path``.
-    hats_initial_order
-        The initial HEALPix order to use for partitioning the data. Defaults to 6.
-    hats_max_order
-        The maximum HEALPix order to use for partitioning the data. If not
-        provided, the tiling process will continue until all pixels contain
-        fewer than ``hats_max_rows_per_file`` rows.
-    hats_max_rows_per_pixel
-        The maximum number of rows per pixel. If set to ``None``, no adaptive
-        tiling will be performed and the data will be partitioned using the
-        ``hats_initial_order``.
-    partition_max_rows_per_file
-        The maximum number of rows per partitioned file.
-    partition_approximate_bytes_per_file
-        The approximate number of bytes per partitioned file. Defaults to 1 GB.
-    apply_callback
-        A callback function or list of callback functions to apply to the data
-        before saving. Each callback should take a Polars LazyFrame as input
-        and return a modified LazyFrame.
-    convert_kwargs
-        Additional keyword arguments to pass to the conversion function.
-    preserve_progress
-        If ``True``, will try to skip steps that have already been completed.
-        Otherwise, will run all the steps of the conversion process.
-    show_progress
-        Track conversion progress and show a progress bar. Progress tracking
-        can be inaccurate. For the initial pixelation, in particular, the estimate
-        will only be accurate if the input data is approximately all-sky.
-    log
-        An optional logger to use for logging the conversion process.
-    quiet
-        If ``True``, suppresses logging output. Defaults to ``False``.
-
-    """
-
-    # Get logger
-    log = log or get_xmatch_rs_logger(log_level=40 if quiet else 20)
-
-    # Create output directory if it doesn't exist.
-    output_path = pathlib.Path(output_path)
-    output_path.mkdir(parents=True, exist_ok=True)
-
-    # Load the schema.
-    if schema is not None and not isinstance(schema, Schema):
-        schema = Schema(schema)
-
-    # Try to load the _convert.yaml file or create a new instance.
-    if (output_path / "_convert.yaml").exists():
-        log.info(f"Loading _convert.yaml from {output_path!s}.")
-        convert_dict = read_yaml_file(output_path / "_convert.yaml", return_class=dict)
-        convert_model = ConvertToHATSModel.model_validate(convert_dict)
-        if schema is not None:
-            convert_model.dataset_schema = schema.schema
-        else:
-            schema = Schema(convert_model.dataset_schema.model_dump())
-    else:
-        if schema is None:
-            raise ValueError(
-                "No schema provided and no _convert.yaml file found in the output "
-                "directory. Please provide a schema for the input data.",
-            )
-
-        # Build the conversion model and the initial phase and
-        # write the _convert.yaml file to the output directory.
-        initial_phase_model = PhaseProgressModel(
-            name="min_order_partitioning",
-            description=(f"Initial pixelation to order {hats_initial_order}."),
-            tiles_processed=0,
-            tiles_required=12 * (2 ** (2 * hats_initial_order)),
-        )
-
-        convert_model = ConvertToHATSModel(
-            dataset_schema=schema.schema,
-            output_path=output_path,
-            progress=ProgressModel(complete=False, phases=[initial_phase_model]),
-        )
-        convert_model.write()
-
-    # Run the initial phase: converting input files to HATS format with a single
-    # tiling of order hats_initial_order.
-    _run_hats_phase_1(
-        data_path=data_path,
-        model=convert_model,
-        order=hats_initial_order,
-        format=format,
-        partition_max_rows_per_file=partition_max_rows_per_file,
-        partition_approximate_bytes_per_file=partition_approximate_bytes_per_file,
-        apply_callback=apply_callback,
-        convert_kwargs=convert_kwargs,
-        log=log,
-        show_progress=show_progress,
-        preserve_progress=preserve_progress,
-    )
-
-
-def _run_hats_phase_1(
-    data_path: list[str | pathlib.Path] | str | pathlib.Path,
-    model: ConvertToHATSModel,
-    order: int,
-    format: Literal["csv", "parquet"] | None,
-    partition_max_rows_per_file: int | None,
-    partition_approximate_bytes_per_file: int | Literal["auto"] | None,
-    apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None,
-    convert_kwargs: dict | None,
-    log: SDSSLogger,
-    show_progress: bool,
-    preserve_progress: bool,
-) -> None:
-    """Runs the first phase of the HATS conversion: convert to a fixed tiling order."""
-
-    phase_model = model.get_phase("min_order_partitioning")
-    schema = model.get_schema()
-
-    if phase_model.complete and not preserve_progress:
-        log.info(f"Partitioning to order {order} complete.")
-    else:
-        # Determine the file format if not provided.
-        if format is None:
-            files = parse_path(data_path)
-            sample_file = files[0]
-            if re.match(r".*\.csv\.?[gz|bz2]?$", sample_file.name):
-                log.info("Inferred file format as CSV based on file extension.")
-                format = "csv"
-            elif re.match(r".*\.parquet$", sample_file.name):
-                log.info("Inferred file format as Parquet based on file extension.")
-                format = "parquet"
-            else:
-                raise ValueError(
-                    "Could not infer file format from file extension. "
-                    "Please specify the format explicitly.",
-                )
-
-        if show_progress:
-            progress_proc = multiprocessing.Process(
-                target=monitor_progress,
-                args=(model.output_path, "min_order_partitioning"),
-                kwargs={
-                    "order": order,
-                    "show_progress": True,
-                    "progress_bar_description": f"Tiling to order {order}",
-                },
-            )
-            progress_proc.start()
-
-    # Get the file provider for HATS files.
-    hats_file_provider = get_hats_file_provider(order, column_name=f"_healpix_{order}")
-
-    with Timer() as timer:
-        if format == "csv":
-            log.info("Converting CSV files to HATS.")
-            log.info(f"Performing initial convertion to order {order}.")
-
-            convert_csv_to_parquet(
-                csv_files=data_path,
-                schema=schema,
-                output_path=model.output_path,
-                mode="partition",
-                partition_key=f"_healpix_{order}",
-                file_path_provider=hats_file_provider,
-                partition_max_rows_per_file=partition_max_rows_per_file,
-                partition_approximate_bytes_per_file=partition_approximate_bytes_per_file,
-                partition_include_key=False,
-                healpix_orders=[29, order],
-                healpix_column_name="_healpix_{order}",
-                apply_callback=apply_callback,
-                log=log,
-                **(convert_kwargs or {}),
-            )
-
-        elif format == "parquet":
-            log.info("Converting Parquet files to HATS.")
-            log.info(f"Performing initial convertion to order {order}.")
-
-            if isinstance(data_path, (str, pathlib.Path)):
-                data_path = [data_path]
-
-            lf = polars.scan_parquet([pathlib.Path(p) for p in data_path])
-
-            convert_to_parquet(
-                lf,
-                schema=schema,
-                output_path=model.output_path,
-                mode="partition",
-                partition_key=f"_healpix_{order}",
-                file_path_provider=hats_file_provider,
-                partition_max_rows_per_file=partition_max_rows_per_file,
-                partition_approximate_bytes_per_file=partition_approximate_bytes_per_file,
-                partition_include_key=False,
-                healpix_orders=[29, order],
-                healpix_column_name="_healpix_{order}",
-                apply_callback=apply_callback,
-                log=log,
-                **(convert_kwargs or {}),
-            )
-
-        else:
-            raise ValueError(
-                f"Invalid format {format!r}. Currently supported formats "
-                "are 'csv' and 'parquet'.",
-            )
-
-        log.debug("Marking initial phase complete.")
-        model.update_phase("min_order_partitioning", complete=True)
-
-        if show_progress:
-            log.debug("Waiting for progress monitoring process to finish.")
-            progress_proc.join()
-
-        log.info(f"Initial conversion completed in {timer.elapsed:.1f} seconds.")
+__all__ = ["convert_csv_to_parquet", "convert_to_parquet"]
 
 
 def convert_csv_to_parquet(
-    csv_files: list[str | pathlib.Path] | str | pathlib.Path,
+    csv_files: DATA_PATH_T,
     output_path: str | pathlib.Path,
     schema: Schema | str | pathlib.Path | dict,
     allow_extra_columns: bool = False,
@@ -329,9 +71,10 @@ def convert_csv_to_parquet(
     n_workers: int | None = None,
     scan_csv_kwargs: dict | None = None,
     sink_parquet_kwargs: dict | None = None,
+    collect_async: bool = False,
     show_progress: bool = False,
     log: SDSSLogger | None = None,
-) -> None:
+) -> _GeventDataFrameResult | None:
     """Converts CSV files to Parquet format using the provided schema.
 
     Parameters
@@ -406,6 +149,10 @@ def convert_csv_to_parquet(
         Additional keyword arguments to pass to `polars.scan_csv`.
     sink_parquet_kwargs
         Additional keyword arguments to pass to `polars.LazyFrame.sink_parquet`.
+    collect_async
+        Whether to sink the Parquet files asynchronosly. In this case ``sink_parquet``
+        will be called with ``.collect_async(gevent=True)`` and this function
+        returns a wrapper that has a ``.get(block=True, timeout=None)`` method.
     show_progress
         Whether to show a progress bar during the conversion. Only applicable
         if ``mode`` is ``"direct"``.
@@ -480,7 +227,7 @@ def convert_csv_to_parquet(
 
         lfs[output_file] = lf
 
-    convert_to_parquet(
+    result = convert_to_parquet(
         lfs,
         output_path=output_path,
         schema=schema,
@@ -503,9 +250,13 @@ def convert_csv_to_parquet(
         parallelise=parallelise,
         n_workers=n_workers,
         sink_parquet_kwargs=sink_parquet_kwargs,
+        collect_async=collect_async,
         show_progress=show_progress,
         log=log,
     )
+
+    if result is not None:
+        return result
 
     log.info(f"Conversion complete. Parquet files saved to {output_path!s}.")
 
@@ -536,9 +287,10 @@ def convert_to_parquet(
     parallelise: bool = False,
     n_workers: int | None = None,
     sink_parquet_kwargs: dict | None = None,
+    collect_async: bool = False,
     show_progress: bool = False,
     log: SDSSLogger | None = None,
-) -> None:
+) -> _GeventDataFrameResult[polars.DataFrame] | None:
     """Convert a list of DataFrames/LazyFrames to Parquet files.
 
     Parameters
@@ -613,6 +365,11 @@ def convert_to_parquet(
         Additional keyword arguments to pass to `polars.scan_csv`.
     sink_parquet_kwargs
         Additional keyword arguments to pass to `polars.LazyFrame.sink_parquet`.
+    collect_async
+        Whether to sink the Parquet files asynchronosly. In this case ``sink_parquet``
+        will be called with ``.collect_async(gevent=True)`` and this function
+        returns a wrapper that has a ``.get(block=True, timeout=None)`` method.
+        Only used when ``mode`` is ``"partition"``.
     show_progress
         Whether to show a progress bar during the conversion. Only applicable
         if ``mode`` is ``"direct"``.
@@ -755,7 +512,15 @@ def convert_to_parquet(
             approximate_bytes_per_file=partition_approximate_bytes_per_file,
         )
 
-        lf.sink_parquet(partition_by, **(sink_parquet_kwargs or {}))
+        lf = lf.sink_parquet(
+            partition_by,
+            lazy=collect_async,
+            **(sink_parquet_kwargs or {}),
+        )
+
+        if lf is not None and collect_async:
+            result = lf.collect_async(gevent=True)
+            return result  # ty:ignore[invalid-return-type]
 
     else:
         raise ValueError("Invalid mode. Must be 'direct' or 'partition'.")

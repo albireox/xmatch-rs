@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pathlib
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 import yaml
 from filelock import FileLock
@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from xmatch_rs.schema import Schema, SchemaModel
 
 
-__all__: list[str] = ["ConvertToHATSModel", "ProgressModel", "PhaseProgressModel"]
+__all__: list[str] = ["ConvertToHATSModel", "PhaseModel"]
 
 
 class ConvertToHATSModel(BaseModel):
@@ -35,11 +35,16 @@ class ConvertToHATSModel(BaseModel):
         Field(description="The path where the converted file will be saved."),
     ]
 
-    progress: Annotated[
-        ProgressModel,
+    complete: Annotated[
+        bool,
+        Field(description="Whether the conversion is complete."),
+    ] = False
+
+    phases: Annotated[
+        list[PhaseModel],
         Field(
-            description="Progress of the conversion to HATS format.",
-            default_factory=ProgressModel,
+            description="Phases of the conversion to HATS format.",
+            default_factory=list,
         ),
     ]
 
@@ -58,10 +63,15 @@ class ConvertToHATSModel(BaseModel):
         convert_model = ConvertToHATSModel.model_validate(convert_dict)
         return convert_model
 
-    def get_phase(self, phase_name: str) -> PhaseProgressModel:
-        """Returns the progress model for a given phase name."""
+    def get_phase_names(self) -> list[str]:
+        """Returns a list of the names of the phases in the conversion model."""
 
-        for phase in self.progress.phases:
+        return [phase.name for phase in self.phases]
+
+    def get_phase(self, phase_name: str) -> PhaseModel:
+        """Returns the model for a given phase name."""
+
+        for phase in self.phases:
             if phase.name == phase_name:
                 return phase
 
@@ -75,8 +85,6 @@ class ConvertToHATSModel(BaseModel):
     def update_phase(
         self,
         phase_name: str,
-        tiles_processed: int | None = None,
-        tiles_required: int | None = None,
         complete: bool | None = None,
         progress: float | None = None,
         compute_progress: bool = True,
@@ -85,10 +93,6 @@ class ConvertToHATSModel(BaseModel):
         """Updates the progress model for a given phase name."""
 
         phase = self.get_phase(phase_name)
-        if tiles_processed is not None:
-            phase.tiles_processed = tiles_processed
-        if tiles_required is not None:
-            phase.tiles_required = tiles_required
         if complete is not None:
             phase.complete = complete
 
@@ -97,8 +101,6 @@ class ConvertToHATSModel(BaseModel):
         elif compute_progress:
             if phase.complete:
                 phase.progress = 100.0
-            elif phase.tiles_required is not None and phase.tiles_processed is not None:
-                phase.progress = (phase.tiles_processed / phase.tiles_required) * 100
 
         if write:
             self.write()
@@ -114,24 +116,7 @@ class ConvertToHATSModel(BaseModel):
                 f.write(yaml.dump(self.model_dump(mode="json"), sort_keys=False))
 
 
-class ProgressModel(BaseModel):
-    """Model representing the progress of the conversion."""
-
-    complete: Annotated[
-        bool,
-        Field(description="Whether the conversion is complete."),
-    ] = False
-
-    phases: Annotated[
-        list[PhaseProgressModel],
-        Field(
-            description="Progress of each phase of the conversion.",
-            default_factory=list,
-        ),
-    ]
-
-
-class PhaseProgressModel(BaseModel):
+class PhaseModel(BaseModel):
     """Model representing the progress of a single phase of the conversion."""
 
     name: Annotated[
@@ -144,6 +129,11 @@ class PhaseProgressModel(BaseModel):
         Field(description="A description of the phase."),
     ] = ""
 
+    data_source_is_partitioned: Annotated[
+        bool,
+        Field(description="Whether the data source is already partitioned."),
+    ] = False
+
     complete: Annotated[
         bool,
         Field(description="Whether the phase is complete."),
@@ -154,12 +144,27 @@ class PhaseProgressModel(BaseModel):
         Field(description="Progress of the phase as a percentage."),
     ] = 0.0
 
-    tiles_required: Annotated[
+    partitioning_type: Annotated[
+        Literal["full", "max_rows"],
+        Field(description="The type of partitioning."),
+    ] = "full"
+
+    healpix_order_0: Annotated[
         int | None,
-        Field(description="The number of tiles to be processed in this phase."),
+        Field(description="The initial HEALPix order, if applicable."),
     ] = None
 
-    tiles_processed: Annotated[
+    healpix_order_1: Annotated[
         int | None,
-        Field(description="The number of tiles processed."),
+        Field(description="The final HEALPix order, if applicable."),
     ] = None
+
+    max_rows_per_pixel: Annotated[
+        int | None,
+        Field(description="The maximum number of rows per pixel, if applicable."),
+    ] = None
+
+    keep_lower_order_directories: Annotated[
+        bool,
+        Field(description="Keep the lower order directories after partitioning."),
+    ] = False

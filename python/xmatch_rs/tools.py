@@ -86,15 +86,22 @@ def get_xmatch_rs_logger(
         use_rich_handler=use_rich_handler,
         log_level=log_level,
     )
+    log.sh.setLevel(log_level)
 
     if use_rich_handler:
         log.rich_console = console
+        if isinstance(log.sh, sdsstools.logger.RichHandler):
+            log.sh.console = console
 
     return log
 
 
 def parse_path(
-    path: list[str | pathlib.Path] | str | pathlib.Path,
+    path: list[str]
+    | list[pathlib.Path]
+    | list[str | pathlib.Path]
+    | str
+    | pathlib.Path,
     extension: str | None = None,
 ) -> list[pathlib.Path]:
     """Parses a path, with glob pattern support, and returns a list of files.
