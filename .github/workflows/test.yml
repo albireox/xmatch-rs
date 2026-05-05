@@ -36,6 +36,13 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Build with maturin
+        uses: PyO3/maturin-action@v1
+        with:
+          command: develop
+          args: --release --uv
+          sccache: true
+
       - name: Install dependencies
         run: |
           uv sync --python ${{ matrix.python-version }} --no-default-groups --group test --frozen
