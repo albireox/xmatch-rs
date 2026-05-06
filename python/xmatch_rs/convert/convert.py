@@ -407,13 +407,8 @@ def convert_to_parquet(
     if isinstance(dfs, (polars.DataFrame, polars.LazyFrame)):
         lfs = [dfs.lazy()]
 
-    # If the output paths are not defined, use a template path.
+    # Make sure the data frames are lazy frames.
     lfs = [df.lazy() if isinstance(df, polars.DataFrame) else df for df in lfs]
-    n_zeros = len(str(len(lfs)))
-    if len(output_paths) == 0:
-        output_paths = [
-            output_path / f"part_{ii:0{n_zeros}d}.parquet" for ii in range(len(lfs))
-        ]
 
     # Create a progress bar.
     pbar = Progress(
@@ -435,6 +430,13 @@ def convert_to_parquet(
     log.debug(f"Converting files using mode {mode!r}")
 
     if mode == "direct":
+        # If the output paths are not defined, use a template path.
+        if len(output_paths) == 0:
+            n_zeros = len(str(len(lfs)))
+            output_paths = [
+                output_path / f"part_{ii:0{n_zeros}d}.parquet" for ii in range(len(lfs))
+            ]
+
         # Add a task if show_progress=True
         if show_progress:
             pbar_task = pbar.add_task(
