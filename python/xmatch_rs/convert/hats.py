@@ -11,7 +11,7 @@ from __future__ import annotations
 import pathlib
 import re
 
-from typing import TYPE_CHECKING, Any, Callable, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import polars
 
@@ -24,14 +24,12 @@ from xmatch_rs.convert import (
     get_hats_file_provider,
 )
 from xmatch_rs.convert.models import ConvertToHATSModel
-from xmatch_rs.convert.progress import monitor_phase_progress
 from xmatch_rs.schema import Schema
 from xmatch_rs.tools import get_xmatch_rs_logger, parse_path
+from xmatch_rs.types import LOW_MEMORY_STRATEGY_OPTIONS_T
 
 
 if TYPE_CHECKING:
-    from polars._utils.async_ import _GeventDataFrameResult
-
     from sdsstools.logger import SDSSLogger
 
     from xmatch_rs.types import (
@@ -44,17 +42,16 @@ if TYPE_CHECKING:
 __all__: list[str] = ["convert_to_hats"]
 
 
-_LOW_MEMORY_DEFAULTS: dict[LOW_MEMORY_STRATEGY_T, Any] = {
+_LOW_MEMORY_DEFAULTS: dict[LOW_MEMORY_STRATEGY_OPTIONS_T, Any] = {
     "data_page_size": 0.1 * 1024 * 1024,
-    "healpix_4": None,
     "streaming_chunk_size": 500,
 }
-_LOW_MEMORY_AUTO: list[LOW_MEMORY_STRATEGY_T] = ["healpix_4"]
 
 
 def get_low_memory_strategy_value(
-    input: list[LOW_MEMORY_STRATEGY_T] | dict[LOW_MEMORY_STRATEGY_T, Any],
-    strategy: LOW_MEMORY_STRATEGY_T,
+    input: list[LOW_MEMORY_STRATEGY_OPTIONS_T]
+    | dict[LOW_MEMORY_STRATEGY_OPTIONS_T, Any],
+    strategy: LOW_MEMORY_STRATEGY_OPTIONS_T,
 ) -> int:
     """Returns the value for a low memory strategy, given the input and defaults."""
 
@@ -67,32 +64,21 @@ def get_low_memory_strategy_value(
     return _LOW_MEMORY_DEFAULTS[strategy]
 
 
-def get_gevent_callback(event: _GeventDataFrameResult) -> Callable[[], bool]:
-    """Returns a callback function that can be used to check if a gevent is ready."""
-
-    def callback() -> bool:
-        return event.result.ready()
-
-    return callback
-
-
 def convert_to_hats(
     data_path: DATA_PATH_T,
     output_path: str | pathlib.Path,
     schema: Schema | str | pathlib.Path | dict | None = None,
     format: Literal["csv", "parquet"] | None = None,
-    hats_initial_order: int = 4,
+    hats_initial_order: int = 6,
     hats_max_order: int | None = None,
     hats_max_rows_per_pixel: int | None = None,
     partition_max_rows_per_file: int | None = None,
     partition_approximate_bytes_per_file: int | Literal["auto"] | None = None,
     apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None = None,
-    low_memory_strategy: LOW_MEMORY_STRATEGY_T
-    | list[LOW_MEMORY_STRATEGY_T]
-    | dict[LOW_MEMORY_STRATEGY_T, Any] = "auto",
+    low_memory_strategy: LOW_MEMORY_STRATEGY_T | None = None,
     convert_kwargs: dict | None = None,
     preserve_progress: bool = True,
-    show_progress: bool = True,
+    show_progress: bool = False,
     log: SDSSLogger | None = None,
     quiet: bool = False,
 ) -> None:
@@ -133,13 +119,10 @@ def convert_to_hats(
     low_memory_strategy
         The strategy to use to prevent OOM errors. Options are ``'data_page_size'``,
         which reduces the data page size used when writing Parquet files;
-        ``'healpix_4'``, which initially converts the data to HATS using HEALPix
-        order 4; or ``'streaming_chunk_size'``, which set a more conservativve
-        streaming chunk size. If set to ``'auto'``, the function will automatically
-        choose a strategy based on the input data and system memory. A list
-        of strategies can be provided, as well as a dictionary mapping strategies
-        to their appropriate parameters (e.g.
-        ``{'data_page_size': 512 * 1024 * 1024, 'healpix_4': None}``.
+        and ``'streaming_chunk_size'``, which set a more conservative streaming chunk
+        size. A list of strategies can be provided, as well as a dictionary mapping
+        strategies to their appropriate parameters (e.g.
+        ``{'data_page_size': 512 * 1024 * 1024, 'healpix_4': None}``).
     convert_kwargs
         Additional keyword arguments to pass to the conversion function.
     preserve_progress
@@ -178,11 +161,8 @@ def convert_to_hats(
     # Parse low-memory strategies.
     if isinstance(low_memory_strategy, str):
         low_memory_strategy = [low_memory_strategy]
-
-    if "auto" in low_memory_strategy:
-        low_memory_strategy = _LOW_MEMORY_AUTO
-
-    use_healpix_4 = False
+    elif low_memory_strategy is None:
+        low_memory_strategy = []
 
     for strategy in low_memory_strategy:
         if strategy not in _LOW_MEMORY_DEFAULTS:
@@ -200,13 +180,6 @@ def convert_to_hats(
             else:
                 convert_kwargs["sink_parquet_kwargs"] = {"data_page_size": page_size}
 
-        elif strategy == "healpix_4" and hats_initial_order > 4:
-            log.info(
-                "Using low-memory strategy 'healpix_4': performing initial "
-                "conversion to HATS with HEALPix order 4.",
-            )
-            use_healpix_4 = True
-
         elif strategy == "streaming_chunk_size":
             chunk_size = get_low_memory_strategy_value(low_memory_strategy, strategy)
             polars.Config.set_streaming_chunk_size(chunk_size)
@@ -222,8 +195,6 @@ def convert_to_hats(
         convert_model = ConvertToHATSModel.model_validate(convert_dict)
         if schema is not None:
             convert_model.dataset_schema = schema.schema
-        else:
-            schema = Schema(convert_model.dataset_schema.model_dump())
     else:
         if schema is None:
             raise ValueError(
@@ -231,39 +202,24 @@ def convert_to_hats(
                 "directory. Please provide a schema for the input data.",
             )
 
-    # Build the conversion model and the initial phase and
-    # write the _convert.yaml file to the output directory.
-    phases: list[PhaseModel] = []
+        # Build the conversion model and the initial phase and
+        # write the _convert.yaml file to the output directory.
 
-    healpix_min_order_model = PhaseModel(
-        name=f"healpix_{hats_initial_order}_partitioning",
-        partitioning_type="full",
-        description=f"Pixelation to order {hats_initial_order}.",
-        healpix_order_0=None,
-        healpix_order_1=hats_initial_order,
-    )
-
-    if use_healpix_4:
-        healpix_4_phase_model = PhaseModel(
-            name="healpix_4_partitioning",
+        healpix_min_order_model = PhaseModel(
+            name=f"healpix_{hats_initial_order}_partitioning",
             partitioning_type="full",
-            description="Pixelation to order 4.",
-            healpix_order_1=4,
+            description=f"Pixelation to order {hats_initial_order}.",
+            healpix_order_0=None,
+            healpix_order_1=hats_initial_order,
         )
-        healpix_min_order_model.healpix_order_0 = 4
-        healpix_min_order_model.data_source_is_partitioned = True
-        phases += [healpix_4_phase_model, healpix_min_order_model]
 
-    else:
-        phases += [healpix_min_order_model]
-
-    convert_model = ConvertToHATSModel(
-        dataset_schema=schema.schema,
-        output_path=output_path,
-        complete=False,
-        phases=phases,
-    )
-    convert_model.write()
+        convert_model = ConvertToHATSModel(
+            dataset_schema=schema.schema,
+            output_path=output_path,
+            complete=False,
+            phases=[healpix_min_order_model],
+        )
+        convert_model.write()
 
     for phase in convert_model.phases:
         _run_hats_phase(
@@ -299,6 +255,10 @@ def _run_hats_phase(
     schema = model.get_schema()
     phase = model.get_phase(phase_name)
 
+    if preserve_progress and phase.complete:
+        log.info(f"Phase {phase_name!r} already completed. Skipping.")
+        return
+
     # Determine the file format if not provided.
     if format is None:
         files = parse_path(data_path)
@@ -320,10 +280,43 @@ def _run_hats_phase(
 
     assert order_1 is not None, "healpix_order_1 must be set for the initial phase."
 
+    if order_0 is None:
+        _run_min_order_phase(
+            data_path=data_path,
+            model=model,
+            schema=schema,
+            phase_name=phase_name,
+            format=format,
+            order_1=order_1,
+            partition_max_rows_per_file=partition_max_rows_per_file,
+            partition_approximate_bytes_per_file=partition_approximate_bytes_per_file,
+            apply_callback=apply_callback,
+            convert_kwargs=convert_kwargs,
+            log=log,
+            show_progress=show_progress,
+        )
+
+
+def _run_min_order_phase(
+    data_path: DATA_PATH_T,
+    model: ConvertToHATSModel,
+    schema: Schema,
+    phase_name: str,
+    format: Literal["csv", "parquet"] | None,
+    order_1: int,
+    partition_max_rows_per_file: int | None,
+    partition_approximate_bytes_per_file: int | Literal["auto"] | None,
+    apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None,
+    convert_kwargs: dict | None,
+    log: SDSSLogger,
+    show_progress: bool,
+) -> None:
+
     # Get the file provider for HATS files.
     hats_file_provider = get_hats_file_provider(
         order_1,
         column_name=f"_healpix_{order_1}",
+        use_uuid=True,
     )
 
     with Timer() as timer:
@@ -331,21 +324,23 @@ def _run_hats_phase(
             log.info("Converting CSV files to HATS.")
             log.info(f"Performing initial convertion to order {order_1}.")
 
-            collect_event = convert_csv_to_parquet(
+            convert_csv_to_parquet(
                 csv_files=data_path,
                 schema=schema,
                 output_path=model.output_path,
                 mode="partition",
+                partition_process_mode="single",
                 partition_key=f"_healpix_{order_1}",
                 file_path_provider=hats_file_provider,
                 partition_max_rows_per_file=partition_max_rows_per_file,
                 partition_approximate_bytes_per_file=partition_approximate_bytes_per_file,
                 partition_include_key=False,
+                parallelise=False,
                 healpix_orders=[29, order_1],
                 healpix_column_name="_healpix_{order}",
                 apply_callback=apply_callback,
+                show_progress=show_progress,
                 log=log,
-                collect_async=True,
                 **(convert_kwargs or {}),
             )
 
@@ -358,21 +353,23 @@ def _run_hats_phase(
 
             lf = polars.scan_parquet([pathlib.Path(p) for p in data_path])
 
-            collect_event = convert_to_parquet(
+            convert_to_parquet(
                 lf,
                 schema=schema,
                 output_path=model.output_path,
                 mode="partition",
+                partition_process_mode="single",
                 partition_key=f"_healpix_{order_1}",
                 file_path_provider=hats_file_provider,
                 partition_max_rows_per_file=partition_max_rows_per_file,
                 partition_approximate_bytes_per_file=partition_approximate_bytes_per_file,
                 partition_include_key=False,
+                parallelise=True,
                 healpix_orders=[29, order_1],
                 healpix_column_name="_healpix_{order}",
                 apply_callback=apply_callback,
                 log=log,
-                collect_async=True,
+                show_progress=show_progress,
                 **(convert_kwargs or {}),
             )
 
@@ -382,17 +379,6 @@ def _run_hats_phase(
                 "are 'csv' and 'parquet'.",
             )
 
-        if show_progress:
-            monitor_phase_progress(
-                model.output_path,
-                phase_name,
-                order=order_1,
-                show_progress=True,
-                console=log.rich_console,
-                progress_bar_description=f"Tiling to order {order_1}",
-                completion_callback=get_gevent_callback(collect_event)
-                if collect_event
-                else None,
-            )
-
         log.info(f"Phase {phase_name!r} completed in {timer.elapsed:.1f} seconds.")
+
+        model.update_phase(phase_name, complete=True)

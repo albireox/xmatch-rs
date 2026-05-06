@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pathlib
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 import sdsstools.logger
 
@@ -59,9 +59,7 @@ class HATS:
         partition_max_rows_per_file: int | None = None,
         partition_approximate_bytes_per_file: int | Literal["auto"] | None = None,
         apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None = None,
-        low_memory_strategy: LOW_MEMORY_STRATEGY_T
-        | list[LOW_MEMORY_STRATEGY_T]
-        | dict[LOW_MEMORY_STRATEGY_T, Any] = "auto",
+        low_memory_strategy: LOW_MEMORY_STRATEGY_T | None = None,
         convert_kwargs: dict | None = None,
         preserve_progress: bool = True,
         show_progress: bool = True,
@@ -105,13 +103,10 @@ class HATS:
         low_memory_strategy
             The strategy to use to prevent OOM errors. Options are ``'data_page_size'``,
             which reduces the data page size used when writing Parquet files;
-            ``'healpix_4'``, which initially converts the data to HATS using HEALPix
-            order 4; or ``'streaming_chunk_size'``, which set a more conservativve
-            streaming chunk size. If set to ``'auto'``, the function will automatically
-            choose a strategy based on the input data and system memory. A list
-            of strategies can be provided, as well as a dictionary mapping strategies
-            to their appropriate parameters (e.g.
-            ``{'data_page_size': 512 * 1024 * 1024, 'healpix_4': None}``.
+            and ``'streaming_chunk_size'``, which set a more conservative streaming
+            chunk size. A list of strategies can be provided, as well as a dictionary
+            mapping strategies to their appropriate parameters (e.g.
+            ``{'data_page_size': 512 * 1024 * 1024, 'healpix_4': None}``).
         convert_kwargs
             Additional keyword arguments to pass to the conversion function.
         preserve_progress

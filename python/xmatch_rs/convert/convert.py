@@ -20,8 +20,8 @@ from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
     Progress,
+    SpinnerColumn,
     TextColumn,
-    TimeElapsedColumn,
 )
 
 from xmatch_rs import console
@@ -37,8 +37,6 @@ from xmatch_rs.tools import (
 
 
 if TYPE_CHECKING:
-    from polars._utils.async_ import _GeventDataFrameResult
-
     from sdsstools.logger import SDSSLogger
 
     from xmatch_rs.types import APPLY_CALLBACK_T, DATA_PATH_T, FILE_PATH_PROVIDER_T
@@ -52,6 +50,7 @@ def convert_csv_to_parquet(
     schema: Schema | str | pathlib.Path | dict,
     allow_extra_columns: bool = False,
     mode: Literal["direct", "partition"] = "direct",
+    partition_process_mode: Literal["single", "combined"] = "combined",
     partition_key: str | list[str] | None = None,
     file_path_provider: FILE_PATH_PROVIDER_T | None = None,
     partition_max_rows_per_file: int | None = None,
@@ -71,10 +70,9 @@ def convert_csv_to_parquet(
     n_workers: int | None = None,
     scan_csv_kwargs: dict | None = None,
     sink_parquet_kwargs: dict | None = None,
-    collect_async: bool = False,
     show_progress: bool = False,
     log: SDSSLogger | None = None,
-) -> _GeventDataFrameResult | None:
+) -> None:
     """Converts CSV files to Parquet format using the provided schema.
 
     Parameters
@@ -97,6 +95,13 @@ def convert_csv_to_parquet(
         The conversion mode. If ``"direct``, each CSV files will be converted
         to a Parquet files. If ``"partition"``, the CSV files will be partitioned
         according to the provided parameters.
+    partition_process_mode
+        The mode to use to process the data frame for partitioning. If ``"single"`,
+        each data frame is processed independently and appended to the partition
+        output. This requires providing a ``file_path_provider`` to prevent overwriting
+        the output files. If ``"combined"``, all data frames are combined into a single
+        data frame before processing and partitioning. This is the default but may
+        require more memory.
     partition_key
         The key(s) to use for partitioning.
     partition_max_rows_per_file
@@ -149,10 +154,6 @@ def convert_csv_to_parquet(
         Additional keyword arguments to pass to `polars.scan_csv`.
     sink_parquet_kwargs
         Additional keyword arguments to pass to `polars.LazyFrame.sink_parquet`.
-    collect_async
-        Whether to sink the Parquet files asynchronosly. In this case ``sink_parquet``
-        will be called with ``.collect_async(gevent=True)`` and this function
-        returns a wrapper that has a ``.get(block=True, timeout=None)`` method.
     show_progress
         Whether to show a progress bar during the conversion. Only applicable
         if ``mode`` is ``"direct"``.
@@ -227,11 +228,12 @@ def convert_csv_to_parquet(
 
         lfs[output_file] = lf
 
-    result = convert_to_parquet(
+    convert_to_parquet(
         lfs,
         output_path=output_path,
         schema=schema,
         mode=mode,
+        partition_process_mode=partition_process_mode,
         partition_key=partition_key,
         file_path_provider=file_path_provider,
         partition_max_rows_per_file=partition_max_rows_per_file,
@@ -250,13 +252,9 @@ def convert_csv_to_parquet(
         parallelise=parallelise,
         n_workers=n_workers,
         sink_parquet_kwargs=sink_parquet_kwargs,
-        collect_async=collect_async,
         show_progress=show_progress,
         log=log,
     )
-
-    if result is not None:
-        return result
 
     log.info(f"Conversion complete. Parquet files saved to {output_path!s}.")
 
@@ -269,6 +267,7 @@ def convert_to_parquet(
     output_path: str | pathlib.Path,
     schema: Schema | str | pathlib.Path | dict,
     mode: Literal["direct", "partition"] = "direct",
+    partition_process_mode: Literal["single", "combined"] = "combined",
     partition_key: str | list[str] | None = None,
     file_path_provider: FILE_PATH_PROVIDER_T | None = None,
     partition_max_rows_per_file: int | None = None,
@@ -287,10 +286,9 @@ def convert_to_parquet(
     parallelise: bool = False,
     n_workers: int | None = None,
     sink_parquet_kwargs: dict | None = None,
-    collect_async: bool = False,
     show_progress: bool = False,
     log: SDSSLogger | None = None,
-) -> _GeventDataFrameResult[polars.DataFrame] | None:
+) -> None:
     """Convert a list of DataFrames/LazyFrames to Parquet files.
 
     Parameters
@@ -313,8 +311,18 @@ def convert_to_parquet(
         The conversion mode. If ``"direct``, each CSV files will be converted
         to a Parquet files. If ``"partition"``, the CSV files will be partitioned
         according to the provided parameters.
+    partition_process_mode
+        The mode to use to process the data frame for partitioning. If ``"single"``,
+        each data frame is processed independently and appended to the partition
+        output. This requires providing a ``file_path_provider`` to prevent overwriting
+        the output files. If ``"combined"``, all data frames are combined into a single
+        data frame before processing and partitioning. This is the default but may
+        require more memory.
     partition_key
         The key(s) to use for partitioning.
+    file_path_provider
+        An optional function that takes the partition key value(s) and returns a
+        file path to write the partition to.
     partition_max_rows_per_file
         The maximum number of rows per partitioned file.
     partition_approximate_bytes_per_file
@@ -357,22 +365,17 @@ def convert_to_parquet(
         a string representing one of the predefined callbacks provided by
         ``xmatch_rs``.
     parallelise
-        Whether to parallelise the conversion. Only applicable if ``mode`` is
-        ``"direct"``.
+        Whether to parallelise the conversion.
     n_workers
         The number of workers to use for parallelisation.
     scan_csv_kwargs
         Additional keyword arguments to pass to `polars.scan_csv`.
     sink_parquet_kwargs
         Additional keyword arguments to pass to `polars.LazyFrame.sink_parquet`.
-    collect_async
-        Whether to sink the Parquet files asynchronosly. In this case ``sink_parquet``
-        will be called with ``.collect_async(gevent=True)`` and this function
-        returns a wrapper that has a ``.get(block=True, timeout=None)`` method.
-        Only used when ``mode`` is ``"partition"``.
     show_progress
         Whether to show a progress bar during the conversion. Only applicable
-        if ``mode`` is ``"direct"``.
+        if ``mode`` is ``"direct"`` or ``"partition"`` with
+        ``partition_process_mode="single"``.
     log
         An optional logger to use for logging messages during the conversion.
 
@@ -412,24 +415,35 @@ def convert_to_parquet(
             output_path / f"part_{ii:0{n_zeros}d}.parquet" for ii in range(len(lfs))
         ]
 
-    log.debug(f"Mode: {mode!r}")
+    # Create a progress bar.
+    pbar = Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        console=console,
+        transient=True,
+    )
+    pbar_task: int | None = None
+
+    # Handle parallelisation options.
+    if n_workers == 1:
+        parallelise = False
+    elif parallelise and n_workers is None:
+        n_workers = multiprocessing.cpu_count()
+
+    log.debug(f"Converting files using mode {mode!r}")
 
     if mode == "direct":
-        pbar = Progress(
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(bar_width=None),
-            MofNCompleteColumn(),
-            TimeElapsedColumn(),
-            console=console,
-            transient=True,
-            expand=True,
-            auto_refresh=True,
-        )
-        pbar_task = pbar.add_task("Converting to Parquet ...", total=len(lfs))
-
+        # Add a task if show_progress=True
         if show_progress:
+            pbar_task = pbar.add_task(
+                "Processing ...",
+                total=len(lfs),
+            )
             pbar.start()
 
+        # Create a partial function for the conversion to Parquet.
         _imap_partial = partial(
             _convert_to_parquet_direct,
             output_path=output_path,
@@ -447,9 +461,6 @@ def convert_to_parquet(
             apply_callback=apply_callback,
         )
 
-        if n_workers == 1:
-            parallelise = False
-
         if parallelise:
             if add_row_index_column:
                 raise ValueError(
@@ -458,14 +469,16 @@ def convert_to_parquet(
                 )
 
             proc = multiprocessing.get_context("spawn")
-            if n_workers is None:
-                n_workers = proc.cpu_count()
 
             log.debug(f"Parallelising conversion with {n_workers} workers ...")
 
             with proc.Pool(n_workers) as pool:
-                for _ in pool.imap_unordered(_imap_partial, zip(lfs, output_paths)):
-                    pbar.advance(pbar_task)
+                for _ in pool.imap_unordered(
+                    lambda args: _imap_partial(*args),
+                    zip(lfs, output_paths),
+                ):
+                    if pbar_task is not None:
+                        pbar.advance(pbar_task)
 
         else:
             row_index_start = 1
@@ -476,14 +489,41 @@ def convert_to_parquet(
                     row_index_start=row_index_start,
                 )
                 row_index_start += n_rows
-                pbar.advance(pbar_task)
+                if pbar_task is not None:
+                    pbar.advance(pbar_task)
 
         pbar.stop()
 
     elif mode == "partition":
-        lf = _process_lazy_frame(
-            polars.concat(lfs),
-            schema,
+        log.debug(
+            f"Partitioning by {partition_key!r} with mode={partition_process_mode!r}, "
+            f"max_rows_per_file={partition_max_rows_per_file} and "
+            f"approximate_bytes_per_file={partition_approximate_bytes_per_file}"
+        )
+
+        if partition_process_mode == "single":
+            if show_progress:
+                pbar_task = pbar.add_task(
+                    "Processing ...",
+                    total=len(lfs),
+                )
+                pbar.start()
+        else:
+            lfs = [polars.concat(lfs)]
+
+        sink_parquet_kwargs = sink_parquet_kwargs or {}
+        partition_by_kwargs = {
+            "base_path": output_path,
+            "key": partition_key,
+            "file_path_provider": file_path_provider,
+            "include_key": partition_include_key,
+            "max_rows_per_file": partition_max_rows_per_file,
+            "approximate_bytes_per_file": partition_approximate_bytes_per_file,
+        }
+
+        _process_lazy_frame_partial = partial(
+            _process_lazy_frame,
+            schema=schema,
             ra_column=ra_column,
             dec_column=dec_column,
             ra_column_unit=ra_column_unit,
@@ -495,35 +535,32 @@ def convert_to_parquet(
             row_index_column_name=row_index_column_name,
             row_index_start=1,
             apply_callback=apply_callback,
+            sink_parquet=True,
+            partition_by_kwargs=partition_by_kwargs,
+            sink_parquet_kwargs=sink_parquet_kwargs,
         )
 
-        log.debug(
-            f"Partitioning by {partition_key!r} with "
-            f"max_rows_per_file={partition_max_rows_per_file} and "
-            f"approximate_bytes_per_file={partition_approximate_bytes_per_file}"
-        )
+        if parallelise:
+            proc = multiprocessing.get_context("spawn")
 
-        partition_by = polars.PartitionBy(
-            output_path,
-            key=partition_key,
-            file_path_provider=file_path_provider,
-            include_key=partition_include_key,
-            max_rows_per_file=partition_max_rows_per_file,
-            approximate_bytes_per_file=partition_approximate_bytes_per_file,
-        )
+            log.debug(f"Parallelising conversion with {n_workers} workers ...")
 
-        lf = lf.sink_parquet(
-            partition_by,
-            lazy=collect_async,
-            **(sink_parquet_kwargs or {}),
-        )
+            with proc.Pool(n_workers) as pool:
+                for _ in pool.imap_unordered(_process_lazy_frame_partial, lfs):
+                    if pbar_task is not None:
+                        pbar.advance(pbar_task)
 
-        if lf is not None and collect_async:
-            result = lf.collect_async(gevent=True)
-            return result  # ty:ignore[invalid-return-type]
+        else:
+            for lf in lfs:
+                _process_lazy_frame_partial(lf)
+                if pbar_task is not None:
+                    pbar.advance(pbar_task)
 
     else:
         raise ValueError("Invalid mode. Must be 'direct' or 'partition'.")
+
+    if pbar_task is not None:
+        pbar.stop()
 
 
 def _convert_to_parquet_direct(
@@ -582,6 +619,10 @@ def _process_lazy_frame(
     row_index_column_name: str = "id",
     row_index_start: int = 1,
     apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None = None,
+    sink_parquet: bool = False,
+    output_path: pathlib.Path | None = None,
+    partition_by_kwargs: dict | None = None,
+    sink_parquet_kwargs: dict | None = None,
 ) -> polars.LazyFrame:
     """Processes a lazy frame, including calculating the HEALPix column."""
 
@@ -660,6 +701,18 @@ def _process_lazy_frame(
                 lf = callbacks[callback_func](lf)
             else:
                 lf = callback_func(lf)  # ty:ignore[call-non-callable]
+
+    if sink_parquet:
+        if output_path:
+            lf = lf.sink_parquet(output_path, **(sink_parquet_kwargs or {}))
+        elif partition_by_kwargs:
+            partition_by = polars.PartitionBy(**partition_by_kwargs)
+            lf = lf.sink_parquet(partition_by, **(sink_parquet_kwargs or {}))
+        else:
+            raise ValueError(
+                "Must provide either output_path or partition_by_kwargs "
+                "to sink to Parquet."
+            )
 
     return lf
 
