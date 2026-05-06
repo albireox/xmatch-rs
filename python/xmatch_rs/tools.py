@@ -103,6 +103,7 @@ def parse_path(
     | str
     | pathlib.Path,
     extension: str | None = None,
+    recursive: bool = False,
 ) -> list[pathlib.Path]:
     """Parses a path, with glob pattern support, and returns a list of files.
 
@@ -114,6 +115,9 @@ def parse_path(
     extension
         If provided, only files with this extension will be returned. Matched as
         a regular expression against the file name.
+    recursive
+        If True, directories will be searched recursively. Ignored if glob patterns
+        are used, as they can already include recursive patterns (e.g., **/*.*).
 
     Returns
     -------
@@ -133,7 +137,8 @@ def parse_path(
         else:
             path = pathlib.Path(file)
             if path.is_dir():
-                for matched_file in path.glob("**/*.*"):
+                files = path.glob("**/*.*") if recursive else path.glob("*.*")
+                for matched_file in files:
                     path_tmp.append(matched_file)
             else:
                 path_tmp.append(path)

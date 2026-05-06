@@ -356,7 +356,7 @@ def _run_min_order_phase(
             convert_to_parquet(
                 lf,
                 schema=schema,
-                output_path=model.output_path,
+                output_paths=model.output_path,
                 mode="partition",
                 partition_process_mode="single",
                 partition_key=f"_healpix_{order_1}",

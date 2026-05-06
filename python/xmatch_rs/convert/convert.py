@@ -12,7 +12,7 @@ import multiprocessing
 import pathlib
 from functools import partial
 
-from typing import TYPE_CHECKING, Iterable, Literal, Mapping, Sequence
+from typing import TYPE_CHECKING, Iterable, Literal, Sequence
 
 import numpy
 import polars
@@ -22,6 +22,7 @@ from rich.progress import (
     Progress,
     SpinnerColumn,
     TextColumn,
+    TimeRemainingColumn,
 )
 
 from xmatch_rs import console
@@ -162,6 +163,13 @@ def convert_csv_to_parquet(
 
     """
 
+    output_path = pathlib.Path(output_path)
+    if not output_path.exists():
+        output_path.mkdir(parents=True, exist_ok=True)
+    else:
+        if not output_path.is_dir():
+            raise ValueError(f"Output path {output_path!s} is not a directory.")
+
     log = log or get_xmatch_rs_logger("xmatch_rs.convert")
 
     # Retrieve the schema if a path or name is provided.
@@ -174,7 +182,11 @@ def convert_csv_to_parquet(
     if isinstance(csv_files, (str, pathlib.Path)):
         csv_files = [csv_files]
 
-    csv_paths = parse_path(csv_files, extension=r"\.csv.*")
+    csv_paths = parse_path(
+        csv_files,
+        extension=r"\.csv.*",
+        recursive=False,
+    )
 
     if len(csv_paths) == 0:
         raise ValueError("No CSV files found to convert.")
@@ -215,7 +227,8 @@ def convert_csv_to_parquet(
     if schema.schema_file:
         log.debug(f"Using schema file: {schema.schema_file!s}")
 
-    lfs: dict[str, polars.LazyFrame] = {}
+    lfs: list[polars.LazyFrame] = []
+    output_paths: list[pathlib.Path] = []
     for csv_path in csv_paths:
         lf = polars.scan_csv(csv_path, **scan_csv_kwargs)
 
@@ -226,11 +239,12 @@ def convert_csv_to_parquet(
 
         output_file = stem + ".parquet"
 
-        lfs[output_file] = lf
+        lfs.append(lf)
+        output_paths.append(output_path / output_file)
 
     convert_to_parquet(
         lfs,
-        output_path=output_path,
+        output_paths=output_paths if mode == "direct" else output_path,
         schema=schema,
         mode=mode,
         partition_process_mode=partition_process_mode,
@@ -262,9 +276,8 @@ def convert_csv_to_parquet(
 def convert_to_parquet(
     dfs: polars.DataFrame
     | polars.LazyFrame
-    | Iterable[polars.DataFrame | polars.LazyFrame]
-    | Mapping[str, polars.DataFrame | polars.LazyFrame],
-    output_path: str | pathlib.Path,
+    | Iterable[polars.DataFrame | polars.LazyFrame],
+    output_paths: str | pathlib.Path | Iterable[str | pathlib.Path],
     schema: Schema | str | pathlib.Path | dict,
     mode: Literal["direct", "partition"] = "direct",
     partition_process_mode: Literal["single", "combined"] = "combined",
@@ -295,11 +308,10 @@ def convert_to_parquet(
     ----------
     dfs
         A list of data frames or lazy frames to convert to Parquet.
-        It is also possible to provide a dictionary of data frames, in which
-        case the keys must be the stem of the output Parquet file to write for
-        that data frame (ignored for partition mode).
-    output_path
-        The directory where the converted Parquet files will be saved.
+    output_paths
+        The directory where the converted Parquet files will be saved. Alternatively,
+        a list of paths to the output Parquet files, in which case each data frame
+        will be saved to the corresponding path.
     schema
         The schema to use for the conversion. It can be a path to a schema file,
         the name of a schema in the ``schemas/`` directory, or a dictionary
@@ -384,31 +396,14 @@ def convert_to_parquet(
     # Create logger or use the one provided.
     log = log or get_xmatch_rs_logger("xmatch_rs.convert")
 
-    # Create the output directory if it doesn't exist.
-    output_path = pathlib.Path(output_path)
-    output_path.mkdir(parents=True, exist_ok=True)
-
     # Retrieve the schema if a path or name is provided.
     if not isinstance(schema, Schema):
         schema = Schema(schema)
 
-    # Prepare the list of lazy frames and output paths.
-    lfs: list[polars.LazyFrame] = []
-    output_paths: list[pathlib.Path] = []
-
-    if isinstance(dfs, Mapping):
-        lfs = [
-            df.lazy()
-            for df in dfs.values()
-            if isinstance(df, (polars.DataFrame, polars.LazyFrame))
-        ]
-        output_paths = [(output_path / str(key)) for key in dfs.keys()]
-
     if isinstance(dfs, (polars.DataFrame, polars.LazyFrame)):
         lfs = [dfs.lazy()]
-
-    # Make sure the data frames are lazy frames.
-    lfs = [df.lazy() if isinstance(df, polars.DataFrame) else df for df in lfs]
+    else:
+        lfs = [df.lazy() for df in dfs]
 
     # Create a progress bar.
     pbar = Progress(
@@ -416,6 +411,7 @@ def convert_to_parquet(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         MofNCompleteColumn(),
+        TimeRemainingColumn(),
         console=console,
         transient=True,
     )
@@ -430,12 +426,20 @@ def convert_to_parquet(
     log.debug(f"Converting files using mode {mode!r}")
 
     if mode == "direct":
-        # If the output paths are not defined, use a template path.
-        if len(output_paths) == 0:
+        if isinstance(output_paths, (str, pathlib.Path)):
+            # If the output paths are not defined, use a template path.
+            base_path = pathlib.Path(output_paths)
             n_zeros = len(str(len(lfs)))
             output_paths = [
-                output_path / f"part_{ii:0{n_zeros}d}.parquet" for ii in range(len(lfs))
+                base_path / f"part_{ii:0{n_zeros}d}.parquet" for ii in range(len(lfs))
             ]
+        else:
+            output_paths = [pathlib.Path(p) for p in output_paths]
+            if len(output_paths) != len(lfs):
+                raise ValueError(
+                    "If output_paths is a list of paths, it must have the same "
+                    "length as the number of data frames."
+                )
 
         # Add a task if show_progress=True
         if show_progress:
@@ -448,7 +452,6 @@ def convert_to_parquet(
         # Create a partial function for the conversion to Parquet.
         _imap_partial = partial(
             _convert_to_parquet_direct,
-            output_path=output_path,
             schema=schema,
             sink_parquet_kwargs=sink_parquet_kwargs,
             add_healpix_columns=add_healpix_columns,
@@ -497,6 +500,11 @@ def convert_to_parquet(
         pbar.stop()
 
     elif mode == "partition":
+        if not isinstance(output_paths, (str, pathlib.Path)):
+            raise ValueError("When mode='partition', output_paths must be a directory.")
+
+        base_path = pathlib.Path(output_paths)
+
         log.debug(
             f"Partitioning by {partition_key!r} with mode={partition_process_mode!r}, "
             f"max_rows_per_file={partition_max_rows_per_file} and "
@@ -515,7 +523,7 @@ def convert_to_parquet(
 
         sink_parquet_kwargs = sink_parquet_kwargs or {}
         partition_by_kwargs = {
-            "base_path": output_path,
+            "base_path": base_path,
             "key": partition_key,
             "file_path_provider": file_path_provider,
             "include_key": partition_include_key,
