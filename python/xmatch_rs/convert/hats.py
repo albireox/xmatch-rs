@@ -319,6 +319,9 @@ def _run_min_order_phase(
         use_uuid=True,
     )
 
+    # The output path for the Norder hive files, followong the HATS convention.
+    output_path = model.output_path / "dataset"
+
     with Timer() as timer:
         if format == "csv":
             log.info("Converting CSV files to HATS.")
@@ -327,7 +330,7 @@ def _run_min_order_phase(
             convert_csv_to_parquet(
                 csv_files=data_path,
                 schema=schema,
-                output_path=model.output_path,
+                output_path=output_path,
                 mode="partition",
                 partition_process_mode="single",
                 partition_key=f"_healpix_{order_1}",
@@ -356,7 +359,7 @@ def _run_min_order_phase(
             convert_to_parquet(
                 lf,
                 schema=schema,
-                output_paths=model.output_path,
+                output_paths=output_path,
                 mode="partition",
                 partition_process_mode="single",
                 partition_key=f"_healpix_{order_1}",
