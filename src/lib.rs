@@ -7,7 +7,6 @@
 
 use pyo3::{prelude::*, py_run};
 
-pub mod hats;
 pub mod healpix;
 pub mod polars_expressions;
 
@@ -23,12 +22,6 @@ fn healpix_pixel_area(order: u8, degrees: bool) -> PyResult<f64> {
     Ok(healpix::healpix_pixel_area(order, degrees))
 }
 
-#[pyfunction]
-fn test_hats_dataset(path: &str) -> PyResult<()> {
-    hats::hats_dataset(path);
-    Ok(())
-}
-
 // Define the Python module
 #[pymodule(name = "_xmatch_rs_lib")]
 fn xmatch_rs_pymodule(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -42,16 +35,6 @@ fn xmatch_rs_pymodule(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         "import sys; sys.modules['xmatch_rs._xmatch_rs_lib.healpix'] = xmatch_rs_healpix"
     );
     m.add_submodule(&xmatch_rs_healpix)?;
-
-    // xmatch_rs.hats module
-    let xmatch_rs_hats = PyModule::new(_py, "hats")?;
-    xmatch_rs_hats.add_function(wrap_pyfunction!(test_hats_dataset, &xmatch_rs_hats)?)?;
-    py_run!(
-        _py,
-        xmatch_rs_hats,
-        "import sys; sys.modules['xmatch_rs._xmatch_rs_lib.hats'] = xmatch_rs_hats"
-    );
-    m.add_submodule(&xmatch_rs_hats)?;
 
     Ok(())
 }

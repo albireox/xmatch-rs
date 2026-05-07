@@ -4028,7 +4028,6 @@ dependencies = [
  "pyo3",
  "pyo3-polars",
  "serde",
- "zlib-rs",
 ]
 
 [[package]]
