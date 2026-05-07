@@ -82,12 +82,28 @@ class ConvertToHATSModel(BaseModel):
 
         return Schema(self.dataset_schema.model_dump())
 
+    def add_phase(
+        self,
+        phase: PhaseModel | None = None,
+        write: bool = True,
+        **kwargs,
+    ) -> PhaseModel:
+        """Adds a phase to the conversion model."""
+
+        if phase is None:
+            phase = PhaseModel(**kwargs)
+
+        self.phases.append(phase)
+
+        if write:
+            self.write()
+
+        return phase
+
     def update_phase(
         self,
         phase_name: str,
         complete: bool | None = None,
-        progress: float | None = None,
-        compute_progress: bool = True,
         write: bool = True,
     ) -> None:
         """Updates the progress model for a given phase name."""
@@ -95,12 +111,6 @@ class ConvertToHATSModel(BaseModel):
         phase = self.get_phase(phase_name)
         if complete is not None:
             phase.complete = complete
-
-        if progress is not None:
-            phase.progress = progress
-        elif compute_progress:
-            if phase.complete:
-                phase.progress = 100.0
 
         if write:
             self.write()
@@ -124,30 +134,20 @@ class PhaseModel(BaseModel):
         Field(description="The name of the phase."),
     ]
 
+    type: Annotated[
+        Literal["healpix_partitioning", "rechunk"],
+        Field(description="The type of the phase."),
+    ] = "healpix_partitioning"
+
     description: Annotated[
         str,
         Field(description="A description of the phase."),
     ] = ""
 
-    data_source_is_partitioned: Annotated[
-        bool,
-        Field(description="Whether the data source is already partitioned."),
-    ] = False
-
     complete: Annotated[
         bool,
         Field(description="Whether the phase is complete."),
     ] = False
-
-    progress: Annotated[
-        float,
-        Field(description="Progress of the phase as a percentage."),
-    ] = 0.0
-
-    partitioning_type: Annotated[
-        Literal["full", "max_rows"],
-        Field(description="The type of partitioning."),
-    ] = "full"
 
     healpix_order_0: Annotated[
         int | None,

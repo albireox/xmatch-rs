@@ -204,10 +204,9 @@ def convert_to_hats(
 
         # Build the conversion model and the initial phase and
         # write the _convert.yaml file to the output directory.
-
         healpix_min_order_model = PhaseModel(
             name=f"healpix_{hats_initial_order}_partitioning",
-            partitioning_type="full",
+            type="healpix_partitioning",
             description=f"Pixelation to order {hats_initial_order}.",
             healpix_order_0=None,
             healpix_order_1=hats_initial_order,
@@ -222,22 +221,25 @@ def convert_to_hats(
         convert_model.write()
 
     for phase in convert_model.phases:
-        _run_hats_phase(
-            data_path=data_path,
-            model=convert_model,
-            phase_name=phase.name,
-            format=format,
-            partition_max_rows_per_file=partition_max_rows_per_file,
-            partition_approximate_bytes_per_file=partition_approximate_bytes_per_file,
-            apply_callback=apply_callback,
-            convert_kwargs=convert_kwargs,
-            log=log,
-            show_progress=show_progress,
-            preserve_progress=preserve_progress,
-        )
+        if phase.type == "healpix_partitioning":
+            _run_hats_healpix_phase(
+                data_path=data_path,
+                model=convert_model,
+                phase_name=phase.name,
+                format=format,
+                partition_max_rows_per_file=partition_max_rows_per_file,
+                partition_approximate_bytes_per_file=partition_approximate_bytes_per_file,
+                apply_callback=apply_callback,
+                convert_kwargs=convert_kwargs,
+                log=log,
+                show_progress=show_progress,
+                preserve_progress=preserve_progress,
+            )
+        else:
+            raise ValueError(f"Unknown phase type {phase.type!r}.")
 
 
-def _run_hats_phase(
+def _run_hats_healpix_phase(
     data_path: DATA_PATH_T,
     model: ConvertToHATSModel,
     phase_name: str,
@@ -281,7 +283,7 @@ def _run_hats_phase(
     assert order_1 is not None, "healpix_order_1 must be set for the initial phase."
 
     if order_0 is None:
-        _run_min_order_phase(
+        _run_healpix_min_order_phase(
             data_path=data_path,
             model=model,
             schema=schema,
@@ -297,7 +299,7 @@ def _run_hats_phase(
         )
 
 
-def _run_min_order_phase(
+def _run_healpix_min_order_phase(
     data_path: DATA_PATH_T,
     model: ConvertToHATSModel,
     schema: Schema,
@@ -311,6 +313,7 @@ def _run_min_order_phase(
     log: SDSSLogger,
     show_progress: bool,
 ) -> None:
+    """Runs the initial HEALPix partitioning phase of the HATS conversion."""
 
     # Get the file provider for HATS files.
     hats_file_provider = get_hats_file_provider(
