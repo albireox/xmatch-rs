@@ -69,7 +69,7 @@ def convert_to_hats(
     output_path: str | pathlib.Path,
     schema: Schema | str | pathlib.Path | dict | None = None,
     format: Literal["csv", "parquet"] | None = None,
-    hats_initial_order: int = 6,
+    hats_initial_order: int = 2,
     hats_max_order: int | None = None,
     hats_max_rows_per_pixel: int | None = None,
     partition_max_rows_per_file: int | None = None,
