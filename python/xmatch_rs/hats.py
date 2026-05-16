@@ -88,7 +88,7 @@ class HATS:
             will be added to the dataset. This should be a relatively high order,
             ideally higher than any reasonable spatial resolution that the dataset
             (or any other dataset with which it will be cross-matched) can achieve.
-            Defaults to 29, which corresponds to a resolution of ~0.025 arcseconds.
+            Defaults to 29, which corresponds to a resolution of ~0.000393 arcseconds.
         max_order
             The maximum HEALPix order to use for partitioning the data. If not
             provided, the tiling process will continue until all pixels contain
