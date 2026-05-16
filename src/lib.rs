@@ -39,7 +39,7 @@ fn hats_increase_order(
     n_workers: Option<usize>,
     progress_file: Option<PathBuf>,
     keep_initial_order_directories: bool,
-) -> Result<()> {
+) -> Result<Vec<i64>> {
     let options = hats::HATSIncreaseOrderOptions {
         max_rows_per_pixel,
         max_kilobytes_per_pixel,

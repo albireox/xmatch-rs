@@ -55,7 +55,7 @@ def convert_csv_to_parquet(
     partition_key: str | list[str] | None = None,
     file_path_provider: FILE_PATH_PROVIDER_T | None = None,
     partition_max_rows_per_file: int | None = None,
-    partition_approximate_bytes_per_file: int | Literal["auto"] | None = None,
+    partition_approximate_bytes_per_file: int | Literal["auto"] | None = "auto",
     partition_include_key: bool = False,
     add_healpix_columns: bool = True,
     healpix_orders: int | Sequence[int] = [29],
@@ -108,7 +108,7 @@ def convert_csv_to_parquet(
     partition_max_rows_per_file
         The maximum number of rows per partitioned file.
     partition_approximate_bytes_per_file
-        The approximate number of bytes per partitioned file. Defaults to 1 GB.
+        The approximate number of bytes per partitioned file.
     partition_include_key
         Whether to include the partition key in the output Parquet files.
     add_healpix_columns
@@ -284,7 +284,7 @@ def convert_to_parquet(
     partition_key: str | list[str] | None = None,
     file_path_provider: FILE_PATH_PROVIDER_T | None = None,
     partition_max_rows_per_file: int | None = None,
-    partition_approximate_bytes_per_file: int | Literal["auto"] | None = 1000_000_000,
+    partition_approximate_bytes_per_file: int | Literal["auto"] | None = "auto",
     partition_include_key: bool = False,
     add_healpix_columns: bool = True,
     healpix_orders: int | Sequence[int] = [29],
@@ -338,7 +338,7 @@ def convert_to_parquet(
     partition_max_rows_per_file
         The maximum number of rows per partitioned file.
     partition_approximate_bytes_per_file
-        The approximate number of bytes per partitioned file. Defaults to 1 GB.
+        The approximate number of bytes per partitioned file.
     partition_include_key
         Whether to include the partition key in the output Parquet files.
     add_healpix_columns

@@ -10,24 +10,13 @@ from __future__ import annotations
 
 import pathlib
 
-from typing import Any, Callable, Literal
+from typing import Callable
 
 import polars
 
 
 DATA_PATH_T = (
     list[str] | list[pathlib.Path] | list[str | pathlib.Path] | str | pathlib.Path
-)
-
-LOW_MEMORY_STRATEGY_OPTIONS_T = Literal[
-    "data_page_size",
-    "streaming_chunk_size",
-]
-
-LOW_MEMORY_STRATEGY_T = (
-    LOW_MEMORY_STRATEGY_OPTIONS_T
-    | list[LOW_MEMORY_STRATEGY_OPTIONS_T]
-    | dict[LOW_MEMORY_STRATEGY_OPTIONS_T, Any]
 )
 
 CALLBACK_FUNC_T = Callable[[polars.LazyFrame], polars.LazyFrame]

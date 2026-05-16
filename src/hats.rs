@@ -78,10 +78,14 @@ impl HATSIncreaseOrderOptions {
     }
 }
 
+/// Progress information for the HATS increase order operation, written to the progress file.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HATSIncreaseOrderProgress {
+    pub order_0: u8,
+    pub order_1: u8,
     pub pixels_to_process: Vec<i64>,
     pub pixels_completed: Vec<i64>,
+    pub complete: bool,
 }
 
 /// Increases HATS order from `order_0` to `order_1` for selected `pixels`.
@@ -93,7 +97,7 @@ pub fn hats_increase_order(
     order_1: u8,
     pixels: Option<Vec<i64>>,
     options: HATSIncreaseOrderOptions,
-) -> Result<()> {
+) -> Result<Vec<i64>> {
     let mut path = path.clone();
 
     // Check the parent directory.
@@ -133,10 +137,6 @@ pub fn hats_increase_order(
     // Sort the pixel list.
     pixels.sort();
 
-    if pixels.is_empty() {
-        return Ok(());
-    }
-
     // If there is a progress file configured, write the initial progress information
     // with the list of pixels to process.
     let progress_file = if let Some(progress_file) = options.progress_file {
@@ -145,13 +145,17 @@ pub fn hats_increase_order(
                 .read(true)
                 .write(true)
                 .create(true)
+                .truncate(true)
                 .open(progress_file)
                 .unwrap(),
         ));
 
         let progress = HATSIncreaseOrderProgress {
+            order_0,
+            order_1,
             pixels_to_process: pixels.clone(),
             pixels_completed: vec![],
+            complete: pixels.is_empty(),
         };
 
         serde_json::to_writer(&*progress_file.lock().unwrap(), &progress).unwrap();
@@ -160,6 +164,10 @@ pub fn hats_increase_order(
     } else {
         None
     };
+
+    if pixels.is_empty() {
+        return Ok(pixels);
+    }
 
     let n_workers = if let Some(n_workers) = options.n_workers {
         n_workers
@@ -176,7 +184,7 @@ pub fn hats_increase_order(
                 let progress_file_clone = progress_file.clone();
                 process_pixel(
                     &path,
-                    pixel,
+                    *pixel,
                     order_0,
                     order_1,
                     options.ref_order,
@@ -192,7 +200,7 @@ pub fn hats_increase_order(
             let progress_file_clone = progress_file.clone();
             process_pixel(
                 &path,
-                pixel,
+                *pixel,
                 order_0,
                 order_1,
                 options.ref_order,
@@ -203,7 +211,13 @@ pub fn hats_increase_order(
         });
     }
 
-    Ok(())
+    // After processing all pixels, if there is a progress file,
+    // update it to mark the operation as complete.
+    if let Some(progress_file) = progress_file {
+        update_progress_file(&progress_file, None, Some(true))?;
+    }
+
+    Ok(pixels)
 }
 
 /// Lists pixel IDs that exceed the configured maximum row count or byte size.
@@ -310,7 +324,7 @@ fn list_pixels_to_increase_order(
 /// Processes a single pixel and writes re-partitioned parquet output for `order_1`.
 fn process_pixel(
     dataset_path: &PathBuf,
-    pixel: &i64,
+    pixel: i64,
     order_0: u8,
     order_1: u8,
     ref_order: u8,
@@ -376,16 +390,7 @@ fn process_pixel(
 
     // If there is a progress file configured, update it with the completed pixel.
     if let Some(progress_file) = progress_file {
-        // Rewind the progress file to the beginning before reading and writing.
-        progress_file.lock().unwrap().rewind().unwrap();
-
-        // Update the progress file with the completed pixel.
-        let mut progress: HATSIncreaseOrderProgress =
-            serde_json::from_reader(BufReader::new(&*progress_file.lock().unwrap()))?;
-        progress.pixels_completed.push(*pixel);
-
-        progress_file.lock().unwrap().rewind().unwrap();
-        serde_json::to_writer(&*progress_file.lock().unwrap(), &progress)?;
+        update_progress_file(&progress_file, Some(pixel), None)?;
     }
 
     Ok(())
@@ -418,4 +423,33 @@ fn path_provider_uuid(
     let path = format!("Dir={}/Npix={}/{}", dir, pixel, file);
 
     return Ok(pl_fp::FileProviderReturn::Path(path));
+}
+
+fn update_progress_file(
+    progress_file: &Arc<Mutex<File>>,
+    pixel: Option<i64>,
+    complete: Option<bool>,
+) -> Result<()> {
+    // Rewind the progress file to the beginning before reading and writing.
+    progress_file.lock().unwrap().rewind().unwrap();
+
+    // Update the progress file with the completed pixel.
+    let mut progress: HATSIncreaseOrderProgress =
+        serde_json::from_reader(BufReader::new(&*progress_file.lock().unwrap()))?;
+
+    if let Some(pixel) = pixel {
+        progress.pixels_completed.push(pixel);
+    }
+
+    if let Some(complete) = complete {
+        progress.complete = complete;
+    }
+
+    // Rewind the progress file again and truncate it before writing the updated progress data.
+    progress_file.lock().unwrap().set_len(0).unwrap();
+    progress_file.lock().unwrap().rewind().unwrap();
+
+    serde_json::to_writer(&*progress_file.lock().unwrap(), &progress)?;
+
+    Ok(())
 }

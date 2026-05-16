@@ -40,6 +40,11 @@ class ConvertToHATSModel(BaseModel):
         Field(description="Whether the conversion is complete."),
     ] = False
 
+    reference_order: Annotated[
+        int,
+        Field(description="The reference HEALPix order."),
+    ] = 29
+
     phases: Annotated[
         list[PhaseModel],
         Field(
@@ -99,6 +104,15 @@ class ConvertToHATSModel(BaseModel):
             self.write()
 
         return phase
+
+    def get_next_phase(self) -> PhaseModel | None:
+        """Returns the next phase to run, i.e., the first phase that is not complete."""
+
+        for phase in self.phases:
+            if not phase.complete:
+                return phase
+
+        return None
 
     def update_phase(
         self,
@@ -162,6 +176,11 @@ class PhaseModel(BaseModel):
     max_rows_per_pixel: Annotated[
         int | None,
         Field(description="The maximum number of rows per pixel, if applicable."),
+    ] = None
+
+    max_kilobytes_per_pixel: Annotated[
+        int | None,
+        Field(description="The maximum number of kilobytes per pixel, if applicable."),
     ] = None
 
     keep_lower_order_directories: Annotated[

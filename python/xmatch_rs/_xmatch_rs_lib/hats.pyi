@@ -18,13 +18,13 @@ def hats_increase_order(
     n_workers: int | None,
     progress_file: str | None,
     keep_initial_order_directories: bool,
-) -> None:
+) -> list[int]:
     """Repartitions a HATS dataset increasing the HEALPix order.
 
     Given a HATS dataset, reads the pixels at the specified ``order_0`` depth and,
     for a given list of pixels, repartitions the pixels to a higher HEALPix order
     ``order_1``. The resulting pixels are written to the original dataset directory
-    under ``Noder=order_1``.
+    under ``Norder=order_1``.
 
     Parameters
     ----------
@@ -41,7 +41,7 @@ def hats_increase_order(
         The maximum number of rows per pixel. If :obj:`None`, no limit is applied.
     max_kilobytes_per_pixel
         The maximum number of kilobytes per pixel (i.e., of the
-        ``Norder=<order_0>/Dir=?/Npixel=?`` directory). If :obj:`None`,
+        ``Norder=<order_0>/Dir=?/Npix=?`` directory). If :obj:`None`,
         no limit is applied.
     n_workers
         The number of workers to use. If :obj:`None`, uses half the available CPU cores.
@@ -53,6 +53,11 @@ def hats_increase_order(
     keep_initial_order_directories
         If ``True``, the original ``Norder=order_0`` directories are not deleted
         after the operation.
+
+    Returns
+    -------
+    list[int]
+        The list of pixels that were re-partitioned.
 
     """
     ...

@@ -19,7 +19,7 @@ from xmatch_rs.schema import Schema
 
 
 if TYPE_CHECKING:
-    from xmatch_rs.types import APPLY_CALLBACK_T, LOW_MEMORY_STRATEGY_T
+    from xmatch_rs.types import APPLY_CALLBACK_T
 
 
 class HATS:
@@ -53,15 +53,14 @@ class HATS:
         output_path: str | pathlib.Path,
         schema: Schema | str | pathlib.Path | dict | None = None,
         format: Literal["csv", "parquet"] | None = None,
-        hats_initial_order: int = 2,
-        hats_max_order: int | None = None,
-        hats_max_rows_per_pixel: int | None = None,
-        partition_max_rows_per_file: int | None = None,
-        partition_approximate_bytes_per_file: int | Literal["auto"] | None = None,
+        initial_order: int = 2,
+        reference_order: int = 29,
+        max_order: int | None = None,
+        max_rows_per_pixel: int | None = 1_000_000,
+        max_kilobytes_per_pixel: int | None = None,
+        n_workers: int | None = None,
+        dynamic_planning: bool = True,
         apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None = None,
-        low_memory_strategy: LOW_MEMORY_STRATEGY_T | None = None,
-        convert_kwargs: dict | None = None,
-        preserve_progress: bool = True,
         show_progress: bool = True,
         log: sdsstools.logger.SDSSLogger | None = None,
         quiet: bool = False,
@@ -82,36 +81,43 @@ class HATS:
         format
             The format of the output files. If not provided, it will be inferred from
             the files in ``path``.
-        hats_initial_order
+        initial_order
             The initial HEALPix order to use for partitioning the data. Defaults to 6.
-        hats_max_order
+        reference_order
+            The reference HEALPix order. A column ``_healpix_{reference_order}``
+            will be added to the dataset. This should be a relatively high order,
+            ideally higher than any reasonable spatial resolution that the dataset
+            (or any other dataset with which it will be cross-matched) can achieve.
+            Defaults to 29, which corresponds to a resolution of ~0.025 arcseconds.
+        max_order
             The maximum HEALPix order to use for partitioning the data. If not
             provided, the tiling process will continue until all pixels contain
-            fewer than ``hats_max_rows_per_file`` rows.
-        hats_max_rows_per_pixel
-            The maximum number of rows per pixel. If set to ``None``, no adaptive
+            fewer than ``max_rows_per_pixel`` rows.
+        max_rows_per_pixel
+            The maximum number of rows per pixel. If set to ``None`` (and
+            ``max_kilobytes_per_pixel`` is also ``None``), no adaptive
             tiling will be performed and the data will be partitioned using the
-            ``hats_initial_order``.
-        partition_max_rows_per_file
-            The maximum number of rows per partitioned file.
-        partition_approximate_bytes_per_file
-            The approximate number of bytes per partitioned file. Defaults to 1 GB.
+            ``initial_order``.
+        max_kilobytes_per_pixel
+            The maximum number of kilobytes per pixel. If set to ``None`` (and
+            ``max_rows_per_pixel`` is also ``None``), no adaptive
+            tiling will be performed and the data will be partitioned using the
+            ``initial_order``.
+        n_workers
+            The number of worker processes to use for the conversion. If not provided,
+            uses recommended defaults based on the system's resources. ``n_workers=1``
+            will disable multiprocessing and threading in most cases and processing
+            will be done sequentially in a single process.
+        dynamic_planning
+            If ``True``, the code will dynamically decide whether to add phases to
+            the conversion process to ensure that ``max_rows_per_pixel`` and
+            ``max_kilobytes_per_pixel`` are not exceeded. If ``False``,
+            a conversion YAML file is expected to be present in the output directory
+            and the conversion process will follow the phases defined in that file.
         apply_callback
             A callback function or list of callback functions to apply to the data
             before saving. Each callback should take a Polars LazyFrame as input
             and return a modified LazyFrame.
-        low_memory_strategy
-            The strategy to use to prevent OOM errors. Options are ``'data_page_size'``,
-            which reduces the data page size used when writing Parquet files;
-            and ``'streaming_chunk_size'``, which set a more conservative streaming
-            chunk size. A list of strategies can be provided, as well as a dictionary
-            mapping strategies to their appropriate parameters (e.g.
-            ``{'data_page_size': 512 * 1024 * 1024, 'healpix_4': None}``).
-        convert_kwargs
-            Additional keyword arguments to pass to the conversion function.
-        preserve_progress
-            If ``True``, will try to skip steps that have already been completed.
-            Otherwise, will run all the steps of the conversion process.
         show_progress
             Track conversion progress and show a progress bar. Progress tracking
             can be inaccurate. For the initial pixelation, in particular, the estimate
@@ -133,15 +139,14 @@ class HATS:
             schema=schema,
             output_path=output_path,
             format=format,
-            hats_initial_order=hats_initial_order,
-            hats_max_order=hats_max_order,
-            hats_max_rows_per_pixel=hats_max_rows_per_pixel,
-            partition_max_rows_per_file=partition_max_rows_per_file,
-            partition_approximate_bytes_per_file=partition_approximate_bytes_per_file,
+            initial_order=initial_order,
+            reference_order=reference_order,
+            max_order=max_order,
+            max_rows_per_pixel=max_rows_per_pixel,
+            max_kilobytes_per_pixel=max_kilobytes_per_pixel,
+            n_workers=n_workers,
+            dynamic_planning=dynamic_planning,
             apply_callback=apply_callback,
-            convert_kwargs=convert_kwargs,
-            preserve_progress=preserve_progress,
-            low_memory_strategy=low_memory_strategy,
             show_progress=show_progress,
             log=log,
             quiet=quiet,
