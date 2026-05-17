@@ -654,7 +654,11 @@ def get_dataset_completion_df(path: pathlib.Path) -> polars.DataFrame:
 
     lf = polars.scan_parquet(dataset_path)
 
-    n_rows = lf.group_by(["Norder", "Npix"]).agg(n_rows=polars.count()).collect()
+    n_rows = (
+        lf.group_by(["Norder", "Npix"])
+        .agg(n_rows=polars.len())
+        .collect(engine="streaming")
+    )
     assert isinstance(n_rows, polars.DataFrame)
 
     pixel_dirs = list(dataset_path.glob("Norder=*/Dir=*/Npix=*"))
