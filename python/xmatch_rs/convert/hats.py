@@ -588,7 +588,6 @@ def _monitor_progress(progress_file: pathlib.Path | None, log: SDSSLogger) -> No
                 except json.JSONDecodeError:
                     # In case we are reading the file as it's being written
                     # and it's not valid JSON yet, we just wait and try again.
-                    log.error("Error decoding JSON from progress file.")
                     time.sleep(2)
                     continue
 
