@@ -78,7 +78,7 @@ def hats_cli():
 @cloup.option(
     "--schema",
     "-s",
-    type=cloup.Path(exists=True, dir_okay=False, path_type=pathlib.Path),
+    type=str,
     default=None,
     help=(
         "Path to a catalogue schema YAML file, or the name of an internally "
