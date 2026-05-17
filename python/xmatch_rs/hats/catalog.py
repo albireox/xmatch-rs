@@ -402,7 +402,7 @@ def _run_hats_min_order_phase(
     )
 
     # The output path for the Norder hive files, following the HATS convention.
-    output_path = model.collection_path / "catalog" / "dataset"
+    output_path = model.catalog_path / "dataset"
     output_path.mkdir(parents=True, exist_ok=True)
 
     with Timer() as timer:
@@ -493,7 +493,7 @@ def _run_hats_increase_order(
         log.info(f"Phase {phase_name!r} already completed. Skipping.")
         return []
 
-    dataset_path = get_dataset_path(model.collection_path / "catalog")
+    dataset_path = get_dataset_path(model.catalog_path)
     order_0_path = dataset_path / f"Norder={order_0}"
     if not order_0_path.exists():
         raise ValueError(f"Cannot find directory Norder={order_0} at {order_0_path!r}.")
@@ -507,7 +507,7 @@ def _run_hats_increase_order(
 
     # The re-partitioning is fully implemented in Rust. We run the progress monitoring
     # in a different process (not a differet thread since PyO3 blocks the GIL).
-    progress_file = model.collection_path / "catalog" / f"{phase_name}_progress.json"
+    progress_file = model.catalog_path / f"{phase_name}_progress.json"
 
     _monitor_process = multiprocessing.Process(
         target=_monitor_progress,
