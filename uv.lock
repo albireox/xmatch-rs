@@ -189,6 +189,18 @@ wheels = [
 ]
 
 [[package]]
+name = "cloup"
+version = "3.0.9"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f9/64/7f0a66021ff81d51859c66adc13f3c71f0306c2f8dfb9877a0694cbada05/cloup-3.0.9.tar.gz", hash = "sha256:519f524d3c64040e49a0866b5fc0bfd6af3eac0d3d6a4b2b50b33ab0247db2d7", size = 229896, upload-time = "2026-04-04T03:53:54.182Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/77/15/435bb5a24e3a2dc8c26afedab0c6f0cf4291c66fb99509c168c38eb81135/cloup-3.0.9-py2.py3-none-any.whl", hash = "sha256:c761ef4e975454335d50c0e1eb83595a932735aac06e8955b3ced774bc62ae7b", size = 54724, upload-time = "2026-04-04T03:53:52.909Z" },
+]
+
+[[package]]
 name = "colorama"
 version = "0.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -1575,8 +1587,9 @@ wheels = [
 
 [[package]]
 name = "xmatch-rs"
-source = { editable = "." }
+source = { virtual = "." }
 dependencies = [
+    { name = "cloup" },
     { name = "filelock" },
     { name = "polars" },
     { name = "pydantic" },
@@ -1609,6 +1622,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cloup", specifier = ">=3.0.9" },
     { name = "filelock", specifier = ">=3.25.2" },
     { name = "polars", specifier = ">=1.39.2" },
     { name = "pydantic", specifier = ">=2.12.5" },

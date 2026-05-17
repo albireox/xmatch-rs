@@ -129,7 +129,8 @@ def convert_to_hats(
     log
         An optional logger to use for logging the conversion process.
     quiet
-        If ``True``, suppresses logging output. Defaults to ``False``.
+        If ``True``, suppresses logging output. Defaults to ``False``. Ignored if
+        a logger is provided via the ``log`` parameter.
 
     """
 
