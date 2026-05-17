@@ -249,7 +249,7 @@ fn list_pixels_to_increase_order(
             .filter(col("count").gt(lit(max_rows_per_pixel as i64)))
             .select([col("Npix")])
             .sort(["Npix"], Default::default())
-            .collect()?;
+            .collect_with_engine(Engine::Streaming)?;
 
         let max_rows_pixels = lf_pixels
             .column("Npix")?
@@ -381,7 +381,7 @@ fn process_pixel(
             })),
             UnifiedSinkArgs::default(),
         )?
-        .collect()?;
+        .collect_with_engine(Engine::Streaming)?;
 
     if !keep_initial_order_directories {
         // Remove the original pixel directory for order_0.

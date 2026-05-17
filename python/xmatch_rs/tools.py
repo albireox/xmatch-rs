@@ -31,7 +31,7 @@ __all__: list[str] = [
 def lazy_frame_row_count(lf: polars.LazyFrame) -> int:
     """Returns the number of rows in a lazy frame."""
 
-    return lf.select(polars.count()).collect().item()  # type: ignore
+    return lf.select(polars.len()).collect(engine="streaming").item()  # type: ignore
 
 
 def get_polars_dtype_from_string(dtype_str: str):
