@@ -9,18 +9,17 @@
 from __future__ import annotations
 
 import pathlib
-import warnings
 
 from typing import Literal
 
 import xmatch_rs
 from xmatch_rs.hats.models import HATSPropertiesModel
-from xmatch_rs.hats.object import get_dataset_completion_df, get_dataset_nrows
+from xmatch_rs.hats.object import get_dataset_df, get_dataset_nrows
 from xmatch_rs.schema import Schema
 from xmatch_rs.tools import get_current_time
 
 
-__all__: list[str] = ["HATSProperties", "create_properties"]
+__all__: list[str] = ["HATSProperties", "create_properties", "create_partition_info"]
 
 
 class HATSProperties:
@@ -59,8 +58,12 @@ class HATSProperties:
 
         self.path = pathlib.Path(path)
 
-        if not self.path.name == "properties":
-            raise ValueError("The path filename must be 'properties'.")
+        if self.path.name not in [
+            "properties",
+            "collection.properties",
+            "hats.properties",
+        ]:
+            raise ValueError("Invalid file name for a properties file.")
 
         if not self.path.exists():
             if obs_collection is None or dataproduct_type is None:
@@ -132,19 +135,12 @@ def create_properties(
 
         path = object_path / "properties"
     elif dataproduct_type == "collection":
-        path = collection_path / "properties"
+        path = collection_path / "collection.properties"
     else:
         raise NotImplementedError(f"Data type {dataproduct_type!r} is not supported.")
 
-    if path.exists():
-        if overwrite:
-            warnings.warn(
-                f"The properties file {path!s} already exists. "
-                "Some fields may be overwritten.",
-                UserWarning,
-            )
-        else:
-            raise ValueError(f"The properties file {path!s} already exists.")
+    if path.exists() and not overwrite:
+        raise ValueError(f"The properties file {path!s} already exists.")
 
     obs_collection = schema.schema.catalogue_name
 
@@ -163,10 +159,10 @@ def create_properties(
 
         hats_nrows = get_dataset_nrows(object_path)
 
-        completion_df = get_dataset_completion_df(object_path, include_size=True)
-        hats_order = completion_df["Norder"].max()
-        hats_max_rows = completion_df["n_rows"].max()
-        hats_estsize = completion_df["size_kb"].sum()
+        dataset_df = get_dataset_df(object_path, include_size=True)
+        hats_order = dataset_df["Norder"].max()
+        hats_max_rows = dataset_df["n_rows"].max()
+        hats_estsize = dataset_df["size_kb"].sum()
     else:
         hats_col_ra = None
         hats_col_dec = None
@@ -198,3 +194,38 @@ def create_properties(
         hats_version=hats_version,
     )
     properties.write(overwrite=overwrite)
+
+
+def create_partition_info(
+    dataproduct_type: Literal["object", "margin"],
+    dataset_path: str | pathlib.Path,
+    overwrite: bool = False,
+):
+    """Creates the partition info file for the given product.
+
+    Parameters
+    ----------
+    dataproduct_type
+        The type of HATS product (e.g., "object", "margin").
+    dataset_path
+        The path to the HATS dataset.
+    overwrite
+        Whether to overwrite the partition info file if it already exists.
+
+    """
+
+    if dataproduct_type not in ["object", "margin"]:
+        raise NotImplementedError(f"Data type {dataproduct_type!r} is not supported.")
+
+    dataset_path = pathlib.Path(dataset_path)
+    if not dataset_path.exists():
+        raise ValueError(f"The dataset path {dataset_path!r} does not exist.")
+
+    partition_info_path = dataset_path / "partition_info.csv"
+    if partition_info_path.exists() and not overwrite:
+        raise ValueError(f"The file {partition_info_path!r} already exists.")
+
+    data = get_dataset_df(dataset_path, include_size=False)
+    data = data.select(["Norder", "Npix"]).sort(["Norder", "Npix"])
+
+    data.write_csv(partition_info_path)

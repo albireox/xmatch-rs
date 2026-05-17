@@ -51,7 +51,7 @@ __all__: list[str] = [
     "convert_to_hats_object_catalogue",
     "get_dataset_nrows",
     "check_completion",
-    "get_dataset_completion_df",
+    "get_dataset_df",
     "get_directory_size",
     "get_dataset_path",
 ]
@@ -673,10 +673,7 @@ def get_dataset_path(base_path: pathlib.Path) -> pathlib.Path:
     return dataset_path
 
 
-def get_dataset_completion_df(
-    path: pathlib.Path,
-    include_size: bool = True,
-) -> polars.DataFrame:
+def get_dataset_df(path: pathlib.Path, include_size: bool = True) -> polars.DataFrame:
     """Returns a DataFrame with the number of rows and size in Kb for each pixel."""
 
     dataset_path = get_dataset_path(path)
@@ -751,7 +748,7 @@ def check_completion(
 
     dataset_path = get_dataset_path(dataset_path)
 
-    data = get_dataset_completion_df(
+    data = get_dataset_df(
         dataset_path,
         include_size=max_kilobytes_per_pixel is not None,
     )

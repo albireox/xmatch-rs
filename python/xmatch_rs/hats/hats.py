@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Literal
 
 import sdsstools.logger
 
-from xmatch_rs.hats.metadata import create_properties
+from xmatch_rs.hats.metadata import create_partition_info, create_properties
 from xmatch_rs.hats.object import convert_to_hats_object_catalogue
 from xmatch_rs.schema import Schema
 from xmatch_rs.tools import get_xmatch_rs_logger
@@ -195,5 +195,13 @@ class HATS:
             overwrite=overwrite,
         )
         log.info(f"Collection properties file created at {collection_path!s}.")
+
+        # Add the partition info file for the object catalogue.
+        create_partition_info(
+            "object",
+            collection_path / "object",
+            overwrite=overwrite,
+        )
+        log.info("Object catalogue partition info file created.")
 
         return cls(pathlib.Path(collection_path))
