@@ -49,10 +49,10 @@ if TYPE_CHECKING:
     from xmatch_rs.types import APPLY_CALLBACK_T, DATA_PATH_T
 
 
-__all__: list[str] = ["convert_to_hats"]
+__all__: list[str] = ["convert_to_hats_catalog"]
 
 
-def convert_to_hats(
+def convert_to_hats_catalog(
     data_path: DATA_PATH_T,
     collection_path: str | pathlib.Path,
     schema: Schema | str | pathlib.Path | dict | None = None,
@@ -69,7 +69,12 @@ def convert_to_hats(
     log: SDSSLogger | None = None,
     quiet: bool = False,
 ) -> None:
-    """Converts a dataset to the HATS format.
+    """Converts a dataset to a catalog in HATS format.
+
+    This function creates the structure of a HATS collection but does not populate
+    the metadata files for the collection or catalog. Use
+    :obj:`~xmatch_rs.hats.HATS.convert_to_hats` for a higher-level function
+    that also creates the metadata files.
 
     Parameters
     ----------
@@ -161,19 +166,24 @@ def convert_to_hats(
         )
         n_workers = None
 
+    # Create the catalog and dataset directories.
+    catalog_path = collection_path / "catalog"
+    catalog_path.mkdir(parents=True, exist_ok=True)
+
+    dataset_path = catalog_path / "dataset"
+    dataset_path.mkdir(parents=True, exist_ok=True)
+
     # Try to load the _convert.yaml file or create a new instance.
-    if (collection_path / "_convert.yaml").exists():
-        log.info(f"Loading _convert.yaml from {collection_path!s}.")
-        convert_dict = read_yaml_file(
-            collection_path / "_convert.yaml", return_class=dict
-        )
+    if (catalog_path / "_convert.yaml").exists():
+        log.info(f"Loading _convert.yaml from {catalog_path!s}.")
+        convert_dict = read_yaml_file(catalog_path / "_convert.yaml", return_class=dict)
         convert_model = ConvertToHATSModel.model_validate(convert_dict)
         if schema is not None:
             convert_model.dataset_schema = schema.schema
     else:
         if not dynamic_planning:
             raise FileNotFoundError(
-                f"No _convert.yaml file found in {collection_path!r} and "
+                f"No _convert.yaml file found in {catalog_path!r} and "
                 "dynamic_planning is False. Please provide a conversion model "
                 "or set dynamic_planning to True.",
             )
@@ -196,7 +206,7 @@ def convert_to_hats(
 
         convert_model = ConvertToHATSModel(
             dataset_schema=schema.schema,
-            collection_path=collection_path,
+            catalog_path=catalog_path,
             complete=False,
             reference_order=reference_order,
             phases=[healpix_min_order_model],
@@ -207,13 +217,6 @@ def convert_to_hats(
     if convert_model.complete:
         log.info("Conversion to HATS is already complete. Nothing left to do.")
         return
-
-    # Create the catalog and dataset directories.
-    catalog_path = collection_path / "catalog"
-    catalog_path.mkdir(parents=True, exist_ok=True)
-
-    dataset_path = catalog_path / "dataset"
-    dataset_path.mkdir(parents=True, exist_ok=True)
 
     while not convert_model.complete:
         # Get next phase to run.

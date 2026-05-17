@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Literal
 
 import sdsstools.logger
 
-from xmatch_rs.convert.hats import convert_to_hats
+from xmatch_rs.hats.catalog import convert_to_hats_catalog
 from xmatch_rs.schema import Schema
 
 
@@ -31,8 +31,7 @@ class HATS:
         Parameters
         ----------
         path
-            The path to a dataset structured such that it follows the
-            HATS specification.
+            The path to a HATS collection.
 
         """
 
@@ -136,7 +135,7 @@ class HATS:
 
         """
 
-        convert_to_hats(
+        convert_to_hats_catalog(
             data_path=data_path,
             schema=schema,
             collection_path=collection_path,
