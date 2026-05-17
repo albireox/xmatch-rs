@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-xmatch_rs = "xmatch_rs.cli:xmatch_rs_cli"
+xmatch-rs = "xmatch_rs.cli:xmatch_rs_cli"
 
 [dependency-groups]
 dev = [
