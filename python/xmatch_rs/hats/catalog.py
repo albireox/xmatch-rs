@@ -31,7 +31,7 @@ from rich.progress import (
 from sdsstools import Timer, read_yaml_file
 
 from xmatch_rs import console
-from xmatch_rs._xmatch_rs_lib.hats import hats_increase_order
+from xmatch_rs._xmatch_rs_lib.hats import hats_repartition
 from xmatch_rs.convert import (
     PhaseModel,
     convert_csv_to_parquet,
@@ -369,7 +369,7 @@ def _run_hats_healpix_phase(
     else:
         # Re-partition from order_0 to order_1.
         assert order_1 is not None, "healpix_order_1 must be set for re-partitioning."
-        _run_hats_increase_order(
+        _run_hats_repartition(
             model=model,
             phase_name=phase_name,
             order_0=order_0,
@@ -466,7 +466,7 @@ def _run_hats_min_order_phase(
         model.update_phase(phase_name, complete=True)
 
 
-def _run_hats_increase_order(
+def _run_hats_repartition(
     model: ConvertToHATSModel,
     phase_name: str,
     order_0: int,
@@ -524,7 +524,7 @@ def _run_hats_increase_order(
     # Now we call the Rust code.
     try:
         # List of pixels that were re-partitioned.
-        pixels: list[int] = hats_increase_order(
+        pixels: list[int] = hats_repartition(
             path=str(dataset_path),
             order_0=order_0,
             order_1=order_1,

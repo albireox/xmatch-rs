@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-def hats_increase_order(
+def hats_repartition(
     path: str,
     order_0: int,
     order_1: int,

@@ -25,7 +25,7 @@ fn healpix_pixel_area(order: u8, degrees: bool) -> PyResult<f64> {
 }
 
 #[pyfunction]
-fn hats_increase_order(
+fn hats_repartition(
     path: PathBuf,
     order_0: u8,
     order_1: u8,
@@ -36,16 +36,16 @@ fn hats_increase_order(
     progress_file: Option<PathBuf>,
     keep_initial_order_directories: bool,
 ) -> Result<Vec<i64>> {
-    let options = hats::HATSIncreaseOrderOptions {
+    let options = hats::HATSRepartitionOptions {
         max_rows_per_pixel,
         max_kilobytes_per_pixel,
         n_workers,
         progress_file,
         keep_initial_order_directories,
-        ..hats::HATSIncreaseOrderOptions::default()
+        ..hats::HATSRepartitionOptions::default()
     };
 
-    hats::hats_increase_order(path, order_0, order_1, pixels, options)
+    hats::hats_repartition(path, order_0, order_1, pixels, options)
 }
 
 // Define the Python module
@@ -64,13 +64,12 @@ fn xmatch_rs_pymodule(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // xmatch_rs.hats module
     let xmatch_rs_hats = PyModule::new(_py, "hats")?;
-    xmatch_rs_hats.add_function(wrap_pyfunction!(hats_increase_order, &xmatch_rs_hats)?)?;
+    xmatch_rs_hats.add_function(wrap_pyfunction!(hats_repartition, &xmatch_rs_hats)?)?;
     py_run!(
         _py,
         xmatch_rs_hats,
         "import sys; sys.modules['xmatch_rs._xmatch_rs_lib.hats'] = xmatch_rs_hats"
     );
-    xmatch_rs_hats.add_function(wrap_pyfunction!(hats_increase_order, &xmatch_rs_hats)?)?;
     m.add_submodule(&xmatch_rs_hats)?;
 
     Ok(())

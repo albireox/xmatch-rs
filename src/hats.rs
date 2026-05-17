@@ -19,8 +19,8 @@ use polars::lazy::dsl::file_provider as pl_fp;
 use polars::prelude::*;
 use serde::{Deserialize, Serialize};
 
-/// Configuration options for [`hats_increase_order`].
-pub struct HATSIncreaseOrderOptions {
+/// Configuration options for [`hats_repartition`].
+pub struct HATSRepartitionOptions {
     /// Maximum number of rows allowed per pixel before increasing order.
     ///
     /// If `None`, no automatic pixel selection based on row count is done.
@@ -51,7 +51,7 @@ pub struct HATSIncreaseOrderOptions {
     pub progress_file: Option<PathBuf>,
 }
 
-impl HATSIncreaseOrderOptions {
+impl HATSRepartitionOptions {
     /// Creates a new options object with a custom `max_rows_per_pixel` value.
     ///
     /// Other options are set to their default values.
@@ -78,9 +78,9 @@ impl HATSIncreaseOrderOptions {
     }
 }
 
-/// Progress information for the HATS increase order operation, written to the progress file.
+/// Progress information for the HATS re-partition operation, written to the progress file.
 #[derive(Debug, Serialize, Deserialize)]
-pub struct HATSIncreaseOrderProgress {
+pub struct HATSRepartitionProgress {
     pub order_0: u8,
     pub order_1: u8,
     pub pixels_to_process: Vec<i64>,
@@ -88,15 +88,15 @@ pub struct HATSIncreaseOrderProgress {
     pub complete: bool,
 }
 
-/// Increases HATS order from `order_0` to `order_1` for selected `pixels`.
+/// Re-partitions HATS pixels from order `order_0` to `order_1` for selected `pixels`.
 ///
 /// If `pixels` is `None`, candidate pixels are selected based on `options.max_rows_per_pixel`.
-pub fn hats_increase_order(
+pub fn hats_repartition(
     path: PathBuf,
     order_0: u8,
     order_1: u8,
     pixels: Option<Vec<i64>>,
-    options: HATSIncreaseOrderOptions,
+    options: HATSRepartitionOptions,
 ) -> Result<Vec<i64>> {
     let mut path = path.clone();
 
@@ -121,12 +121,12 @@ pub fn hats_increase_order(
         );
     }
 
-    // List of pixels to increase order for. If the input pixels is None, we
+    // List of pixels to re-partition. If the input pixels is None, we
     // list the pixels that have more than `options.max_rows_per_pixel` rows.
     let mut pixels = if let Some(pixels) = pixels {
         pixels
     } else {
-        list_pixels_to_increase_order(
+        list_pixels_to_repartition(
             &path,
             order_0,
             options.max_rows_per_pixel,
@@ -150,7 +150,7 @@ pub fn hats_increase_order(
                 .unwrap(),
         ));
 
-        let progress = HATSIncreaseOrderProgress {
+        let progress = HATSRepartitionProgress {
             order_0,
             order_1,
             pixels_to_process: pixels.clone(),
@@ -223,7 +223,7 @@ pub fn hats_increase_order(
 /// Lists pixel IDs that exceed the configured maximum row count or byte size.
 ///
 /// Returns an empty vector when `max_rows_per_pixel` is `None`.
-fn list_pixels_to_increase_order(
+fn list_pixels_to_repartition(
     path: &PathBuf,
     order_0: u8,
     max_rows_per_pixel: Option<usize>,
@@ -434,7 +434,7 @@ fn update_progress_file(
     progress_file.lock().unwrap().rewind().unwrap();
 
     // Update the progress file with the completed pixel.
-    let mut progress: HATSIncreaseOrderProgress =
+    let mut progress: HATSRepartitionProgress =
         serde_json::from_reader(BufReader::new(&*progress_file.lock().unwrap()))?;
 
     if let Some(pixel) = pixel {
