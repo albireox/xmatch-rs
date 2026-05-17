@@ -4060,6 +4060,7 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "anyhow",
  "cdshealpix",
+ "glob",
  "polars",
  "pyo3",
  "pyo3-polars",

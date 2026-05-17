@@ -374,6 +374,15 @@ class Schema:
 
         return schema.model_dump()
 
+    def get_primary_keys(self) -> list[str]:
+        """Returns a list of the columns that are marked as primary keys."""
+
+        return [
+            column_name
+            for column_name, column_data in self.schema.columns.items()
+            if column_data.database_params.primary_key
+        ]
+
     def get_polars_schema(
         self,
         source_columns: bool = False,

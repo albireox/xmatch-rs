@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Literal
 
 import sdsstools.logger
 
+from xmatch_rs._xmatch_rs_lib.hats import hats_rechunk
 from xmatch_rs.hats.metadata import create_partition_info, create_properties
 from xmatch_rs.hats.object import convert_to_hats_object_catalogue
 from xmatch_rs.schema import Schema
@@ -59,6 +60,9 @@ class HATS:
         max_order: int | None = None,
         max_rows_per_pixel: int | None = 1_000_000,
         max_kilobytes_per_pixel: int | None = None,
+        rechunk: bool = True,
+        max_rows_per_file: int | None = None,
+        max_kilobytes_per_file: int | None = None,
         n_workers: int | None = None,
         dynamic_planning: bool = True,
         apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None = None,
@@ -107,6 +111,21 @@ class HATS:
             ``max_rows_per_pixel`` is also ``None``), no adaptive
             tiling will be performed and the data will be partitioned using the
             ``initial_order``.
+        rechunk
+            If ``True``, the dataset will be rechunked to ensure that each file
+            contains at most ``max_rows_per_file`` rows and is approximately smaller
+            than ``max_kilobytes_per_file`` kilobytes.
+        max_rows_per_file
+            The maximum number of rows per file when rechunking. Only used if
+            ``rechunk`` is ``True``. If not provided, the original file chunks
+            created during the tiling process will be used, which ensures that
+            each file contains at most ``max_rows_per_pixel`` rows.
+        max_kilobytes_per_file
+            The maximum number of kilobytes per file when rechunking. Only used if
+            ``rechunk`` is ``True``. If not provided, the original file chunks
+            created during the tiling process will be used, which ensures that
+            each file is approximately smaller than ``max_kilobytes_per_pixel``
+            kilobytes.
         n_workers
             The number of worker processes to use for the conversion. If not provided,
             uses recommended defaults based on the system's resources. ``n_workers=1``
@@ -158,6 +177,9 @@ class HATS:
             max_order=max_order,
             max_rows_per_pixel=max_rows_per_pixel,
             max_kilobytes_per_pixel=max_kilobytes_per_pixel,
+            rechunk=rechunk,
+            max_rows_per_file=max_rows_per_file,
+            max_kilobytes_per_file=max_kilobytes_per_file,
             n_workers=n_workers,
             dynamic_planning=dynamic_planning,
             apply_callback=apply_callback,
@@ -205,3 +227,56 @@ class HATS:
         log.info("Object catalogue partition info file created.")
 
         return cls(pathlib.Path(collection_path))
+
+    def rechunk(
+        self,
+        product: str,
+        product_type: Literal["object", "margin", "index"],
+        max_rows_per_file: int | None = None,
+        max_kilobytes_per_file: int | None = None,
+    ):
+        """Rechunks a HATS product.
+
+        Parameters
+        ----------
+        product
+            The HATS product to rechunk (e.g., "object", "margin_5_arcsec").
+        product_type
+            The type of the product to rechunk. Must be one of "object", "margin", or
+            "index". Used to determine whether the dataset is organised by HEALPix
+            pixels.
+        max_rows_per_file
+            The maximum number of rows per file when rechunking. If not provided,
+            defaults to 1,000,000 rows per file when ``max_kilobytes_per_file`` is
+            provided.
+        max_kilobytes_per_file
+            The maximum number of kilobytes per file when rechunking.
+
+        """
+
+        if product_type in ["object", "margin"]:
+            product_path = self.path / product
+            is_dataset = True
+        elif product_type == "index":
+            product_path = self.path / product / "dataset" / "index"
+            is_dataset = False
+
+        if not product_path.exists():
+            raise ValueError(f"The specified product {product!s} does not exist.")
+        elif not product_path.is_dir():
+            raise ValueError(f"The specified product {product!s} is not a directory.")
+
+        if max_rows_per_file is None and max_kilobytes_per_file is None:
+            raise ValueError(
+                "At least one of max_rows_per_file or "
+                "max_kilobytes_per_file must be provided."
+            )
+
+        hats_rechunk(
+            product_path,
+            is_dataset=is_dataset,
+            max_rows_per_file=max_rows_per_file,
+            approximate_bytes_per_file=max_kilobytes_per_file * 1024
+            if max_kilobytes_per_file is not None
+            else None,
+        )

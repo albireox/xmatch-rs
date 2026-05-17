@@ -31,7 +31,7 @@ from rich.progress import (
 from sdsstools import Timer, read_yaml_file
 
 from xmatch_rs import console
-from xmatch_rs._xmatch_rs_lib.hats import hats_repartition
+from xmatch_rs._xmatch_rs_lib.hats import hats_rechunk, hats_repartition
 from xmatch_rs.convert import convert_csv_to_parquet, convert_to_parquet
 from xmatch_rs.hats.models import ConvertToHATSModel, PhaseModel
 from xmatch_rs.hats.providers import (
@@ -67,6 +67,9 @@ def convert_to_hats_object_catalogue(
     max_order: int | None = None,
     max_rows_per_pixel: int | None = 1_000_000,
     max_kilobytes_per_pixel: int | None = None,
+    rechunk: bool = True,
+    max_rows_per_file: int | None = 1_000_000,
+    max_kilobytes_per_file: int | None = None,
     apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None = None,
     n_workers: int | None = None,
     dynamic_planning: bool = True,
@@ -118,6 +121,21 @@ def convert_to_hats_object_catalogue(
         ``max_rows_per_pixel`` is also ``None``), no adaptive
         tiling will be performed and the data will be partitioned using the
         ``initial_order``.
+    rechunk
+        If ``True``, the dataset will be rechunked to ensure that each file
+        contains at most ``max_rows_per_file`` rows and is approximately smaller
+        than ``max_kilobytes_per_file`` kilobytes.
+    max_rows_per_file
+        The maximum number of rows per file when rechunking. Only used if
+        ``rechunk`` is ``True``. If not provided, the original file chunks
+        created during the tiling process will be used, which ensures that
+        each file contains at most ``max_rows_per_pixel`` rows.
+    max_kilobytes_per_file
+        The maximum number of kilobytes per file when rechunking. Only used if
+        ``rechunk`` is ``True``. If not provided, the original file chunks
+        created during the tiling process will be used, which ensures that
+        each file is approximately smaller than ``max_kilobytes_per_pixel``
+        kilobytes.
     n_workers
         The number of worker processes to use for the conversion. If not provided,
         uses recommended defaults based on the system's resources. ``n_workers=1``
@@ -185,6 +203,7 @@ def convert_to_hats_object_catalogue(
         log.info(f"Loading _convert.yaml from {object_path!s}.")
         convert_dict = read_yaml_file(object_path / "_convert.yaml", return_class=dict)
         convert_model = ConvertToHATSModel.model_validate(convert_dict)
+        convert_model.object_path = object_path
         if schema is not None:
             convert_model.catalogue_schema = schema.schema
     else:
@@ -218,7 +237,8 @@ def convert_to_hats_object_catalogue(
             reference_order=reference_order,
             phases=[healpix_min_order_model],
         )
-        convert_model.write()
+
+    convert_model.write()
 
     # Check if conversion is complete.
     if convert_model.complete:
@@ -238,6 +258,25 @@ def convert_to_hats_object_catalogue(
             )
 
             if result:
+                if rechunk:
+                    # Check if we have already rechunked the data.
+                    rechunk_phase = convert_model.get_phase("rechunk_dataset")
+                    if not rechunk_phase or not rechunk_phase.complete:
+                        log.debug("Adding rechunking phase.")
+                        convert_model.add_phase(
+                            PhaseModel(
+                                name="rechunk_dataset",
+                                type="rechunk",
+                                description=(
+                                    "Rechunk the dataset files to a maximum "
+                                    "number of rows and KB."
+                                ),
+                                max_rows_per_file=max_rows_per_file,
+                                max_kilobytes_per_file=max_kilobytes_per_file,
+                            )
+                        )
+                        continue
+
                 log.info("Conversion to HATS object catalogue is complete.")
                 convert_model.complete = True
                 convert_model.write()
@@ -268,6 +307,23 @@ def convert_to_hats_object_catalogue(
                 show_progress=show_progress,
                 n_workers=n_workers,
             )
+        elif phase.type == "rechunk":
+            log.info("Rechunking dataset files. This may take a while.")
+            hats_rechunk(
+                path=str(dataset_path),
+                max_rows_per_file=phase.max_rows_per_file,
+                approximate_bytes_per_file=phase.max_kilobytes_per_file * 1024
+                if phase.max_kilobytes_per_file is not None
+                else None,
+                is_dataset=True,
+            )
+
+            # Nothing left to do after this so mark the phase and conversion complete.
+            log.info("Rechunking complete.")
+            convert_model.update_phase(phase.name, complete=True)
+            convert_model.complete = True
+            convert_model.write()
+            return convert_model
         else:
             raise ValueError(f"Unknown phase type {phase.type!r}.")
 
@@ -334,7 +390,10 @@ def _run_hats_healpix_phase(
     """Runs the first phase of the HATS conversion: convert to a fixed tiling order."""
 
     schema = model.get_schema()
+
     phase = model.get_phase(phase_name)
+    if not phase:
+        raise ValueError(f"Phase {phase_name!r} not found in conversion model.")
 
     if phase.complete:
         log.info(f"Phase {phase_name!r} already completed. Skipping.")
@@ -497,6 +556,8 @@ def _run_hats_repartition(
     log = log or get_xmatch_rs_logger()
 
     phase = model.get_phase(phase_name)
+    if not phase:
+        raise ValueError(f"Phase {phase_name!r} not found in conversion model.")
 
     if phase.complete:
         log.info(f"Phase {phase_name!r} already completed. Skipping.")

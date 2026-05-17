@@ -76,14 +76,14 @@ class ConvertToHATSModel(BaseModel):
 
         return [phase.name for phase in self.phases]
 
-    def get_phase(self, phase_name: str) -> PhaseModel:
+    def get_phase(self, phase_name: str) -> PhaseModel | None:
         """Returns the model for a given phase name."""
 
         for phase in self.phases:
             if phase.name == phase_name:
                 return phase
 
-        raise ValueError(f"Phase {phase_name} not found in conversion model.")
+        return None
 
     def get_schema(self) -> Schema:
         """Returns the schema of the conversion model."""
@@ -126,6 +126,9 @@ class ConvertToHATSModel(BaseModel):
         """Updates the progress model for a given phase name."""
 
         phase = self.get_phase(phase_name)
+        if phase is None:
+            raise ValueError(f"Phase {phase_name} not found in conversion model.")
+
         if complete is not None:
             phase.complete = complete
 
@@ -168,22 +171,32 @@ class PhaseModel(BaseModel):
 
     healpix_order_0: Annotated[
         int | None,
-        Field(description="The initial HEALPix order, if applicable."),
+        Field(description="The initial HEALPix order."),
     ] = None
 
     healpix_order_1: Annotated[
         int | None,
-        Field(description="The final HEALPix order, if applicable."),
+        Field(description="The final HEALPix order."),
     ] = None
 
     max_rows_per_pixel: Annotated[
         int | None,
-        Field(description="The maximum number of rows per pixel, if applicable."),
+        Field(description="The maximum number of rows per pixel."),
     ] = None
 
     max_kilobytes_per_pixel: Annotated[
         int | None,
-        Field(description="The maximum number of kilobytes per pixel, if applicable."),
+        Field(description="The maximum number of kilobytes per pixel."),
+    ] = None
+
+    max_rows_per_file: Annotated[
+        int | None,
+        Field(description="The maximum number of rows per file."),
+    ] = None
+
+    max_kilobytes_per_file: Annotated[
+        int | None,
+        Field(description="The maximum number of kilobytes per file."),
     ] = None
 
     keep_lower_order_directories: Annotated[
@@ -487,10 +500,6 @@ class HATSPropertiesModel(BaseModel):
         """Writes the properties to a YAML file in the output path."""
 
         output_path = pathlib.Path(output_path)
-        if output_path.is_file():
-            if not output_path.name == "properties":
-                raise ValueError("Output path is not named 'properties'.")
-
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         with output_path.open("w", encoding="utf-8") as f:

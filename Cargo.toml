@@ -17,6 +17,7 @@ opt-level = 3
 [dependencies]
 anyhow = "1"
 cdshealpix = "0.9.1"
+glob = "0.3.3"
 polars = { version = "0.53.0", features = ["lazy", "default", "object", "parquet", "new_streaming"] }
 pyo3 = { version = "^0.27", features = ["abi3-py311", "anyhow"] }
 pyo3-polars = { version = "0.26.0", features = ["derive", "lazy"] }

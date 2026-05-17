@@ -453,3 +453,89 @@ fn update_progress_file(
 
     Ok(())
 }
+
+pub struct HATSRechunkOptions {
+    pub is_dataset: bool,
+    pub max_rows_per_file: Option<u32>,
+    pub approximate_bytes_per_file: Option<u64>,
+}
+
+pub fn rechunk_hats_dataset(path: PathBuf, rechunk_options: HATSRechunkOptions) -> Result<()> {
+    // Check the parent directory.
+    if !path.exists() {
+        bail!("Path does not exist: {:?}", path);
+    }
+
+    // In case we have specified the top-level HATS we check if there is a
+    // "dataset" subdirectory and use it if it exists.
+    let path = if rechunk_options.is_dataset && path.join("dataset").exists() {
+        path.join("dataset")
+    } else {
+        path
+    };
+
+    if rechunk_options.is_dataset {
+        // List the Norder= directories in the dataset.
+        for entry in glob::glob(&format!("{}/Norder=*/Dir=*/Npix=*", path.display()))? {
+            match entry {
+                Ok(path) => _rechunk_path(&path, &rechunk_options)?,
+                Err(e) => bail!("Error listing pixel directories: {:?}", e),
+            }
+        }
+    } else {
+        // Just rechunk the given path.
+        _rechunk_path(&path, &rechunk_options)?;
+    }
+
+    Ok(())
+}
+
+fn _rechunk_path(path: &PathBuf, rechunk_options: &HATSRechunkOptions) -> Result<()> {
+    // Rename the original directory to a temporary name with _orig suffix.
+    let orig_path = path.with_file_name(format!(
+        "{}_orig",
+        path.file_name().unwrap().to_string_lossy()
+    ));
+    std::fs::rename(&path, &orig_path)?;
+
+    // Scan the parquet files in the original directory.
+    let path_pl = PlRefPath::new(orig_path.to_string_lossy().as_ref());
+    let lf = LazyFrame::scan_parquet(path_pl, ScanArgsParquet::default())?;
+
+    // Sink the lazyframe to new parquet files with the configured rechunking options.
+    lf.sink(
+        SinkDestination::Partitioned {
+            base_path: PlRefPath::new(path.to_string_lossy().as_ref()),
+            file_path_provider: crate::tools::file_path_provider_fn!(path_provider_part),
+            partition_strategy: PartitionStrategy::FileSize,
+            max_rows_per_file: rechunk_options.max_rows_per_file.unwrap_or(1_000_000),
+            approximate_bytes_per_file: rechunk_options
+                .approximate_bytes_per_file
+                .unwrap_or(u64::MAX),
+        },
+        FileWriteFormat::Parquet(Arc::new(ParquetWriteOptions {
+            compression: ParquetCompression::default(),
+            statistics: StatisticsOptions::default(),
+            row_group_size: None,
+            data_page_size: None,
+            key_value_metadata: None,
+            arrow_schema: None,
+            compat_level: None,
+        })),
+        UnifiedSinkArgs::default(),
+    )?
+    .collect_with_engine(Engine::Streaming)?;
+
+    // Remove the original directory with the _orig suffix.
+    std::fs::remove_dir_all(orig_path)?;
+
+    Ok(())
+}
+
+fn path_provider_part(
+    args: pl_fp::FileProviderArgs,
+) -> Result<pl_fp::FileProviderReturn, polars::error::PolarsError> {
+    let index = args.index_in_partition;
+    let file = format!("part-{:06}.parquet", index + 1);
+    return Ok(pl_fp::FileProviderReturn::Path(file));
+}

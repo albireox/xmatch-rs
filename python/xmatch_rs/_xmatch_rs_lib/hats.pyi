@@ -8,15 +8,17 @@
 
 from __future__ import annotations
 
+import pathlib
+
 def hats_repartition(
-    path: str,
+    path: str | pathlib.Path,
     order_0: int,
     order_1: int,
     pixels: list[int] | None,
     max_rows_per_pixel: int | None,
     max_kilobytes_per_pixel: int | None,
     n_workers: int | None,
-    progress_file: str | None,
+    progress_file: str | pathlib.Path | None,
     keep_initial_order_directories: bool,
 ) -> list[int]:
     """Repartitions a HATS dataset increasing the HEALPix order.
@@ -58,6 +60,36 @@ def hats_repartition(
     -------
     list[int]
         The list of pixels that were re-partitioned.
+
+    """
+    ...
+
+def hats_rechunk(
+    path: str | pathlib.Path,
+    is_dataset: bool,
+    max_rows_per_file: int | None,
+    approximate_bytes_per_file: int | None,
+) -> None:
+    """Rechunks a HATS dataset.
+
+    Given a HATS dataset, reads the pixels at the specified depth and rechunks them
+    into smaller files. The resulting pixels are written to the original dataset
+    directory under ``Norder=order``.
+
+    Parameters
+    ----------
+    path
+        The path to the HATS dataset.
+    is_dataset
+        Whether the provided path is the dataset directory (i.e., the one containing
+        the ``Norder=`` subdirectories). If ``True``, will rechunk any
+        ``Norder=*/Dir=*/Npix=*`` directory under the provided path. If ``False``,
+        will rechunk the provided path directly.
+    max_rows_per_file
+        The maximum number of rows per file. If :obj:`None`, defaults to 1 million
+        rows per file.
+    approximate_bytes_per_file
+        The approximate number of bytes per file. If :obj:`None`, no limit is applied.
 
     """
     ...
