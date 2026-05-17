@@ -30,9 +30,9 @@ class ConvertToHATSModel(BaseModel):
         Field(description="The schema to use for the conversion."),
     ]
 
-    output_path: Annotated[
+    collection_path: Annotated[
         pathlib.Path,
-        Field(description="The path where the converted file will be saved."),
+        Field(description="The path where the output HATS collection will be created."),
     ]
 
     complete: Annotated[
@@ -132,8 +132,8 @@ class ConvertToHATSModel(BaseModel):
     def write(self) -> None:
         """Writes the model to a ``_convert.yaml`` file in the output path."""
 
-        output_file = self.output_path / "_convert.yaml"
-        lock = FileLock(self.output_path / "_convert.yaml.lock")
+        output_file = self.collection_path / "_convert.yaml"
+        lock = FileLock(self.collection_path / "_convert.yaml.lock")
 
         with lock:
             with output_file.open("w") as f:

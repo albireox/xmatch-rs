@@ -72,7 +72,7 @@ def hats_cli():
     required=True,
 )
 @cloup.argument(
-    "output_path",
+    "collection_path",
     type=cloup.Path(exists=False, path_type=pathlib.Path),
 )
 @cloup.option(
@@ -166,7 +166,7 @@ def hats_cli():
 )
 def convert(
     data_path: tuple[str, ...],
-    output_path: pathlib.Path,
+    collection_path: pathlib.Path,
     schema: pathlib.Path | None,
     format: Literal["csv", "parquet"] | None,
     initial_order: int,
@@ -194,7 +194,7 @@ def convert(
 
     HATS.convert_to_hats(
         data_path=list(data_path),
-        output_path=output_path,
+        collection_path=collection_path,
         schema=schema,
         format=format,
         initial_order=initial_order,

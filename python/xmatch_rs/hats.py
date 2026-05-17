@@ -50,7 +50,7 @@ class HATS:
     def convert_to_hats(
         cls,
         data_path: list[str | pathlib.Path] | str | pathlib.Path,
-        output_path: str | pathlib.Path,
+        collection_path: str | pathlib.Path,
         schema: Schema | str | pathlib.Path | dict | None = None,
         format: Literal["csv", "parquet"] | None = None,
         initial_order: int = 2,
@@ -71,8 +71,10 @@ class HATS:
         ----------
         data_path
             The path(s) to the input dataset. Can be a single path or a list of paths.
-        output_path
-            The path where the output HATS dataset will be saved.
+        collection_path
+            The path where the output HATS collecton will be created. The resulting
+            directory structure will be ``<collection_path>/catalog/dataset/...``
+            along with the necessary metadata files.
         schema
             The schema of the input dataset. Can be a Schema object, a path to a schema
             file, or a dictionary representing the schema. If the schema is not set,
@@ -137,7 +139,7 @@ class HATS:
         convert_to_hats(
             data_path=data_path,
             schema=schema,
-            output_path=output_path,
+            collection_path=collection_path,
             format=format,
             initial_order=initial_order,
             reference_order=reference_order,
@@ -152,4 +154,4 @@ class HATS:
             quiet=quiet,
         )
 
-        return cls(pathlib.Path(output_path))
+        return cls(pathlib.Path(collection_path))

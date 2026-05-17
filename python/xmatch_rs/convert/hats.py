@@ -54,7 +54,7 @@ __all__: list[str] = ["convert_to_hats"]
 
 def convert_to_hats(
     data_path: DATA_PATH_T,
-    output_path: str | pathlib.Path,
+    collection_path: str | pathlib.Path,
     schema: Schema | str | pathlib.Path | dict | None = None,
     format: Literal["csv", "parquet"] | None = None,
     initial_order: int = 2,
@@ -75,8 +75,10 @@ def convert_to_hats(
     ----------
     data_path
         The path(s) to the dataset to be converted to HATS.
-    output_path
-        The path where the output HATS dataset will be saved.
+    collection_path
+        The path where the output HATS collecton will be created. The resulting
+        directory structure will be ``<collection_path>/catalog/dataset/...``
+        along with the necessary metadata files.
     schema
         The schema of the input dataset. Can be a Schema object, a path to a schema
         file, or a dictionary representing the schema. If the schema is not set,
@@ -144,8 +146,8 @@ def convert_to_hats(
         data_path = [str(p) for p in data_path]
 
     # Create output directory if it doesn't exist.
-    output_path = pathlib.Path(output_path)
-    output_path.mkdir(parents=True, exist_ok=True)
+    collection_path = pathlib.Path(collection_path)
+    collection_path.mkdir(parents=True, exist_ok=True)
 
     # Load the schema.
     if schema is not None and not isinstance(schema, Schema):
@@ -160,18 +162,20 @@ def convert_to_hats(
         n_workers = None
 
     # Try to load the _convert.yaml file or create a new instance.
-    if (output_path / "_convert.yaml").exists():
-        log.info(f"Loading _convert.yaml from {output_path!s}.")
-        convert_dict = read_yaml_file(output_path / "_convert.yaml", return_class=dict)
+    if (collection_path / "_convert.yaml").exists():
+        log.info(f"Loading _convert.yaml from {collection_path!s}.")
+        convert_dict = read_yaml_file(
+            collection_path / "_convert.yaml", return_class=dict
+        )
         convert_model = ConvertToHATSModel.model_validate(convert_dict)
         if schema is not None:
             convert_model.dataset_schema = schema.schema
     else:
         if not dynamic_planning:
             raise FileNotFoundError(
-                f"No _convert.yaml file found in {output_path!r} and dynamic_planning "
-                "is False. Please provide a conversion model or set dynamic_planning "
-                "to True.",
+                f"No _convert.yaml file found in {collection_path!r} and "
+                "dynamic_planning is False. Please provide a conversion model "
+                "or set dynamic_planning to True.",
             )
 
         if schema is None:
@@ -192,7 +196,7 @@ def convert_to_hats(
 
         convert_model = ConvertToHATSModel(
             dataset_schema=schema.schema,
-            output_path=output_path,
+            collection_path=collection_path,
             complete=False,
             reference_order=reference_order,
             phases=[healpix_min_order_model],
@@ -204,6 +208,13 @@ def convert_to_hats(
         log.info("Conversion to HATS is already complete. Nothing left to do.")
         return
 
+    # Create the catalog and dataset directories.
+    catalog_path = collection_path / "catalog"
+    catalog_path.mkdir(parents=True, exist_ok=True)
+
+    dataset_path = catalog_path / "dataset"
+    dataset_path.mkdir(parents=True, exist_ok=True)
+
     while not convert_model.complete:
         # Get next phase to run.
         phase = convert_model.get_next_phase()
@@ -211,7 +222,7 @@ def convert_to_hats(
         if not phase:
             log.info("No more phases to run. Checking if conversion is complete.")
             result = check_completion(
-                output_path,
+                dataset_path,
                 max_rows_per_pixel=max_rows_per_pixel,
                 max_kilobytes_per_pixel=max_kilobytes_per_pixel,
             )
@@ -255,7 +266,7 @@ def convert_to_hats(
 
         log.info("Checking if HATS conversion is complete.")
         complete = check_completion(
-            output_path,
+            dataset_path,
             max_rows_per_pixel=max_rows_per_pixel,
             max_kilobytes_per_pixel=max_kilobytes_per_pixel,
         )
@@ -388,7 +399,8 @@ def _run_hats_min_order_phase(
     )
 
     # The output path for the Norder hive files, following the HATS convention.
-    output_path = model.output_path / "dataset"
+    output_path = model.collection_path / "catalog" / "dataset"
+    output_path.mkdir(parents=True, exist_ok=True)
 
     with Timer() as timer:
         if format == "csv":
@@ -478,7 +490,7 @@ def _run_hats_increase_order(
         log.info(f"Phase {phase_name!r} already completed. Skipping.")
         return []
 
-    dataset_path = get_dataset_path(model.output_path)
+    dataset_path = get_dataset_path(model.collection_path / "catalog")
     order_0_path = dataset_path / f"Norder={order_0}"
     if not order_0_path.exists():
         raise ValueError(f"Cannot find directory Norder={order_0} at {order_0_path!r}.")
@@ -492,7 +504,7 @@ def _run_hats_increase_order(
 
     # The re-partitioning is fully implemented in Rust. We run the progress monitoring
     # in a different process (not a differet thread since PyO3 blocks the GIL).
-    progress_file = model.output_path / f"{phase_name}_progress.json"
+    progress_file = model.collection_path / "catalog" / f"{phase_name}_progress.json"
 
     _monitor_process = multiprocessing.Process(
         target=_monitor_progress,
