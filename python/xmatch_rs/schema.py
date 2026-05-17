@@ -9,10 +9,12 @@
 from __future__ import annotations
 
 import pathlib
+import warnings
 
 from typing import Annotated
 
 import polars
+import yaml
 from pydantic import BaseModel, Field
 
 from sdsstools import read_yaml_file
@@ -35,10 +37,20 @@ class SchemaModel(BaseModel):
         Field(description="Short version of the name of the catalogue."),
     ]
 
-    source_url: Annotated[
-        str | None,
+    source_catalogue_url: Annotated[
+        str,
         Field(description="A URL to the original source of the data."),
     ]
+
+    bib_reference: Annotated[
+        str | None,
+        Field(description="A bibliographic reference for the catalogue."),
+    ] = None
+
+    bib_reference_url: Annotated[
+        str | None,
+        Field(description="A URL to a bibliographic reference for the catalogue."),
+    ] = None
 
     comments: Annotated[
         str | None,
@@ -48,6 +60,39 @@ class SchemaModel(BaseModel):
     source_catalogue_params: Annotated[
         SourceCatalogueParamsModel | None,
         Field(description="Parameters to read the original source data."),
+    ] = None
+
+    ra_column: Annotated[
+        str | None,
+        Field(description="The name of the RA column in the catalogue (in degrees)."),
+    ] = None
+
+    dec_column: Annotated[
+        str | None,
+        Field(description="The name of the Dec column in the catalogue."),
+    ] = None
+
+    pmra_column: Annotated[
+        str | None,
+        Field(description="The name of the proper motion in RA column."),
+    ] = None
+
+    pmra_is_cosdec: Annotated[
+        bool,
+        Field(
+            description="Whether the proper motion in RA column has already been "
+            "deprojected by multiplying by cos(dec)."
+        ),
+    ] = True
+
+    pmdec_column: Annotated[
+        str | None,
+        Field(description="The name of the proper motion in Dec column."),
+    ] = None
+
+    coordinate_epoch: Annotated[
+        float | None,
+        Field(description="The epoch of the coordinates as Julian year."),
     ] = None
 
     columns: Annotated[
@@ -133,6 +178,16 @@ class SourceCatalogueParamsColumnModel(BaseModel):
         ),
     ] = None
 
+    apply_functions: Annotated[
+        list[str] | None,
+        Field(
+            description="A list of functions to apply to the column after reading it "
+            "from the original source data. The functions are applied in the order "
+            "they are listed. See the xmatch_rs.convert.callbacks module for available "
+            "functions."
+        ),
+    ] = None
+
 
 class DatabaseParamsModel(BaseModel):
     """Model representing database constraints and other parameters for a column."""
@@ -214,6 +269,45 @@ class Schema:
 
         self.schema: SchemaModel = SchemaModel(**self._raw_schema)
 
+    def get_ra_dec_columns(self) -> tuple[str, str]:
+        """Returns the names of the RA and Dec columns in the schema.
+
+        Returns
+        -------
+        ra_column
+            The name of the RA column.
+        dec_column
+            The name of the Dec column.
+
+        """
+
+        ra_column = self.schema.ra_column
+        dec_column = self.schema.dec_column
+
+        if ra_column is None:
+            if "ra" in self.schema.columns:
+                ra_column = "ra"
+                warnings.warn(
+                    "RA column not specified in schema, "
+                    "but 'ra' column exists. Using 'ra' as the RA column.",
+                    UserWarning,
+                )
+            else:
+                raise ValueError("RA column not specified in schema.")
+
+        if dec_column is None:
+            if "dec" in self.schema.columns:
+                dec_column = "dec"
+                warnings.warn(
+                    "Dec column not specified in schema, "
+                    "but 'dec' column exists. Using 'dec' as the Dec column.",
+                    UserWarning,
+                )
+            else:
+                raise ValueError("Dec column not specified in schema.")
+
+        return ra_column, dec_column
+
     def read_schema(
         self,
         schema_file: str | pathlib.Path,
@@ -246,6 +340,22 @@ class Schema:
         schema_data = read_yaml_file(schema_path, return_class=dict)
 
         return schema_data, schema_path
+
+    def write_schema(self, path: str | pathlib.Path) -> None:
+        """Writes the schema to a YAML file.
+
+        Parameters
+        ----------
+        path
+            The path where the schema file will be written.
+
+        """
+
+        path = pathlib.Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(path, "w") as f:
+            yaml.dump(self._raw_schema, f, sort_keys=False, indent=2)
 
     def to_dict(self, only_source_columns: bool = False) -> dict:
         """Returns the schema as a dictionary.

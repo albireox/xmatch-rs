@@ -1,0 +1,200 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+#
+# @Author: José Sánchez-Gallego (gallegoj@uw.edu)
+# @Date: 2026-05-17
+# @Filename: metadata.py
+# @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
+
+from __future__ import annotations
+
+import pathlib
+import warnings
+
+from typing import Literal
+
+import xmatch_rs
+from xmatch_rs.hats.models import HATSPropertiesModel
+from xmatch_rs.hats.object import get_dataset_completion_df, get_dataset_nrows
+from xmatch_rs.schema import Schema
+from xmatch_rs.tools import get_current_time
+
+
+__all__: list[str] = ["HATSProperties", "create_properties"]
+
+
+class HATSProperties:
+    """A class to represent the properties metadata file for a HATS product."""
+
+    def __init__(
+        self,
+        path: str | pathlib.Path,
+        obs_collection: str | None = None,
+        dataproduct_type: Literal[
+            "object",
+            "margin",
+            "association",
+            "index",
+            "collection",
+        ]
+        | None = None,
+        **fields,
+    ):
+        """Initializes the HATS properties.
+
+        Parameters
+        ----------
+        path
+            The path to the HATS properties file.
+        obs_collection
+            The short name of the original dataset (e.g., 2MASS). Required if the
+            properties file does not exist.
+        dataproduct_type
+            The type of HATS product (e.g., "object", "margin", "association",
+            "index", "collection"). Required if the properties file does not exist.
+        fields
+            Any additional fields to add to the properties file.
+
+        """
+
+        self.path = pathlib.Path(path)
+
+        if not self.path.name == "properties":
+            raise ValueError("The path filename must be 'properties'.")
+
+        if not self.path.exists():
+            if obs_collection is None or dataproduct_type is None:
+                raise ValueError(
+                    "The properties file does not exist. obs_collection and "
+                    "dataproduct_type are required to create it."
+                )
+            self.model = HATSPropertiesModel(
+                obs_collection=obs_collection,
+                dataproduct_type=dataproduct_type,
+                **fields,
+            )
+        else:
+            try:
+                model = HATSPropertiesModel.read(self.path)
+            except Exception as err:
+                raise ValueError("Failed to read properties file.") from err
+
+            model_dump = model.model_dump()
+
+            if obs_collection is not None:
+                model_dump["obs_collection"] = obs_collection
+
+            if dataproduct_type is not None:
+                model_dump["dataproduct_type"] = dataproduct_type
+
+            for key, value in fields.items():
+                model_dump[key] = value
+
+            self.model = HATSPropertiesModel(**model_dump)
+
+    def write(self, overwrite: bool = False):
+        """Writes the properties file to disk."""
+
+        if self.path.exists() and not overwrite:
+            raise ValueError(f"The properties file {self.path!r} already exists.")
+
+        self.model.write(self.path)
+
+
+def create_properties(
+    dataproduct_type: Literal[
+        "object",
+        "margin",
+        "association",
+        "index",
+        "collection",
+    ],
+    collection_path: str | pathlib.Path,
+    schema: Schema | None = None,
+    overwrite: bool = False,
+):
+    """Creates a properties file for the corresponding HATS data product."""
+
+    collection_path = pathlib.Path(collection_path)
+    if not collection_path.exists():
+        raise ValueError(f"The collection path {collection_path!r} does not exist.")
+
+    if schema is None:
+        schema_path = collection_path / "_schema.yaml"
+        if not schema_path.exists():
+            raise ValueError(f"The schema path {schema_path!s} does not exist.")
+        schema = Schema(schema_path)
+
+    if dataproduct_type == "object":
+        object_path = collection_path / "object"
+        if not object_path.exists():
+            raise ValueError(f"The object path {object_path!s} does not exist.")
+
+        path = object_path / "properties"
+    elif dataproduct_type == "collection":
+        path = collection_path / "properties"
+    else:
+        raise NotImplementedError(f"Data type {dataproduct_type!r} is not supported.")
+
+    if path.exists():
+        if overwrite:
+            warnings.warn(
+                f"The properties file {path!s} already exists. "
+                "Some fields may be overwritten.",
+                UserWarning,
+            )
+        else:
+            raise ValueError(f"The properties file {path!s} already exists.")
+
+    obs_collection = schema.schema.catalogue_name
+
+    hats_builder = f"xmatch-rs v{xmatch_rs.__version__}"
+    hats_creation_date = get_current_time(format="isot", timezone="UTC")
+    hats_version = "1.0"
+
+    hats_primary_table_url = schema.schema.source_catalogue_url
+    bib_reference = schema.schema.bib_reference
+    bib_reference_url = schema.schema.bib_reference_url
+
+    if dataproduct_type == "object":
+        hats_col_ra, hats_col_dec = schema.get_ra_dec_columns()
+        hats_coordinate_epoch = schema.schema.coordinate_epoch
+        hats_frame = "equatorial"
+
+        hats_nrows = get_dataset_nrows(object_path)
+
+        completion_df = get_dataset_completion_df(object_path, include_size=True)
+        hats_order = completion_df["Norder"].max()
+        hats_max_rows = completion_df["n_rows"].max()
+        hats_estsize = completion_df["size_kb"].sum()
+    else:
+        hats_col_ra = None
+        hats_col_dec = None
+        hats_frame = None
+        hats_coordinate_epoch = None
+        hats_nrows = None
+        hats_order = None
+        hats_max_rows = None
+        hats_estsize = None
+
+    properties = HATSProperties(
+        path=path,
+        header=f"HATS {dataproduct_type} properties",
+        obs_collection=obs_collection,
+        dataproduct_type=dataproduct_type,
+        hats_primary_table_url=hats_primary_table_url,
+        bib_reference=bib_reference,
+        bib_reference_url=bib_reference_url,
+        hats_col_ra=hats_col_ra,
+        hats_col_dec=hats_col_dec,
+        hats_coordinate_epoch=hats_coordinate_epoch,
+        hats_frame=hats_frame,
+        hats_nrows=hats_nrows,
+        hats_order=str(hats_order) if hats_order is not None else None,
+        hats_max_rows=str(hats_max_rows) if hats_max_rows is not None else None,
+        hats_estsize=str(int(hats_estsize)) if hats_estsize is not None else None,
+        hats_creation_date=hats_creation_date,
+        hats_builder=hats_builder,
+        hats_version=hats_version,
+    )
+    properties.write(overwrite=overwrite)

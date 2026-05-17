@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import datetime
 import glob
 import pathlib
 import re
@@ -25,6 +26,7 @@ __all__: list[str] = [
     "is_glob_pattern",
     "get_xmatch_rs_logger",
     "parse_path",
+    "get_current_time",
 ]
 
 
@@ -149,3 +151,17 @@ def parse_path(
         paths = [ff for ff in paths if re.match(rf".*{extension}$", ff.name)]
 
     return paths
+
+
+def get_current_time(format: str = "isot", timezone: str = "UTC") -> str:
+    """Returns the current time as a string in the specified format and timezone."""
+
+    if format.lower() != "isot":
+        raise NotImplementedError(f"Time format '{format}' is not supported.")
+
+    if timezone.upper() != "UTC":
+        raise NotImplementedError(f"Timezone '{timezone}' is not supported.")
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    return now.strftime("%Y-%m-%dT%H:%M:%SZ")

@@ -26,7 +26,7 @@ from rich.progress import (
 )
 
 from xmatch_rs import console
-from xmatch_rs.convert.callbacks import callbacks
+from xmatch_rs.convert.callbacks import callbacks, exprs
 from xmatch_rs.expressions import get_healpix
 from xmatch_rs.schema import Schema
 from xmatch_rs.tools import (
@@ -695,6 +695,15 @@ def _process_lazy_frame(
                 if cast_to and source_cat.dtype:
                     cast_to_dtype = get_polars_dtype_from_string(cast_to)
                     lf = lf.with_columns(polars.col(lf_col).cast(cast_to_dtype))
+
+                apply_functions = source_cat.apply_functions or []
+                for func in apply_functions:
+                    if func not in exprs:
+                        raise ValueError(
+                            f"Expression function '{func}' is not defined. "
+                            f"Available expressions: {list(exprs.keys())}"
+                        )
+                    lf = lf.with_columns(exprs[func](lf_col).alias(lf_col))
 
     if apply_callback is not None:
         if not isinstance(apply_callback, (list, tuple)):

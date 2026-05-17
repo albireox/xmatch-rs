@@ -14,8 +14,10 @@ from typing import TYPE_CHECKING, Literal
 
 import sdsstools.logger
 
-from xmatch_rs.hats.catalog import convert_to_hats_catalog
+from xmatch_rs.hats.metadata import create_properties
+from xmatch_rs.hats.object import convert_to_hats_object_catalogue
 from xmatch_rs.schema import Schema
+from xmatch_rs.tools import get_xmatch_rs_logger
 
 
 if TYPE_CHECKING:
@@ -63,8 +65,9 @@ class HATS:
         show_progress: bool = True,
         log: sdsstools.logger.SDSSLogger | None = None,
         quiet: bool = False,
+        overwrite: bool = False,
     ) -> HATS:
-        """Converts a dataset to the HATS format.
+        """Converts a dataset to the HATS object catalogue format.
 
         Parameters
         ----------
@@ -72,7 +75,7 @@ class HATS:
             The path(s) to the input dataset. Can be a single path or a list of paths.
         collection_path
             The path where the output HATS collecton will be created. The resulting
-            directory structure will be ``<collection_path>/catalog/dataset/...``
+            directory structure will be ``<collection_path>/object/dataset/...``
             along with the necessary metadata files.
         schema
             The schema of the input dataset. Can be a Schema object, a path to a schema
@@ -126,7 +129,11 @@ class HATS:
         log
             An optional logger to use for logging the conversion process.
         quiet
-            If ``True``, suppresses logging output. Defaults to ``False``.
+            If ``True``, suppresses logging output. Defaults to ``False``. Ignored
+            if a logger is provided.
+        overwrite
+            If ``True``, allows overwriting existing files in the output directory.
+            Defaults to ``False``.
 
         Returns
         -------
@@ -135,7 +142,13 @@ class HATS:
 
         """
 
-        convert_to_hats_catalog(
+        log = log or get_xmatch_rs_logger(log_level=40 if quiet else 20)
+
+        # Load the schema.
+        if schema is not None and not isinstance(schema, Schema):
+            schema = Schema(schema)
+
+        convert_model = convert_to_hats_object_catalogue(
             data_path=data_path,
             schema=schema,
             collection_path=collection_path,
@@ -150,7 +163,37 @@ class HATS:
             apply_callback=apply_callback,
             show_progress=show_progress,
             log=log,
-            quiet=quiet,
+            overwrite=overwrite,
         )
+
+        if schema is None:
+            schema = convert_model.get_schema()
+
+        # Write the schema file to the root of the collection.
+        collection_path = pathlib.Path(collection_path)
+        schema_path = collection_path / "_schema.yaml"
+
+        if schema_path.exists() and not overwrite:
+            raise FileExistsError(f"The schema file {schema_path!s} already exists.")
+
+        schema.write_schema(schema_path)
+
+        # Add the properties file for the object catalogue.
+        create_properties(
+            "object",
+            collection_path,
+            schema=schema,
+            overwrite=overwrite,
+        )
+        log.info(f"Object catalogue properties file created at {collection_path!s}.")
+
+        # Add the properties for the collection.
+        create_properties(
+            "collection",
+            collection_path,
+            schema=schema,
+            overwrite=overwrite,
+        )
+        log.info(f"Collection properties file created at {collection_path!s}.")
 
         return cls(pathlib.Path(collection_path))

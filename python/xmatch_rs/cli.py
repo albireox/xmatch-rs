@@ -164,6 +164,12 @@ def hats_cli():
     ),
     constraint=cloup.constraints.mutually_exclusive,
 )
+@cloup.option(
+    "--overwrite",
+    is_flag=True,
+    default=False,
+    help="Allow overwriting existing output directory.",
+)
 def convert(
     data_path: tuple[str, ...],
     collection_path: pathlib.Path,
@@ -179,6 +185,7 @@ def convert(
     show_progress: bool,
     quiet: bool,
     verbose: bool,
+    overwrite: bool,
 ):
     """Convert a dataset to HATS format."""
 
@@ -206,4 +213,5 @@ def convert(
         dynamic_planning=dynamic_planning,
         show_progress=show_progress if not quiet else False,
         log=log,
+        overwrite=overwrite,
     )

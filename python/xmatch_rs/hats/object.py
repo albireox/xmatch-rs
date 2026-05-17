@@ -3,7 +3,7 @@
 #
 # @Author: José Sánchez-Gallego (gallegoj@uw.edu)
 # @Date: 2026-04-14
-# @Filename: hats.py
+# @Filename: object.py
 # @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
 
 from __future__ import annotations
@@ -32,13 +32,11 @@ from sdsstools import Timer, read_yaml_file
 
 from xmatch_rs import console
 from xmatch_rs._xmatch_rs_lib.hats import hats_repartition
-from xmatch_rs.convert import (
-    PhaseModel,
-    convert_csv_to_parquet,
-    convert_to_parquet,
+from xmatch_rs.convert import convert_csv_to_parquet, convert_to_parquet
+from xmatch_rs.hats.models import ConvertToHATSModel, PhaseModel
+from xmatch_rs.hats.providers import (
     get_hats_file_provider,
 )
-from xmatch_rs.convert.models import ConvertToHATSModel
 from xmatch_rs.schema import Schema
 from xmatch_rs.tools import get_xmatch_rs_logger, parse_path
 
@@ -49,13 +47,20 @@ if TYPE_CHECKING:
     from xmatch_rs.types import APPLY_CALLBACK_T, DATA_PATH_T
 
 
-__all__: list[str] = ["convert_to_hats_catalog"]
+__all__: list[str] = [
+    "convert_to_hats_object_catalogue",
+    "get_dataset_nrows",
+    "check_completion",
+    "get_dataset_completion_df",
+    "get_directory_size",
+    "get_dataset_path",
+]
 
 
-def convert_to_hats_catalog(
+def convert_to_hats_object_catalogue(
     data_path: DATA_PATH_T,
     collection_path: str | pathlib.Path,
-    schema: Schema | str | pathlib.Path | dict | None = None,
+    schema: Schema | None,
     format: Literal["csv", "parquet"] | None = None,
     initial_order: int = 2,
     reference_order: int = 29,
@@ -68,11 +73,12 @@ def convert_to_hats_catalog(
     show_progress: bool = True,
     log: SDSSLogger | None = None,
     quiet: bool = False,
-) -> None:
-    """Converts a dataset to a catalog in HATS format.
+    overwrite: bool = False,
+) -> ConvertToHATSModel:
+    """Converts a dataset to a HATS object catalogue.
 
     This function creates the structure of a HATS collection but does not populate
-    the metadata files for the collection or catalog. Use
+    the metadata files for the collection or catalogue. Use
     :obj:`~xmatch_rs.hats.HATS.convert_to_hats` for a higher-level function
     that also creates the metadata files.
 
@@ -81,14 +87,12 @@ def convert_to_hats_catalog(
     data_path
         The path(s) to the dataset to be converted to HATS.
     collection_path
-        The path where the output HATS collecton will be created. The resulting
-        directory structure will be ``<collection_path>/catalog/dataset/...``
+        The path where the output HATS object catalogue will be created. The resulting
+        directory structure will be ``<collection_path>/object/dataset/...``
         along with the necessary metadata files.
     schema
-        The schema of the input dataset. Can be a Schema object, a path to a schema
-        file, or a dictionary representing the schema. If the schema is not set,
-        the function will look for the ``_convert.yaml`` file in the output
-        directory and, if it exists, will read the schema from there.
+        The schema of the input dataset. Must be a :obj:`~xmatch_rs.schema.Schema`
+        object.
     format
         The format of the output files. If not provided, it will be inferred from
         the files in ``data_path``.
@@ -138,6 +142,9 @@ def convert_to_hats_catalog(
     quiet
         If ``True``, suppresses logging output. Defaults to ``False``. Ignored if
         a logger is provided via the ``log`` parameter.
+    overwrite
+        If ``True``, allows overwriting existing files in the output directory.
+        defaults to ``False``.
 
     """
 
@@ -150,14 +157,6 @@ def convert_to_hats_catalog(
     else:
         data_path = [str(p) for p in data_path]
 
-    # Create output directory if it doesn't exist.
-    collection_path = pathlib.Path(collection_path)
-    collection_path.mkdir(parents=True, exist_ok=True)
-
-    # Load the schema.
-    if schema is not None and not isinstance(schema, Schema):
-        schema = Schema(schema)
-
     # Check n_workers
     if n_workers is not None and n_workers < 1:
         log.warning(
@@ -166,24 +165,32 @@ def convert_to_hats_catalog(
         )
         n_workers = None
 
-    # Create the catalog and dataset directories.
-    catalog_path = collection_path / "catalog"
-    catalog_path.mkdir(parents=True, exist_ok=True)
+    # Create the object and dataset directories.
+    collection_path = pathlib.Path(collection_path)
 
-    dataset_path = catalog_path / "dataset"
+    object_path = collection_path / "object"
+    object_path.mkdir(parents=True, exist_ok=True)
+
+    dataset_path = object_path / "dataset"
+    if dataset_path.exists() and not overwrite:
+        raise FileExistsError(
+            f"The dataset directory {dataset_path!s} already exists. "
+            "Set overwrite=True to allow overwriting.",
+        )
+
     dataset_path.mkdir(parents=True, exist_ok=True)
 
     # Try to load the _convert.yaml file or create a new instance.
-    if (catalog_path / "_convert.yaml").exists():
-        log.info(f"Loading _convert.yaml from {catalog_path!s}.")
-        convert_dict = read_yaml_file(catalog_path / "_convert.yaml", return_class=dict)
+    if (object_path / "_convert.yaml").exists():
+        log.info(f"Loading _convert.yaml from {object_path!s}.")
+        convert_dict = read_yaml_file(object_path / "_convert.yaml", return_class=dict)
         convert_model = ConvertToHATSModel.model_validate(convert_dict)
         if schema is not None:
-            convert_model.dataset_schema = schema.schema
+            convert_model.catalogue_schema = schema.schema
     else:
         if not dynamic_planning:
             raise FileNotFoundError(
-                f"No _convert.yaml file found in {catalog_path!r} and "
+                f"No _convert.yaml file found in {object_path!s} and "
                 "dynamic_planning is False. Please provide a conversion model "
                 "or set dynamic_planning to True.",
             )
@@ -205,8 +212,8 @@ def convert_to_hats_catalog(
         )
 
         convert_model = ConvertToHATSModel(
-            dataset_schema=schema.schema,
-            catalog_path=catalog_path,
+            catalogue_schema=schema.schema,
+            object_path=object_path,
             complete=False,
             reference_order=reference_order,
             phases=[healpix_min_order_model],
@@ -215,8 +222,8 @@ def convert_to_hats_catalog(
 
     # Check if conversion is complete.
     if convert_model.complete:
-        log.info("Conversion to HATS is already complete. Nothing left to do.")
-        return
+        log.info("Conversion to HATS object catalogue is complete. Nothing left to do.")
+        return convert_model
 
     while not convert_model.complete:
         # Get next phase to run.
@@ -231,7 +238,7 @@ def convert_to_hats_catalog(
             )
 
             if result:
-                log.info("Conversion to HATS is complete.")
+                log.info("Conversion to HATS object catalogue is complete.")
                 convert_model.complete = True
                 convert_model.write()
                 break
@@ -275,7 +282,7 @@ def convert_to_hats_catalog(
         )
 
         if complete:
-            log.info("Conversion to HATS is complete.")
+            log.info("Conversion to HATS object catalogue is complete.")
             convert_model.complete = True
             convert_model.write()
             break
@@ -310,6 +317,8 @@ def convert_to_hats_catalog(
             max_rows_per_pixel=max_rows_per_pixel,
             max_kilobytes_per_pixel=max_kilobytes_per_pixel,
         )
+
+    return convert_model
 
 
 def _run_hats_healpix_phase(
@@ -402,7 +411,7 @@ def _run_hats_min_order_phase(
     )
 
     # The output path for the Norder hive files, following the HATS convention.
-    output_path = model.catalog_path / "dataset"
+    output_path = model.object_path / "dataset"
     output_path.mkdir(parents=True, exist_ok=True)
 
     with Timer() as timer:
@@ -493,10 +502,10 @@ def _run_hats_repartition(
         log.info(f"Phase {phase_name!r} already completed. Skipping.")
         return []
 
-    dataset_path = get_dataset_path(model.catalog_path)
+    dataset_path = get_dataset_path(model.object_path)
     order_0_path = dataset_path / f"Norder={order_0}"
     if not order_0_path.exists():
-        raise ValueError(f"Cannot find directory Norder={order_0} at {order_0_path!r}.")
+        raise ValueError(f"Cannot find directory Norder={order_0} at {order_0_path!s}.")
 
     log.info(
         f"Starting re-partitioning from order {order_0} to order {order_1} "
@@ -512,7 +521,7 @@ def _run_hats_repartition(
 
     # The re-partitioning is fully implemented in Rust. We run the progress monitoring
     # in a different process (not a differet thread since PyO3 blocks the GIL).
-    progress_file = model.catalog_path / f"{phase_name}_progress.json"
+    progress_file = model.object_path / f"{phase_name}_progress.json"
 
     _monitor_process = multiprocessing.Process(
         target=_monitor_progress,
@@ -648,18 +657,18 @@ def get_dataset_path(base_path: pathlib.Path) -> pathlib.Path:
 
     base_path = pathlib.Path(base_path)
     if not base_path.exists():
-        raise ValueError(f"The provided path {base_path!r} does not exist.")
+        raise ValueError(f"The provided path {base_path!s} does not exist.")
     elif not base_path.is_dir():
-        raise ValueError(f"The provided path {base_path!r} is not a directory.")
+        raise ValueError(f"The provided path {base_path!s} is not a directory.")
 
     if base_path.name == "dataset":
         return base_path
 
     dataset_path = base_path / "dataset"
     if not dataset_path.exists():
-        raise ValueError(f"Cannot find dataset directory at {dataset_path!r}.")
+        raise ValueError(f"Cannot find dataset directory at {dataset_path!s}.")
     elif not dataset_path.is_dir():
-        raise ValueError(f"The path {dataset_path!r} is not a directory.")
+        raise ValueError(f"The path {dataset_path!s} is not a directory.")
 
     return dataset_path
 
@@ -826,9 +835,9 @@ def get_pixel_path(
 
     if check:
         if not pixel_dir.exists():
-            raise ValueError(f"Pixel directory {pixel_dir!r} does not exist.")
+            raise ValueError(f"Pixel directory {pixel_dir!s} does not exist.")
         elif not pixel_dir.is_dir():
-            raise ValueError(f"Pixel path {pixel_dir!r} is not a directory.")
+            raise ValueError(f"Pixel path {pixel_dir!s} is not a directory.")
 
     return pixel_dir
 

@@ -1,10 +1,15 @@
 catalogue_name: Gaia DR3 source
-source_url: https://gaia.aip.de/metadata/gaiadr3/gaia_source/
+source_catalogue_url: https://gaia.aip.de/metadata/gaiadr3/gaia_source/
 source_catalogue_params:
   format: csv
   csv_delimiter: ','
   csv_has_header: true
   csv_comment_prefix: '#'
+ra_column: ra
+dec_column: dec
+pmra_column: pmra
+pmdec_column: pmdec
+pmra_is_cosdec: true
 columns:
   solution_id:
     dtype: Int64
@@ -133,7 +138,7 @@ columns:
     description: Which parameters have been solved for?
   astrometric_primary_flag:
     dtype: Boolean
-    description: Primary or seconday
+    description: Primary or secondary
   nu_eff_used_in_astrometry:
     dtype: Float32
     unit: um**-1
@@ -157,7 +162,7 @@ columns:
     description: Correlation between parallax and pseudocolour
   pmra_pseudocolour_corr:
     dtype: Float32
-    description: Correlation between proper motion in right asension and pseudocolour
+    description: Correlation between proper motion in right ascension and pseudocolour
   pmdec_pseudocolour_corr:
     dtype: Float32
     description: Correlation between proper motion in declination and pseudocolour
