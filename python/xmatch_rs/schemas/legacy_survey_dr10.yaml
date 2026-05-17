@@ -1,3 +1,4 @@
+catalogue_name: Legacy Survey DR10
 source_url: https://www.legacysurvey.org/dr10/files/#sweep-brickmin-brickmax-fits
 comments:
   This catalogue includes the standard fields from the Legacy Survey DR10
@@ -1022,10 +1023,6 @@ columns:
     source_catalogue:
       dtype: UInt64
       column_name: GAIA_DR3_SOURCE_ID
-  healpix_4:
-    dtype: UInt64
-    description: HEALPix index at depth 4 (NSIDE = 16)
-    is_source_column: false
   healpix_19:
     dtype: UInt64
     description: HEALPix index at depth 19 (NSIDE = 524288)

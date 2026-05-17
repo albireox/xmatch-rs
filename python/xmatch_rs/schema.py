@@ -30,6 +30,11 @@ XMATCH_RS_ROOT = pathlib.Path(xmatch_rs.__file__).parent
 class SchemaModel(BaseModel):
     """Model representing a schema file."""
 
+    catalogue_name: Annotated[
+        str,
+        Field(description="Short version of the name of the catalogue."),
+    ]
+
     source_url: Annotated[
         str | None,
         Field(description="A URL to the original source of the data."),
