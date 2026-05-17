@@ -582,7 +582,15 @@ def _monitor_progress(progress_file: pathlib.Path | None, log: SDSSLogger) -> No
     while True:
         if progress_file.exists():
             with open(progress_file, "r") as f:
-                progress_data = json.load(f)
+                try:
+                    progress_data = json.load(f)
+                except json.JSONDecodeError:
+                    # In case we are reading the file as it's being written
+                    # and it's not valid JSON yet, we just wait and try again.
+                    log.error("Error decoding JSON from progress file.")
+                    time.sleep(2)
+                    continue
+
                 order_0: int = progress_data.get("order_0", -1)
                 order_1: int = progress_data.get("order_1", -1)
                 to_process: list[int] = progress_data.get("pixels_to_process", [])
