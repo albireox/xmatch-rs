@@ -361,6 +361,7 @@ def _run_hats_healpix_phase(
             order_1=order_1,
             log=log,
             show_progress=show_progress,
+            n_workers=n_workers,
         )
 
 
