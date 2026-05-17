@@ -461,7 +461,7 @@ def _run_hats_min_order_phase(
                 "are 'csv' and 'parquet'.",
             )
 
-        log.info(f"Phase {phase_name!r} completed in {timer.elapsed:.1f} seconds.")
+        log.info(f"Phase {phase_name!r} completed in {timer.elapsed:,.1f} seconds.")
 
         model.update_phase(phase_name, complete=True)
 
@@ -505,6 +505,11 @@ def _run_hats_increase_order(
 
     t0 = time.time()
 
+    # Get the number of rows before partitioning for validation.
+    log.debug(f"Getting number of rows in order {order_0} before re-partitioning.")
+    n_rows_order_0 = get_dataset_nrows(dataset_path, orders=[order_0])
+    log.debug(f"Number of rows in order {order_0}: {n_rows_order_0:,}.")
+
     # The re-partitioning is fully implemented in Rust. We run the progress monitoring
     # in a different process (not a differet thread since PyO3 blocks the GIL).
     progress_file = model.catalog_path / f"{phase_name}_progress.json"
@@ -539,24 +544,20 @@ def _run_hats_increase_order(
 
     # Check the Norder=order_0 directories.
     log.info(f"Validating re-partitioning to order {order_1}.")
-    is_complete = check_completion(
+    check_completion(
         dataset_path=dataset_path,
-        order=order_0,
+        order_0=order_0,
+        order_1=order_1,
         max_rows_per_pixel=phase.max_rows_per_pixel,
         max_kilobytes_per_pixel=phase.max_kilobytes_per_pixel,
         skip_pixels=pixels,
+        expected_n_rows=n_rows_order_0,
+        raise_=True,
     )
-
-    if not is_complete:
-        raise RuntimeError(
-            f"Re-partitioning to order {order_1} did not complete successfully. "
-            f"Some pixels in order {order_0} still exceed the configured limits. "
-            "The original pixel directories have not been deleted."
-        )
 
     # Delete the original order_0 directories.
     elapsed = time.time() - t0
-    log.info(f"Re-partitioning to order {order_1} complete in {elapsed:.1f} seconds.")
+    log.info(f"Re-partitioning to order {order_1} complete in {elapsed:,.1f} seconds.")
 
     if phase.keep_lower_order_directories is False:
         log.info(f"Removing order {order_0} directories.")
@@ -663,7 +664,10 @@ def get_dataset_path(base_path: pathlib.Path) -> pathlib.Path:
     return dataset_path
 
 
-def get_dataset_completion_df(path: pathlib.Path) -> polars.DataFrame:
+def get_dataset_completion_df(
+    path: pathlib.Path,
+    include_size: bool = True,
+) -> polars.DataFrame:
     """Returns a DataFrame with the number of rows and size in Kb for each pixel."""
 
     dataset_path = get_dataset_path(path)
@@ -676,6 +680,9 @@ def get_dataset_completion_df(path: pathlib.Path) -> polars.DataFrame:
         .collect(engine="streaming")
     )
     assert isinstance(n_rows, polars.DataFrame)
+
+    if not include_size:
+        return n_rows
 
     pixel_dirs = list(dataset_path.glob("Norder=*/Dir=*/Npix=*"))
     pixel_dirs = [d for d in pixel_dirs if d.is_dir()]
@@ -708,16 +715,20 @@ def get_directory_size(path: pathlib.Path) -> int:
 
 def check_completion(
     dataset_path: pathlib.Path,
-    order: int | None = None,
+    order_0: int | None = None,
+    order_1: int | None = None,
+    expected_n_rows: int | None = None,
     max_rows_per_pixel: int | None = None,
     max_kilobytes_per_pixel: int | None = None,
     skip_pixels: list[int] | None = None,
+    raise_: bool = False,
 ) -> bool:
     """Checks the pixels in a HATS dataset for completion.
 
     This function checks the pixels in the provided path for whether they contain
     more than ``max_rows_per_pixel`` rows or more than
-    ``max_kilobytes_per_pixel`` kilobytes.
+    ``max_kilobytes_per_pixel`` kilobytes. It can also check if the total number of
+    rows in the pixels of order_0 and order_1 matches the expected number of rows.
 
     Returns
     -------
@@ -731,19 +742,70 @@ def check_completion(
 
     dataset_path = get_dataset_path(dataset_path)
 
-    data = get_dataset_completion_df(dataset_path)
-    if order is not None:
-        data = data.filter(polars.col.Norder == order)
+    data = get_dataset_completion_df(
+        dataset_path,
+        include_size=max_kilobytes_per_pixel is not None,
+    )
+
+    if expected_n_rows is not None:
+        # Number of rows in pixels of order_1.
+        n_rows_order_1 = (
+            data.filter(polars.col.Norder == order_1)
+            .select(polars.sum("n_rows"))
+            .item()
+        )
+
+        # It's a bit more complicated for order_0 because we want to exclude pixels
+        # that were re-partitioned to order_1.
+        n_rows_order_0 = (
+            data.filter(polars.col.Norder == order_0)
+            .filter(
+                polars.col.Npix.is_in(skip_pixels).not_()
+                if skip_pixels
+                else polars.lit(True)
+            )
+            .select(polars.sum("n_rows"))
+            .item()
+        )
+
+        n_rows_total = n_rows_order_0 + n_rows_order_1
+        if n_rows_total != expected_n_rows:
+            if raise_:
+                raise RuntimeError(
+                    f"Re-partitioning to order {order_1} did not complete "
+                    f"successfully. The number of rows after re-partitioning does not "
+                    f"match the expected number of rows. Expected {expected_n_rows:,} "
+                    f"rows but found {n_rows_total:,}. The original pixel directories "
+                    f"have not been deleted."
+                )
+            return False
+
+    if order_0 is not None:
+        data = data.filter(polars.col.Norder == order_0)
 
     if skip_pixels is not None:
         data = data.filter(polars.col.Npix.is_in(skip_pixels).not_())
 
     if max_rows_per_pixel is not None:
         if data.filter(polars.col.n_rows > max_rows_per_pixel).height > 0:
+            if raise_:
+                raise RuntimeError(
+                    f"Re-partitioning to order {order_1} did not complete "
+                    f"successfully. Some pixels in order {order_0} contain more than "
+                    f"{max_rows_per_pixel:,} rows. The original pixel directories have "
+                    f"not been deleted."
+                )
             return False
 
     if max_kilobytes_per_pixel is not None:
         if data.filter(polars.col.size_kb > max_kilobytes_per_pixel).height > 0:
+            if raise_:
+                raise RuntimeError(
+                    f"Re-partitioning to order {order_1} did not complete "
+                    f"successfully. Some pixels in order {order_0} contain more than "
+                    f"{max_kilobytes_per_pixel:,} kilobytes. The original pixel "
+                    f"directories have not been deleted."
+                )
             return False
 
     return True
@@ -804,3 +866,21 @@ def add_repartitioning_phase(
     model.add_phase(phase)
 
     return phase
+
+
+def get_dataset_nrows(
+    dataset_path: pathlib.Path,
+    orders: list[int] | None = None,
+) -> int:
+    """Returns the total number of rows in a HATS dataset."""
+
+    dataset_path = get_dataset_path(dataset_path)
+
+    lf = polars.scan_parquet(dataset_path)
+
+    if orders is not None:
+        lf = lf.filter(polars.col("Norder").is_in(orders))
+
+    n_rows = lf.select(polars.len()).collect().item()  # type: ignore
+
+    return n_rows
