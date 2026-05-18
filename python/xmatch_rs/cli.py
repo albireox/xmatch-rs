@@ -311,21 +311,17 @@ def convert(
 )
 @cloup.option(
     "--check-duplicates/--no-check-duplicates",
-    default=True,
+    default=False,
     help=("Whether to check for duplicate entries in the index."),
 )
 @cloup.option(
     "--max-rows-per-file",
     type=int,
-    default=10_000_000,
-    show_default=True,
     help="The maximum number of rows per file when chunking the index.",
 )
 @cloup.option(
     "--max-kilobytes-per-file",
     type=int,
-    default=10 * 1024 * 1024,
-    show_default=True,
     help="The maximum number of kilobytes per file when chunking the index.",
 )
 @cloup.option(
@@ -340,9 +336,9 @@ def create_index(
     index_name: str | None,
     extra_columns: str,
     mode: Literal["sequential", "full"],
-    check_duplicates: bool = True,
-    max_rows_per_file: int = 10_000_000,
-    max_kilobytes_per_file: int = 10 * 1024 * 1024,
+    check_duplicates: bool = False,
+    max_rows_per_file: int | None = None,
+    max_kilobytes_per_file: int | None = None,
     overwrite: bool = False,
 ):
     """Creates an index dataset from the object catalogue."""

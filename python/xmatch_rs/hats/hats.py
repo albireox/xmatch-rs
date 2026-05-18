@@ -274,6 +274,8 @@ class HATS:
                 check_duplicates=check_index_duplicates,
                 overwrite=overwrite,
                 mode="full" if check_index_duplicates else "sequential",
+                max_rows_per_file=max_rows_per_file,
+                max_kilobytes_per_file=max_kilobytes_per_file,
             )
 
         return obj
@@ -337,8 +339,8 @@ class HATS:
         index_column: str,
         extra_columns: list[str] = [],
         check_duplicates: bool = False,
-        max_rows_per_file: int = 10_000_000,
-        max_kilobytes_per_file: int = 10 * 1024 * 1024,
+        max_rows_per_file: int | None = None,
+        max_kilobytes_per_file: int | None = None,
         mode: Literal["sequential", "full"] = "sequential",
         overwrite: bool = False,
     ):
@@ -381,6 +383,9 @@ class HATS:
 
         if check_duplicates and mode != "full":
             raise ValueError("Duplicate checking can only be performed in 'full' mode.")
+
+        max_rows_per_file = max_rows_per_file or 10_000_000
+        max_kilobytes_per_file = max_kilobytes_per_file or 10 * 1024 * 1024
 
         # Check paths.
         object_path = self.path / "object"
