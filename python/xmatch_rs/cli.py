@@ -176,6 +176,12 @@ def hats_cli():
         default="",
         help=("Comma-separated list of additional columns to include in the index."),
     ),
+    cloup.option(
+        "--check-index-duplicates/--no-check-index-duplicates",
+        default=False,
+        help="Whether to check for duplicate entries in the primary key index. "
+        "This may lead to high memory use for large datasets.",
+    ),
 )
 @cloup.option(
     "--dynamic-planning/--no-dynamic-planning",
@@ -228,6 +234,7 @@ def convert(
     create_primary_key_index: bool,
     primary_key_column: str | None,
     extra_index_columns: str,
+    check_index_duplicates: bool,
     n_workers: int | None,
     dynamic_planning: bool,
     show_progress: bool,
@@ -270,6 +277,7 @@ def convert(
         create_primary_key_index=create_primary_key_index,
         primary_key_column=primary_key_column,
         extra_index_columns=extra_index_columns_list,
+        check_index_duplicates=check_index_duplicates,
     )
 
 

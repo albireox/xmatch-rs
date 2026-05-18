@@ -23,7 +23,7 @@ def create_index(
     index_path: pathlib.Path | str,
     index_column: str,
     extra_columns: list[str] = [],
-    check_duplicates: bool = True,
+    check_duplicates: bool = False,
     max_rows_per_file: int = 10_000_000,
     max_kilobytes_per_file: int = 10 * 1024 * 1024,
 ) -> None:

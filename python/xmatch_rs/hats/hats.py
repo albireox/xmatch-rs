@@ -78,6 +78,7 @@ class HATS:
         create_primary_key_index: bool = True,
         primary_key_column: str | None = None,
         extra_index_columns: list[str] = [],
+        check_index_duplicates: bool = False,
         n_workers: int | None = None,
         dynamic_planning: bool = True,
         apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None = None,
@@ -149,6 +150,9 @@ class HATS:
             primary key column defined in the schema will be used.
         extra_index_columns
             A list of additional columns to include in the primary key index dataset.
+        check_index_duplicates
+            Whether to check for duplicate entries in the primary key index.
+            This may lead to high memory use for large datasets.
         n_workers
             The number of worker processes to use for the conversion. If not provided,
             uses recommended defaults based on the system's resources. ``n_workers=1``
@@ -268,7 +272,7 @@ class HATS:
                 index_name=f"index_{index_column}",
                 index_column=index_column,
                 extra_columns=extra_index_columns,
-                check_duplicates=True,
+                check_duplicates=check_index_duplicates,
                 overwrite=overwrite,
             )
 
@@ -332,7 +336,7 @@ class HATS:
         index_name: str,
         index_column: str,
         extra_columns: list[str] = [],
-        check_duplicates: bool = True,
+        check_duplicates: bool = False,
         max_rows_per_file: int = 10_000_000,
         max_kilobytes_per_file: int = 10 * 1024 * 1024,
         overwrite: bool = False,
