@@ -144,13 +144,11 @@ fn _create_hats_index_sequential(
                     };
 
                 // Add the Norder, Dir, and Npix columns to the lazyframe.
-                let lf = lf
-                    .with_columns(vec![
-                        lit(norder).alias("Norder"),
-                        lit(dir).alias("Dir"),
-                        lit(npix).alias("Npix"),
-                    ])
-                    .sort(vec![index_column], Default::default());
+                let lf = lf.with_columns(vec![
+                    lit(norder).alias("Norder"),
+                    lit(dir).alias("Dir"),
+                    lit(npix).alias("Npix"),
+                ]);
 
                 // Group by the index column.
                 let lf = lf.group_by([col("Norder"), col("Dir"), col("Npix"), col(index_column)]);
