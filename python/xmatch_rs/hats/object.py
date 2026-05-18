@@ -303,7 +303,7 @@ def convert_to_hats_object_catalogue(
         if not phase.complete:
             raise RuntimeError(f"Phase {phase.name!r} did not complete successfully.")
 
-        log.info("Checking if HATS is complete.")
+        log.info("Checking if conversion to HATS is complete.")
         if not complete:
             complete = check_completion(
                 dataset_path,
