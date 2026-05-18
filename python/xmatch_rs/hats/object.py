@@ -429,6 +429,7 @@ def _run_hats_healpix_phase(
             else None,
             is_dataset=True,
         )
+        model.update_phase(phase_name, complete=True)
 
 
 def _run_hats_min_order_phase(
