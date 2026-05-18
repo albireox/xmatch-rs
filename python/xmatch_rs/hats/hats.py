@@ -76,6 +76,7 @@ class HATS:
         max_rows_per_file: int | None = None,
         max_kilobytes_per_file: int | None = None,
         create_primary_key_index: bool = True,
+        primary_key_column: str | None = None,
         extra_index_columns: list[str] = [],
         n_workers: int | None = None,
         dynamic_planning: bool = True,
@@ -143,6 +144,9 @@ class HATS:
         create_primary_key_index
             If ``True``, a HATS index dataset will be created for the primary key
             column defined in the schema.
+        primary_key_column
+            The column to use as the primary key for the index. If not provided, the
+            primary key column defined in the schema will be used.
         extra_index_columns
             A list of additional columns to include in the primary key index dataset.
         n_workers
@@ -249,11 +253,15 @@ class HATS:
         obj = cls(pathlib.Path(collection_path))
 
         if create_primary_key_index:
-            pks = schema.get_primary_keys()
-            if len(pks) > 1:
-                raise ValueError("Composite primary keys are not supported in HATS.")
+            if primary_key_column is not None:
+                index_column = primary_key_column
+            else:
+                pks = schema.get_primary_keys()
+                if len(pks) > 1:
+                    raise ValueError("Multiple primary keys are not supported by HATS.")
 
-            index_column = pks[0]
+                index_column = pks[0]
+
             log.info(f"Creating primary key index for column {index_column!r}.")
 
             obj.add_index(

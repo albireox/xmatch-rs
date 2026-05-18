@@ -156,6 +156,27 @@ def hats_cli():
         help="Maximum number of kilobytes per file.",
     ),
 )
+@cloup.option_group(
+    "Primary key index",
+    "Options to control the creation of a primary key index.",
+    cloup.option(
+        "--create-primary-key-index/--no-create-primary-key-index",
+        default=True,
+        help="Whether to create an index on the catalogue primary key column.",
+    ),
+    cloup.option(
+        "--primary-key-column",
+        type=str,
+        help="Column that contains the primary key. If not provided, "
+        "the primary key column will be inferred from the schema.",
+    ),
+    cloup.option(
+        "--extra-index-columns",
+        type=str,
+        default="",
+        help=("Comma-separated list of additional columns to include in the index."),
+    ),
+)
 @cloup.option(
     "--dynamic-planning/--no-dynamic-planning",
     default=True,
@@ -204,6 +225,9 @@ def convert(
     rechunk: bool,
     max_rows_per_file: int | None,
     max_kilobytes_per_file: int | None,
+    create_primary_key_index: bool,
+    primary_key_column: str | None,
+    extra_index_columns: str,
     n_workers: int | None,
     dynamic_planning: bool,
     show_progress: bool,
@@ -223,6 +247,8 @@ def convert(
     else:
         log.set_level(20)
 
+    extra_index_columns_list = extra_index_columns.strip().split(",")
+
     HATS.convert_to_hats(
         data_path=list(data_path),
         collection_path=collection_path,
@@ -241,6 +267,9 @@ def convert(
         show_progress=show_progress if not quiet else False,
         log=log,
         overwrite=overwrite,
+        create_primary_key_index=create_primary_key_index,
+        primary_key_column=primary_key_column,
+        extra_index_columns=extra_index_columns_list,
     )
 
 
