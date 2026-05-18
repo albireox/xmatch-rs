@@ -15,8 +15,7 @@ from typing import TYPE_CHECKING, Literal
 
 import sdsstools.logger
 
-from xmatch_rs._xmatch_rs_lib.hats import hats_rechunk
-from xmatch_rs.hats.index import create_index
+from xmatch_rs._xmatch_rs_lib.hats import hats_create_index, hats_rechunk
 from xmatch_rs.hats.metadata import create_partition_info, create_properties
 from xmatch_rs.hats.object import convert_to_hats_object_catalogue
 from xmatch_rs.schema import Schema
@@ -268,12 +267,13 @@ class HATS:
 
             log.info(f"Creating primary key index for column {index_column!r}.")
 
-            obj.add_index(
+            obj.create_index(
                 index_name=f"index_{index_column}",
                 index_column=index_column,
                 extra_columns=extra_index_columns,
                 check_duplicates=check_index_duplicates,
                 overwrite=overwrite,
+                mode="full" if check_index_duplicates else "sequential",
             )
 
         return obj
@@ -331,7 +331,7 @@ class HATS:
             else None,
         )
 
-    def add_index(
+    def create_index(
         self,
         index_name: str,
         index_column: str,
@@ -339,6 +339,7 @@ class HATS:
         check_duplicates: bool = False,
         max_rows_per_file: int = 10_000_000,
         max_kilobytes_per_file: int = 10 * 1024 * 1024,
+        mode: Literal["sequential", "full"] = "sequential",
         overwrite: bool = False,
     ):
         """Adds an index to the HATS object catalogue.
@@ -362,11 +363,24 @@ class HATS:
         max_kilobytes_per_file
             The maximum number of kilobytes per file when chunking the index.
             Defaults to 10 GB.
+        mode
+            The mode to use for creating the index. If ``sequential``, the index
+            will be created by reading the parquet files in each pixel sequentially.
+            This method uses less memory but can be slower for large datasets.
+            If ``full``, the entire dataset will be scanned and the index will be
+            created using the streaming engine. ``check_duplicates`` can only be used
+            in ``full`` mode.
         overwrite
             If ``True``, allows overwriting existing files in the output directory.
             Defaults to ``False``.
 
         """
+
+        if mode not in ["sequential", "full"]:
+            raise ValueError("Invalid mode. Must be one of 'sequential' or 'full'.")
+
+        if check_duplicates and mode != "full":
+            raise ValueError("Duplicate checking can only be performed in 'full' mode.")
 
         # Check paths.
         object_path = self.path / "object"
@@ -379,14 +393,14 @@ class HATS:
                 raise FileExistsError(f"The index {index_name!r} already exists.")
             else:
                 shutil.rmtree(index_path)
-        index_path.mkdir(parents=True, exist_ok=True)
 
         # Create the index dataset.
-        create_index(
-            object_path=object_path,
-            index_path=index_path,
+        hats_create_index(
+            collection_path=self.path,
+            index_name=index_name,
             index_column=index_column,
             extra_columns=extra_columns,
+            mode="sequential" if not check_duplicates else "full",
             check_duplicates=check_duplicates,
             max_rows_per_file=max_rows_per_file,
             max_kilobytes_per_file=max_kilobytes_per_file,

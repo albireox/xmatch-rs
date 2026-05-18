@@ -302,6 +302,14 @@ def convert(
     "These columns will be included in the index file.",
 )
 @cloup.option(
+    "--mode",
+    "-m",
+    type=cloup.Choice(["sequential", "full"]),
+    default="sequential",
+    show_default=True,
+    help="Mode to use for creating the index.",
+)
+@cloup.option(
     "--check-duplicates/--no-check-duplicates",
     default=True,
     help=("Whether to check for duplicate entries in the index."),
@@ -331,6 +339,7 @@ def create_index(
     index_column: str,
     index_name: str | None,
     extra_columns: str,
+    mode: Literal["sequential", "full"],
     check_duplicates: bool = True,
     max_rows_per_file: int = 10_000_000,
     max_kilobytes_per_file: int = 10 * 1024 * 1024,
@@ -345,12 +354,13 @@ def create_index(
 
     hats = HATS(collection_path)
 
-    hats.add_index(
+    hats.create_index(
         index_name=index_name,
         index_column=index_column,
         extra_columns=extra_columns.strip().split(","),
         check_duplicates=check_duplicates,
         max_rows_per_file=max_rows_per_file,
         max_kilobytes_per_file=max_kilobytes_per_file,
+        mode=mode,
         overwrite=overwrite,
     )

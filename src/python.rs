@@ -36,16 +36,16 @@ fn hats_repartition(
     progress_file: Option<PathBuf>,
     keep_initial_order_directories: bool,
 ) -> Result<Vec<i64>> {
-    let options = hats::HATSRepartitionOptions {
+    let options = hats::partition::HATSRepartitionOptions {
         max_rows_per_pixel,
         max_kilobytes_per_pixel,
         n_workers,
         progress_file,
         keep_initial_order_directories,
-        ..hats::HATSRepartitionOptions::default()
+        ..hats::partition::HATSRepartitionOptions::default()
     };
 
-    hats::hats_repartition(path, order_0, order_1, pixels, options)
+    hats::partition::hats_repartition(path, order_0, order_1, pixels, options)
 }
 
 #[pyfunction]
@@ -55,13 +55,44 @@ fn hats_rechunk(
     max_rows_per_file: Option<u32>,
     approximate_bytes_per_file: Option<u64>,
 ) -> Result<()> {
-    let options = hats::HATSRechunkOptions {
+    let options = hats::rechunk::HATSRechunkOptions {
         is_dataset,
         max_rows_per_file,
         approximate_bytes_per_file,
     };
 
-    hats::rechunk_hats_dataset(path, options)
+    hats::rechunk::rechunk_hats_dataset(path, options)
+}
+
+#[pyfunction]
+fn hats_create_index(
+    collection_path: PathBuf,
+    index_name: &str,
+    index_column: &str,
+    extra_columns: Option<Vec<String>>,
+    mode: Option<String>,
+    check_duplicates: Option<bool>,
+    max_rows_per_file: Option<usize>,
+    max_kilobytes_per_file: Option<u64>,
+) -> Result<()> {
+    let def_opts = hats::index::HATSCreateIndexOptions::default();
+
+    let options = hats::index::HATSCreateIndexOptions {
+        mode: mode.unwrap_or_else(|| def_opts.mode.clone()),
+        check_duplicates: check_duplicates.unwrap_or(def_opts.check_duplicates),
+        max_rows_per_file: max_rows_per_file.unwrap_or(def_opts.max_rows_per_file),
+        max_kilobytes_per_file: max_kilobytes_per_file.unwrap_or(def_opts.max_kilobytes_per_file),
+    };
+
+    hats::index::create_hats_index(
+        collection_path,
+        index_name,
+        index_column,
+        extra_columns,
+        options,
+    )?;
+
+    Ok(())
 }
 
 // Define the Python module
@@ -86,6 +117,7 @@ fn xmatch_rs_pymodule(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     xmatch_rs_hats.add_function(wrap_pyfunction!(hats_repartition, &xmatch_rs_hats)?)?;
     xmatch_rs_hats.add_function(wrap_pyfunction!(hats_rechunk, &xmatch_rs_hats)?)?;
+    xmatch_rs_hats.add_function(wrap_pyfunction!(hats_create_index, &xmatch_rs_hats)?)?;
 
     py_run!(
         _py,

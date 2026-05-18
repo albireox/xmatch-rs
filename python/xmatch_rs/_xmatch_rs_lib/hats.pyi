@@ -93,3 +93,41 @@ def hats_rechunk(
 
     """
     ...
+
+def hats_create_index(
+    collection_path: str | pathlib.Path,
+    index_name: str,
+    index_column: str,
+    extra_columns: list[str] | None,
+    mode: str | None,
+    check_duplicates: bool | None,
+    max_rows_per_file: int | None,
+    max_kilobytes_per_file: int | None,
+) -> None:
+    """Creates a HATS index for a given collection.
+
+    Parameters
+    ----------
+    collection_path
+        The path to the collection for which to create the index.
+    index_name
+        The name of the index to create. This will be used as the name of the
+        directory where the index is stored.
+    index_column
+        The name of the column to use as the index key. This column must exist in
+        the dataset and should contain unique values for each row.
+    extra_columns
+        A list of additional columns to include in the index. These columns will be
+        included in the resulting index files and can be used for filtering or
+        other operations when querying the index.
+    mode
+        The mode for creating the index. Can be "sequential" or "full".
+    check_duplicates
+        Whether to check for duplicate rows in the index. Only applies to "full" mode.
+    max_rows_per_file
+        The maximum number of rows per file.
+    max_kilobytes_per_file
+        The maximum size of each file in kilobytes.
+
+    """
+    ...

@@ -23,17 +23,3 @@ pub fn create_pool(num_threads: Option<usize>) -> Result<rayon::ThreadPool> {
         Ok(pool) => Ok(pool),
     }
 }
-
-macro_rules! file_path_provider_fn {
-    ($func:path) => {
-        Some(
-            polars::lazy::dsl::file_provider::FileProviderType::Function(
-                polars::lazy::dsl::file_provider::FileProviderFunction::Rust(SpecialEq::new(
-                    std::sync::Arc::new($func),
-                )),
-            ),
-        )
-    };
-}
-
-pub(crate) use file_path_provider_fn;

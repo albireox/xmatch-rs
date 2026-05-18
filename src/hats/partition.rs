@@ -1,7 +1,7 @@
 /*
  *  @Author: José Sánchez-Gallego (gallegoj@uw.edu)
- *  @Date: 2026-05-12
- *  @Filename: hats.rs
+ *  @Date: 2026-05-17
+ *  @Filename: partition.rs
  *  @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
  */
 
@@ -14,10 +14,10 @@ use std::{
 };
 
 use anyhow::{Result, bail};
-
-use polars::lazy::dsl::file_provider as pl_fp;
 use polars::prelude::*;
 use serde::{Deserialize, Serialize};
+
+use crate::hats::path_providers::{file_path_provider_fn, path_provider_uuid_pixel};
 
 /// Configuration options for [`hats_repartition`].
 pub struct HATSRepartitionOptions {
@@ -177,7 +177,7 @@ pub fn hats_repartition(
 
     if n_workers > 1 {
         // Use a rayon thread pool for parallel processing.
-        let pool = super::tools::create_pool(Some(n_workers))?;
+        let pool = crate::tools::create_pool(Some(n_workers))?;
         pool.install(|| {
             use rayon::prelude::*;
             pixels.par_iter().for_each(|pixel| {
@@ -361,7 +361,7 @@ fn process_pixel(
         .sink(
             SinkDestination::Partitioned {
                 base_path: PlRefPath::new(dataset_path.to_string_lossy()),
-                file_path_provider: crate::tools::file_path_provider_fn!(path_provider_uuid),
+                file_path_provider: file_path_provider_fn!(path_provider_uuid_pixel),
                 partition_strategy: PartitionStrategy::Keyed {
                     keys: vec![col(&order_1_col)],
                     include_keys: false,
@@ -396,35 +396,6 @@ fn process_pixel(
     Ok(())
 }
 
-/// Provides a partitioned output file path for parquet sink writes with a custom
-/// UUID and pixel-based directory structure.
-fn path_provider_uuid(
-    args: pl_fp::FileProviderArgs,
-) -> Result<pl_fp::FileProviderReturn, polars::error::PolarsError> {
-    // Get the index and partition keys from the arguments. args.partition_keys is a dataframe
-    // with one row and (in this case) one column with the pixel index.
-    let index = args.index_in_partition;
-    let partition_keys = &*args.partition_keys;
-    let pixel = partition_keys
-        .get(0)
-        .unwrap()
-        .get(0)
-        .unwrap()
-        .try_extract::<i64>()
-        .unwrap();
-
-    // Calculate the Dir= directory based on the pixel index.
-    let dir = pixel / 10_000i64;
-
-    let mut uuid_part = uuid::Uuid::new_v4().to_string();
-    uuid_part = uuid_part.replace("-", "");
-
-    let file = format!("{}-{:02}.parquet", uuid_part, index);
-    let path = format!("Dir={}/Npix={}/{}", dir, pixel, file);
-
-    return Ok(pl_fp::FileProviderReturn::Path(path));
-}
-
 fn update_progress_file(
     progress_file: &Arc<Mutex<File>>,
     pixel: Option<i64>,
@@ -452,90 +423,4 @@ fn update_progress_file(
     serde_json::to_writer(&*progress_file.lock().unwrap(), &progress)?;
 
     Ok(())
-}
-
-pub struct HATSRechunkOptions {
-    pub is_dataset: bool,
-    pub max_rows_per_file: Option<u32>,
-    pub approximate_bytes_per_file: Option<u64>,
-}
-
-pub fn rechunk_hats_dataset(path: PathBuf, rechunk_options: HATSRechunkOptions) -> Result<()> {
-    // Check the parent directory.
-    if !path.exists() {
-        bail!("Path does not exist: {:?}", path);
-    }
-
-    // In case we have specified the top-level HATS we check if there is a
-    // "dataset" subdirectory and use it if it exists.
-    let path = if rechunk_options.is_dataset && path.join("dataset").exists() {
-        path.join("dataset")
-    } else {
-        path
-    };
-
-    if rechunk_options.is_dataset {
-        // List the Norder= directories in the dataset.
-        for entry in glob::glob(&format!("{}/Norder=*/Dir=*/Npix=*", path.display()))? {
-            match entry {
-                Ok(path) => _rechunk_path(&path, &rechunk_options)?,
-                Err(e) => bail!("Error listing pixel directories: {:?}", e),
-            }
-        }
-    } else {
-        // Just rechunk the given path.
-        _rechunk_path(&path, &rechunk_options)?;
-    }
-
-    Ok(())
-}
-
-fn _rechunk_path(path: &PathBuf, rechunk_options: &HATSRechunkOptions) -> Result<()> {
-    // Rename the original directory to a temporary name with _orig suffix.
-    let orig_path = path.with_file_name(format!(
-        "{}_orig",
-        path.file_name().unwrap().to_string_lossy()
-    ));
-    std::fs::rename(&path, &orig_path)?;
-
-    // Scan the parquet files in the original directory.
-    let path_pl = PlRefPath::new(orig_path.to_string_lossy().as_ref());
-    let lf = LazyFrame::scan_parquet(path_pl, ScanArgsParquet::default())?;
-
-    // Sink the lazyframe to new parquet files with the configured rechunking options.
-    lf.sink(
-        SinkDestination::Partitioned {
-            base_path: PlRefPath::new(path.to_string_lossy().as_ref()),
-            file_path_provider: crate::tools::file_path_provider_fn!(path_provider_part),
-            partition_strategy: PartitionStrategy::FileSize,
-            max_rows_per_file: rechunk_options.max_rows_per_file.unwrap_or(1_000_000),
-            approximate_bytes_per_file: rechunk_options
-                .approximate_bytes_per_file
-                .unwrap_or(u64::MAX),
-        },
-        FileWriteFormat::Parquet(Arc::new(ParquetWriteOptions {
-            compression: ParquetCompression::default(),
-            statistics: StatisticsOptions::default(),
-            row_group_size: None,
-            data_page_size: None,
-            key_value_metadata: None,
-            arrow_schema: None,
-            compat_level: None,
-        })),
-        UnifiedSinkArgs::default(),
-    )?
-    .collect_with_engine(Engine::Streaming)?;
-
-    // Remove the original directory with the _orig suffix.
-    std::fs::remove_dir_all(orig_path)?;
-
-    Ok(())
-}
-
-fn path_provider_part(
-    args: pl_fp::FileProviderArgs,
-) -> Result<pl_fp::FileProviderReturn, polars::error::PolarsError> {
-    let index = args.index_in_partition;
-    let file = format!("part-{:06}.parquet", index + 1);
-    return Ok(pl_fp::FileProviderReturn::Path(file));
 }

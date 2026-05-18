@@ -4065,6 +4065,7 @@ dependencies = [
  "pyo3",
  "pyo3-polars",
  "rayon",
+ "regex",
  "serde",
  "serde_json",
  "uuid",
