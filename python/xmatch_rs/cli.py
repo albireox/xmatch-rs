@@ -93,46 +93,67 @@ def hats_cli():
     help="Input format. If omitted, inferred from the input files.",
 )
 @cloup.option(
-    "--initial-order",
-    type=int,
-    default=2,
-    show_default=True,
-    help="Initial HEALPix order used for partitioning.",
-)
-@cloup.option(
     "--reference-order",
     type=int,
     default=29,
     show_default=True,
     help="Reference HEALPix order for the _healpix column.",
 )
-@cloup.option(
-    "--max-order",
-    type=int,
-    default=None,
-    help="Maximum HEALPix order for adaptive tiling.",
+@cloup.option_group(
+    "Partitioning options",
+    "Options to control how the dataset is partitioned into HEALPix pixels.",
+    cloup.option(
+        "--initial-order",
+        type=int,
+        default=2,
+        show_default=True,
+        help="Initial HEALPix order used for partitioning.",
+    ),
+    cloup.option(
+        "--max-order",
+        type=int,
+        default=None,
+        help="Maximum HEALPix order for adaptive tiling.",
+    ),
+    cloup.option(
+        "--max-rows-per-pixel",
+        type=int,
+        default=1_000_000,
+        show_default=True,
+        help="Maximum number of rows per pixel.",
+    ),
+    cloup.option(
+        "--max-kilobytes-per-pixel",
+        type=int,
+        default=None,
+        help="Maximum number of kilobytes per pixel.",
+    ),
+    cloup.option(
+        "--n-workers",
+        "-n",
+        type=int,
+        default=None,
+        help=(
+            "Number of worker processes to use. If not provided, automatically "
+            "determined based on the number of CPU cores and the task being run."
+        ),
+    ),
 )
-@cloup.option(
-    "--max-rows-per-pixel",
-    type=int,
-    default=1_000_000,
-    show_default=True,
-    help="Maximum number of rows per pixel.",
-)
-@cloup.option(
-    "--max-kilobytes-per-pixel",
-    type=int,
-    default=None,
-    help="Maximum number of kilobytes per pixel.",
-)
-@cloup.option(
-    "--n-workers",
-    "-n",
-    type=int,
-    default=None,
-    help=(
-        "Number of worker processes to use. If not provided, automatically "
-        "determined based on the number of CPU cores and the task being run."
+@cloup.option_group(
+    "Rechunk options",
+    "Options to control object catalogue rechunking.",
+    cloup.option(
+        "--rechunk/--no-rechunk",
+        default=True,
+        help="Whether to rechunk the object catalogue after partitioning.",
+    ),
+    cloup.option(
+        "--max-rows-per-file", type=int, help="Maximum number of rows per file."
+    ),
+    cloup.option(
+        "--max-kilobytes-per-file",
+        type=int,
+        help="Maximum number of kilobytes per file.",
     ),
 )
 @cloup.option(
@@ -140,14 +161,14 @@ def hats_cli():
     default=True,
     help="Enable/disable dynamic conversion planning.",
 )
-@cloup.option(
-    "--show-progress/--no-show-progress",
-    default=True,
-    help="Enable/disable progress tracking.",
-)
 @cloup.option_group(
     "Logging options",
     "Options to control logging output.",
+    cloup.option(
+        "--show-progress/--no-show-progress",
+        default=True,
+        help="Enable/disable progress tracking.",
+    ),
     cloup.option(
         "--quiet",
         "-q",
@@ -180,6 +201,9 @@ def convert(
     max_order: int | None,
     max_rows_per_pixel: int | None,
     max_kilobytes_per_pixel: int | None,
+    rechunk: bool,
+    max_rows_per_file: int | None,
+    max_kilobytes_per_file: int | None,
     n_workers: int | None,
     dynamic_planning: bool,
     show_progress: bool,
@@ -209,6 +233,9 @@ def convert(
         max_order=max_order,
         max_rows_per_pixel=max_rows_per_pixel,
         max_kilobytes_per_pixel=max_kilobytes_per_pixel,
+        rechunk=rechunk,
+        max_rows_per_file=max_rows_per_file,
+        max_kilobytes_per_file=max_kilobytes_per_file,
         n_workers=n_workers,
         dynamic_planning=dynamic_planning,
         show_progress=show_progress if not quiet else False,

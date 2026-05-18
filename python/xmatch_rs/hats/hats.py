@@ -75,6 +75,8 @@ class HATS:
         rechunk: bool = True,
         max_rows_per_file: int | None = None,
         max_kilobytes_per_file: int | None = None,
+        create_primary_key_index: bool = True,
+        extra_index_columns: list[str] = [],
         n_workers: int | None = None,
         dynamic_planning: bool = True,
         apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None = None,
@@ -138,6 +140,11 @@ class HATS:
             created during the tiling process will be used, which ensures that
             each file is approximately smaller than ``max_kilobytes_per_pixel``
             kilobytes.
+        create_primary_key_index
+            If ``True``, a HATS index dataset will be created for the primary key
+            column defined in the schema.
+        extra_index_columns
+            A list of additional columns to include in the primary key index dataset.
         n_workers
             The number of worker processes to use for the conversion. If not provided,
             uses recommended defaults based on the system's resources. ``n_workers=1``
@@ -238,7 +245,26 @@ class HATS:
         )
         log.info("Object catalogue partition info file created.")
 
-        return cls(pathlib.Path(collection_path))
+        # Create the primary key index if requested.
+        obj = cls(pathlib.Path(collection_path))
+
+        if create_primary_key_index:
+            pks = schema.get_primary_keys()
+            if len(pks) > 1:
+                raise ValueError("Composite primary keys are not supported in HATS.")
+
+            index_column = pks[0]
+            log.info(f"Creating primary key index for column {index_column!r}.")
+
+            obj.add_index(
+                index_name=f"index_{index_column}",
+                index_column=index_column,
+                extra_columns=extra_index_columns,
+                check_duplicates=True,
+                overwrite=overwrite,
+            )
+
+        return obj
 
     def rechunk(
         self,

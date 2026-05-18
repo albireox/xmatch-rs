@@ -66,9 +66,9 @@ def convert_to_hats_object_catalogue(
     rechunk: bool = True,
     max_rows_per_file: int | None = 1_000_000,
     max_kilobytes_per_file: int | None = None,
-    apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None = None,
     n_workers: int | None = None,
     dynamic_planning: bool = True,
+    apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None = None,
     show_progress: bool = True,
     log: SDSSLogger | None = None,
     quiet: bool = False,
@@ -234,6 +234,20 @@ def convert_to_hats_object_catalogue(
             phases=[healpix_min_order_model],
         )
 
+        if rechunk:
+            # Check if we have already rechunked the data.
+            convert_model.add_phase(
+                PhaseModel(
+                    name="rechunk_dataset",
+                    type="rechunk",
+                    description=(
+                        "Rechunk the dataset files to a maximum number of rows and KB."
+                    ),
+                    max_rows_per_file=max_rows_per_file,
+                    max_kilobytes_per_file=max_kilobytes_per_file,
+                )
+            )
+
     convert_model.write()
 
     # Check if conversion is complete.
@@ -241,38 +255,21 @@ def convert_to_hats_object_catalogue(
         log.info("Conversion to HATS object catalogue is complete. Nothing left to do.")
         return convert_model
 
+    complete: bool = False
     while not convert_model.complete:
         # Get next phase to run.
         phase = convert_model.get_next_phase()
 
         if not phase:
-            log.info("No more phases to run. Checking if conversion is complete.")
-            result = check_completion(
-                dataset_path,
-                max_rows_per_pixel=max_rows_per_pixel,
-                max_kilobytes_per_pixel=max_kilobytes_per_pixel,
-            )
+            if not complete:
+                log.info("No more phases to run. Checking if conversion is complete.")
+                complete = check_completion(
+                    dataset_path,
+                    max_rows_per_pixel=max_rows_per_pixel,
+                    max_kilobytes_per_pixel=max_kilobytes_per_pixel,
+                )
 
-            if result:
-                if rechunk:
-                    # Check if we have already rechunked the data.
-                    rechunk_phase = convert_model.get_phase("rechunk_dataset")
-                    if not rechunk_phase or not rechunk_phase.complete:
-                        log.debug("Adding rechunking phase.")
-                        convert_model.add_phase(
-                            PhaseModel(
-                                name="rechunk_dataset",
-                                type="rechunk",
-                                description=(
-                                    "Rechunk the dataset files to a maximum "
-                                    "number of rows and KB."
-                                ),
-                                max_rows_per_file=max_rows_per_file,
-                                max_kilobytes_per_file=max_kilobytes_per_file,
-                            )
-                        )
-                        continue
-
+            if complete:
                 log.info("Conversion to HATS object catalogue is complete.")
                 convert_model.complete = True
                 convert_model.write()
@@ -285,61 +282,36 @@ def convert_to_hats_object_catalogue(
                     )
                     break
 
-                log.info("Conversion is not complete. Adding re-partitioning phase.")
+                log.info("Partitioning is not complete. Adding re-partitioning phase.")
                 phase = add_repartitioning_phase(
                     convert_model,
                     max_rows_per_pixel=max_rows_per_pixel,
                     max_kilobytes_per_pixel=max_kilobytes_per_pixel,
                 )
 
-        if phase.type == "healpix_partitioning":
-            _run_hats_healpix_phase(
-                data_path=data_path,
-                model=convert_model,
-                phase_name=phase.name,
-                format=format,
-                apply_callback=apply_callback,
-                log=log,
-                show_progress=show_progress,
-                n_workers=n_workers,
-            )
-        elif phase.type == "rechunk":
-            log.info("Rechunking dataset files. This may take a while.")
-            hats_rechunk(
-                path=str(dataset_path),
-                max_rows_per_file=phase.max_rows_per_file,
-                approximate_bytes_per_file=phase.max_kilobytes_per_file * 1024
-                if phase.max_kilobytes_per_file is not None
-                else None,
-                is_dataset=True,
-            )
-
-            # Nothing left to do after this so mark the phase and conversion complete.
-            log.info("Rechunking complete.")
-            convert_model.update_phase(phase.name, complete=True)
-            convert_model.complete = True
-            convert_model.write()
-            return convert_model
-        else:
-            raise ValueError(f"Unknown phase type {phase.type!r}.")
+        _run_hats_healpix_phase(
+            data_path=data_path,
+            model=convert_model,
+            phase_name=phase.name,
+            format=format,
+            apply_callback=apply_callback,
+            log=log,
+            show_progress=show_progress,
+            n_workers=n_workers,
+        )
 
         if not phase.complete:
             raise RuntimeError(f"Phase {phase.name!r} did not complete successfully.")
 
-        log.info("Checking if HATS conversion is complete.")
-        complete = check_completion(
-            dataset_path,
-            max_rows_per_pixel=max_rows_per_pixel,
-            max_kilobytes_per_pixel=max_kilobytes_per_pixel,
-        )
+        log.info("Checking if HATS is complete.")
+        if not complete:
+            complete = check_completion(
+                dataset_path,
+                max_rows_per_pixel=max_rows_per_pixel,
+                max_kilobytes_per_pixel=max_kilobytes_per_pixel,
+            )
 
-        if complete:
-            log.info("Conversion to HATS object catalogue is complete.")
-            convert_model.complete = True
-            convert_model.write()
-            break
-
-        if not dynamic_planning:
+        if not dynamic_planning or complete:
             continue
 
         if (
@@ -368,6 +340,7 @@ def convert_to_hats_object_catalogue(
             order_1=phase.healpix_order_1 + 1,
             max_rows_per_pixel=max_rows_per_pixel,
             max_kilobytes_per_pixel=max_kilobytes_per_pixel,
+            add_after=phase.name,
         )
 
     return convert_model
@@ -398,49 +371,63 @@ def _run_hats_healpix_phase(
     order_0 = phase.healpix_order_0
     order_1 = phase.healpix_order_1
 
-    if order_0 is None:
-        # Determine the file format if not provided.
-        if format is None:
-            files = parse_path(data_path)
-            sample_file = files[0]
-            if re.match(r".*\.csv\.?[gz|bz2]?$", sample_file.name):
-                log.info("Inferred file format as CSV based on file extension.")
-                format = "csv"
-            elif re.match(r".*\.parquet$", sample_file.name):
-                log.info("Inferred file format as Parquet based on file extension.")
-                format = "parquet"
-            else:
-                raise ValueError(
-                    "Could not infer file format from file extension. "
-                    "Please specify the format explicitly.",
-                )
+    if phase.type == "healpix_partitioning":
+        if order_0 is None:
+            # Determine the file format if not provided.
+            if format is None:
+                files = parse_path(data_path)
+                sample_file = files[0]
+                if re.match(r".*\.csv\.?[gz|bz2]?$", sample_file.name):
+                    log.info("Inferred file format as CSV based on file extension.")
+                    format = "csv"
+                elif re.match(r".*\.parquet$", sample_file.name):
+                    log.info("Inferred file format as Parquet based on file extension.")
+                    format = "parquet"
+                else:
+                    raise ValueError(
+                        "Could not infer file format from file extension. "
+                        "Please specify the format explicitly.",
+                    )
 
-        assert order_1 is not None, "healpix_order_1 must be set for the initial phase."
+            assert order_1 is not None, "healpix_order_1 must be set."
 
-        # This is the initial partition to HATS format.
-        _run_hats_min_order_phase(
-            data_path=data_path,
-            model=model,
-            schema=schema,
-            phase_name=phase_name,
-            format=format,
-            order_1=order_1,
-            apply_callback=apply_callback,
-            log=log,
-            show_progress=show_progress,
-            n_workers=n_workers,
-        )
-    else:
-        # Re-partition from order_0 to order_1.
-        assert order_1 is not None, "healpix_order_1 must be set for re-partitioning."
-        _run_hats_repartition(
-            model=model,
-            phase_name=phase_name,
-            order_0=order_0,
-            order_1=order_1,
-            log=log,
-            show_progress=show_progress,
-            n_workers=n_workers,
+            # This is the initial partition to HATS format.
+            _run_hats_min_order_phase(
+                data_path=data_path,
+                model=model,
+                schema=schema,
+                phase_name=phase_name,
+                format=format,
+                order_1=order_1,
+                apply_callback=apply_callback,
+                log=log,
+                show_progress=show_progress,
+                n_workers=n_workers,
+            )
+        else:
+            # Re-partition from order_0 to order_1.
+            assert order_0 is not None and order_1 is not None, (
+                "healpix_order_0 and healpix_order_1 must be set for re-partitioning."
+            )
+            _run_hats_repartition(
+                model=model,
+                phase_name=phase_name,
+                order_0=order_0,
+                order_1=order_1,
+                log=log,
+                show_progress=show_progress,
+                n_workers=n_workers,
+            )
+
+    elif phase.type == "rechunk":
+        log.info("Rechunking dataset files. This may take a while.")
+        hats_rechunk(
+            path=str(model.object_path / "dataset"),
+            max_rows_per_file=phase.max_rows_per_file,
+            approximate_bytes_per_file=phase.max_kilobytes_per_file * 1024
+            if phase.max_kilobytes_per_file is not None
+            else None,
+            is_dataset=True,
         )
 
 
@@ -813,6 +800,7 @@ def add_repartitioning_phase(
     order_1: int | None = None,
     max_rows_per_pixel: int | None = None,
     max_kilobytes_per_pixel: int | None = None,
+    add_after: str | None = None,
 ) -> PhaseModel:
     """Adds a re-partitioning phase to the conversion model."""
 
@@ -837,6 +825,6 @@ def add_repartitioning_phase(
         max_kilobytes_per_pixel=max_kilobytes_per_pixel,
     )
 
-    model.add_phase(phase)
+    model.add_phase(phase, add_after=add_after)
 
     return phase

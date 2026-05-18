@@ -94,6 +94,7 @@ class ConvertToHATSModel(BaseModel):
         self,
         phase: PhaseModel | None = None,
         write: bool = True,
+        add_after: str | None = None,
         **kwargs,
     ) -> PhaseModel:
         """Adds a phase to the conversion model."""
@@ -101,7 +102,15 @@ class ConvertToHATSModel(BaseModel):
         if phase is None:
             phase = PhaseModel(**kwargs)
 
-        self.phases.append(phase)
+        if add_after is not None:
+            for ii, existing_phase in enumerate(self.phases):
+                if existing_phase.name == add_after:
+                    self.phases.insert(ii + 1, phase)
+                    break
+            else:
+                raise ValueError(f"Phase {add_after!r} not found in conversion model.")
+        else:
+            self.phases.append(phase)
 
         if write:
             self.write()
