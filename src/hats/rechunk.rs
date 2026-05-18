@@ -28,6 +28,8 @@ pub struct HATSRechunkOptions {
     ///
     /// Default is no limit (u64::MAX).
     pub approximate_bytes_per_file: Option<u64>,
+    /// Sort by this column before rechunking.
+    pub sort_by: Option<String>,
 }
 
 /// Rechunks a HATS dataset.
@@ -80,6 +82,12 @@ fn _rechunk_path(path: &PathBuf, rechunk_options: &HATSRechunkOptions) -> Result
     let lf = LazyFrame::scan_parquet(path_pl, ScanArgsParquet::default())?;
 
     // Sink the lazyframe to new parquet files with the configured rechunking options.
+    let lf = if let Some(sort_by) = &rechunk_options.sort_by {
+        lf.sort(vec![sort_by], Default::default())
+    } else {
+        lf
+    };
+
     lf.sink(
         SinkDestination::Partitioned {
             base_path: PlRefPath::new(path.to_string_lossy().as_ref()),

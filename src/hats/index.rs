@@ -122,6 +122,7 @@ fn _create_hats_index_sequential(
 
     let re_expr = regex::Regex::new(r"Norder=(\d+)/Dir=(\d+)/Npix=(\d+)").unwrap();
 
+    let mut nn: u64 = 1;
     for entry in glob::glob(&format!("{}/Norder=*/Dir=*/Npix=*", object_path.display()))? {
         match entry {
             Ok(path) => {
@@ -165,7 +166,28 @@ fn _create_hats_index_sequential(
                 );
 
                 // Sink the index for the pixel to parquet files.
-                _sink_index_lf(lf.clone(), index_path, options, "uuid")?;
+                lf.sink(
+                    SinkDestination::File {
+                        target: SinkTarget::Path(PlRefPath::new(format!(
+                            "{}/part-{:0>6}.parquet",
+                            index_path.display(),
+                            nn
+                        ))),
+                    },
+                    FileWriteFormat::Parquet(Arc::new(ParquetWriteOptions {
+                        compression: ParquetCompression::default(),
+                        statistics: StatisticsOptions::default(),
+                        row_group_size: None,
+                        data_page_size: None,
+                        key_value_metadata: None,
+                        arrow_schema: None,
+                        compat_level: None,
+                    })),
+                    UnifiedSinkArgs::default(),
+                )?
+                .collect_with_engine(Engine::Streaming)?;
+
+                nn += 1;
             }
             Err(e) => bail!("Error listing pixel directories: {:?}", e),
         }
@@ -176,6 +198,7 @@ fn _create_hats_index_sequential(
         is_dataset: false,
         max_rows_per_file: Some(options.max_rows_per_file as u32),
         approximate_bytes_per_file: Some(options.max_kilobytes_per_file * 1024),
+        sort_by: Some(index_column.to_string()),
     };
     rechunk_hats_dataset(index_path.clone(), rechunk_options)?;
 

@@ -59,6 +59,7 @@ fn hats_rechunk(
         is_dataset,
         max_rows_per_file,
         approximate_bytes_per_file,
+        sort_by: None,
     };
 
     hats::rechunk::rechunk_hats_dataset(path, options)
