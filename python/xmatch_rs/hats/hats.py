@@ -400,7 +400,7 @@ class HATS:
             index_name=index_name,
             index_column=index_column,
             extra_columns=extra_columns,
-            mode="sequential" if not check_duplicates else "full",
+            mode=mode,
             check_duplicates=check_duplicates,
             max_rows_per_file=max_rows_per_file,
             max_kilobytes_per_file=max_kilobytes_per_file,
