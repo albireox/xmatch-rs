@@ -9,12 +9,14 @@
 from __future__ import annotations
 
 import pathlib
+import shutil
 
 from typing import TYPE_CHECKING, Literal
 
 import sdsstools.logger
 
 from xmatch_rs._xmatch_rs_lib.hats import hats_rechunk
+from xmatch_rs.hats.index import create_index
 from xmatch_rs.hats.metadata import create_partition_info, create_properties
 from xmatch_rs.hats.object import convert_to_hats_object_catalogue
 from xmatch_rs.schema import Schema
@@ -47,6 +49,16 @@ class HATS:
 
     def __repr__(self) -> str:
         return f"<HATS (path={str(self.path)!r})>"
+
+    def get_schema(self) -> Schema:
+        """Returns the schema of the HATS collection."""
+
+        schema_path = self.path / "_schema.yaml"
+
+        if not schema_path.exists():
+            raise FileNotFoundError(f"No schema file found at {schema_path!s}.")
+
+        return Schema(schema_path)
 
     @classmethod
     def convert_to_hats(
@@ -279,4 +291,78 @@ class HATS:
             approximate_bytes_per_file=max_kilobytes_per_file * 1024
             if max_kilobytes_per_file is not None
             else None,
+        )
+
+    def add_index(
+        self,
+        index_name: str,
+        index_column: str,
+        extra_columns: list[str] = [],
+        check_duplicates: bool = True,
+        max_rows_per_file: int = 10_000_000,
+        max_kilobytes_per_file: int = 10 * 1024 * 1024,
+        overwrite: bool = False,
+    ):
+        """Adds an index to the HATS object catalogue.
+
+        Parameters
+        ----------
+        index_name
+            The name of the index to add. The index dataset will be created under the
+            directory ``<collection_path>/<index_name>/dataset/index``.
+        index_column
+            The column to index on.
+        extra_columns
+            Any additional columns to include in the index.
+        check_duplicates
+            Whether to check for duplicate entries in the index. If ``True``, an error
+            will be raised if duplicates are found. This can significantly slow down the
+            index generation for large datasets.
+        max_rows_per_file
+            The maximum number of rows per file when chunking the index.
+            Defaults to 10 million rows per file.
+        max_kilobytes_per_file
+            The maximum number of kilobytes per file when chunking the index.
+            Defaults to 10 GB.
+        overwrite
+            If ``True``, allows overwriting existing files in the output directory.
+            Defaults to ``False``.
+
+        """
+
+        # Check paths.
+        object_path = self.path / "object"
+        if not object_path.exists():
+            raise FileNotFoundError(f"No object catalogue found at {object_path!s}.")
+
+        index_path = self.path / index_name / "dataset" / "index"
+        if index_path.exists():
+            if not overwrite:
+                raise FileExistsError(f"The index {index_name!r} already exists.")
+            else:
+                shutil.rmtree(index_path)
+        index_path.mkdir(parents=True, exist_ok=True)
+
+        # Create the index dataset.
+        create_index(
+            object_path=object_path,
+            index_path=index_path,
+            index_column=index_column,
+            extra_columns=extra_columns,
+            check_duplicates=check_duplicates,
+            max_rows_per_file=max_rows_per_file,
+            max_kilobytes_per_file=max_kilobytes_per_file,
+        )
+
+        # Add the properties file for the index.
+        create_properties(
+            "index",
+            self.path,
+            data_path=self.path / index_name,
+            schema=self.get_schema(),
+            overwrite=overwrite,
+            data_fields={
+                "hats_index_column": index_column,
+                "hats_index_extra_column": " ".join(extra_columns),
+            },
         )

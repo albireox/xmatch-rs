@@ -12,11 +12,14 @@ import pathlib
 
 from typing import Literal
 
+import polars
+
 import xmatch_rs
 from xmatch_rs.hats.models import HATSPropertiesModel
 from xmatch_rs.hats.object import get_dataset_df, get_dataset_nrows
+from xmatch_rs.hats.tools import get_directory_size
 from xmatch_rs.schema import Schema
-from xmatch_rs.tools import get_current_time
+from xmatch_rs.tools import get_current_time, lazy_frame_row_count
 
 
 __all__: list[str] = ["HATSProperties", "create_properties", "create_partition_info"]
@@ -113,10 +116,14 @@ def create_properties(
         "collection",
     ],
     collection_path: str | pathlib.Path,
+    data_path: str | pathlib.Path | None = None,
     schema: Schema | None = None,
     overwrite: bool = False,
+    data_fields: dict[str, str] | None = None,
 ):
     """Creates a properties file for the corresponding HATS data product."""
+
+    data_fields = data_fields or {}
 
     collection_path = pathlib.Path(collection_path)
     if not collection_path.exists():
@@ -128,14 +135,21 @@ def create_properties(
             raise ValueError(f"The schema path {schema_path!s} does not exist.")
         schema = Schema(schema_path)
 
+    # If we passed a data path, use it. Otherwise it will be set below.
+    path = pathlib.Path(data_path) if data_path is not None else None
+
     if dataproduct_type == "object":
         object_path = collection_path / "object"
         if not object_path.exists():
             raise ValueError(f"The object path {object_path!s} does not exist.")
 
-        path = object_path / "properties"
+        path = path or (object_path / "properties")
     elif dataproduct_type == "collection":
-        path = collection_path / "collection.properties"
+        path = path or (collection_path / "collection.properties")
+    elif dataproduct_type == "index":
+        if data_path is None:
+            raise ValueError("data_path is required for index properties.")
+        path = pathlib.Path(data_path) / "properties"
     else:
         raise NotImplementedError(f"Data type {dataproduct_type!r} is not supported.")
 
@@ -152,26 +166,43 @@ def create_properties(
     bib_reference = schema.schema.bib_reference
     bib_reference_url = schema.schema.bib_reference_url
 
+    hats_col_ra = None
+    hats_col_dec = None
+    hats_frame = None
+    hats_coordinate_epoch = None
+    hats_nrows = None
+    hats_order = None
+    hats_max_rows = None
+    hats_estsize = None
     if dataproduct_type == "object":
         hats_col_ra, hats_col_dec = schema.get_ra_dec_columns()
         hats_coordinate_epoch = schema.schema.coordinate_epoch
         hats_frame = "equatorial"
 
-        hats_nrows = get_dataset_nrows(object_path)
+        hats_nrows = get_dataset_nrows(path.parent / "dataset")
 
-        dataset_df = get_dataset_df(object_path, include_size=True)
+        dataset_df = get_dataset_df(path.parent / "dataset", include_size=True)
         hats_order = dataset_df["Norder"].max()
         hats_max_rows = dataset_df["n_rows"].max()
         hats_estsize = dataset_df["size_kb"].sum()
-    else:
-        hats_col_ra = None
-        hats_col_dec = None
-        hats_frame = None
-        hats_coordinate_epoch = None
-        hats_nrows = None
-        hats_order = None
-        hats_max_rows = None
-        hats_estsize = None
+
+    hats_index_column = None
+    hats_index_extra_column = None
+    if dataproduct_type == "index":
+        hats_index_column = data_fields.get("hats_index_column")
+        if hats_index_column is None:
+            raise ValueError(
+                "hats_index_column is required for index properties. "
+                "Please provide it in data_fields."
+            )
+
+        hats_index_extra_column = data_fields.get("hats_index_extra_column")
+        if hats_index_extra_column is None or hats_index_extra_column.strip() == "":
+            hats_index_extra_column = None
+
+        dataset_path = path.parent / "dataset" / "index"
+        hats_nrows = lazy_frame_row_count(polars.scan_parquet(dataset_path))
+        hats_estsize = get_directory_size(dataset_path)
 
     properties = HATSProperties(
         path=path,
@@ -189,6 +220,8 @@ def create_properties(
         hats_order=str(hats_order) if hats_order is not None else None,
         hats_max_rows=str(hats_max_rows) if hats_max_rows is not None else None,
         hats_estsize=str(int(hats_estsize)) if hats_estsize is not None else None,
+        hats_index_column=hats_index_column,
+        hats_index_extra_column=hats_index_extra_column,
         hats_creation_date=hats_creation_date,
         hats_builder=hats_builder,
         hats_version=hats_version,

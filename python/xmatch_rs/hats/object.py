@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import multiprocessing
-import os
 import pathlib
 import re
 import shutil
@@ -34,8 +33,12 @@ from xmatch_rs import console
 from xmatch_rs._xmatch_rs_lib.hats import hats_rechunk, hats_repartition
 from xmatch_rs.convert import convert_csv_to_parquet, convert_to_parquet
 from xmatch_rs.hats.models import ConvertToHATSModel, PhaseModel
-from xmatch_rs.hats.providers import (
-    get_hats_file_provider,
+from xmatch_rs.hats.providers import get_hats_file_provider
+from xmatch_rs.hats.tools import (
+    get_dataset_df,
+    get_dataset_nrows,
+    get_dataset_path,
+    get_pixel_path,
 )
 from xmatch_rs.schema import Schema
 from xmatch_rs.tools import get_xmatch_rs_logger, parse_path
@@ -47,14 +50,7 @@ if TYPE_CHECKING:
     from xmatch_rs.types import APPLY_CALLBACK_T, DATA_PATH_T
 
 
-__all__: list[str] = [
-    "convert_to_hats_object_catalogue",
-    "get_dataset_nrows",
-    "check_completion",
-    "get_dataset_df",
-    "get_directory_size",
-    "get_dataset_path",
-]
+__all__: list[str] = ["convert_to_hats_object_catalogue", "check_completion"]
 
 
 def convert_to_hats_object_catalogue(
@@ -713,73 +709,6 @@ def _monitor_progress(progress_file: pathlib.Path | None, log: SDSSLogger) -> No
     return
 
 
-def get_dataset_path(base_path: pathlib.Path) -> pathlib.Path:
-    """Returns the path to the dataset directory in a HATS dataset."""
-
-    base_path = pathlib.Path(base_path)
-    if not base_path.exists():
-        raise ValueError(f"The provided path {base_path!s} does not exist.")
-    elif not base_path.is_dir():
-        raise ValueError(f"The provided path {base_path!s} is not a directory.")
-
-    if base_path.name == "dataset":
-        return base_path
-
-    dataset_path = base_path / "dataset"
-    if not dataset_path.exists():
-        raise ValueError(f"Cannot find dataset directory at {dataset_path!s}.")
-    elif not dataset_path.is_dir():
-        raise ValueError(f"The path {dataset_path!s} is not a directory.")
-
-    return dataset_path
-
-
-def get_dataset_df(path: pathlib.Path, include_size: bool = True) -> polars.DataFrame:
-    """Returns a DataFrame with the number of rows and size in Kb for each pixel."""
-
-    dataset_path = get_dataset_path(path)
-
-    lf = polars.scan_parquet(dataset_path)
-
-    n_rows = (
-        lf.group_by(["Norder", "Npix"])
-        .agg(n_rows=polars.len())
-        .collect(engine="streaming")
-    )
-    assert isinstance(n_rows, polars.DataFrame)
-
-    if not include_size:
-        return n_rows
-
-    pixel_dirs = list(dataset_path.glob("Norder=*/Dir=*/Npix=*"))
-    pixel_dirs = [d for d in pixel_dirs if d.is_dir()]
-
-    sizes_kb = []
-    for pixel_dir in pixel_dirs:
-        size_kb = get_directory_size(pixel_dir)
-        if match := re.match(r".*Norder=(\d+)/Dir=\d+/Npix=(\d+)/?$", str(pixel_dir)):
-            order = int(match.group(1))
-            npix = int(match.group(2))
-            sizes_kb.append({"Norder": order, "Npix": npix, "size_kb": size_kb})
-
-    df_sizes = polars.DataFrame(sizes_kb)
-
-    return n_rows.join(df_sizes, on=["Norder", "Npix"], how="left")
-
-
-def get_directory_size(path: pathlib.Path) -> int:
-    """Returns the total size of a directory in kilobytes."""
-
-    total_size = 0
-    with os.scandir(path) as it:
-        for entry in it:
-            if entry.is_file():
-                # entry.stat() provides size in bytes
-                total_size += entry.stat().st_size
-
-    return total_size // 1024  # Convert to kilobytes
-
-
 def check_completion(
     dataset_path: pathlib.Path,
     order_0: int | None = None,
@@ -878,28 +807,6 @@ def check_completion(
     return True
 
 
-def get_pixel_path(
-    dataset_path: pathlib.Path,
-    order: int,
-    npix: int,
-    check: bool = False,
-) -> pathlib.Path:
-    """Returns the path to a pixel directory in a HATS dataset."""
-
-    dataset_path = get_dataset_path(dataset_path)
-
-    dir_order = npix // 10_000
-    pixel_dir = dataset_path / f"Norder={order}" / f"Dir={dir_order}" / f"Npix={npix}"
-
-    if check:
-        if not pixel_dir.exists():
-            raise ValueError(f"Pixel directory {pixel_dir!s} does not exist.")
-        elif not pixel_dir.is_dir():
-            raise ValueError(f"Pixel path {pixel_dir!s} is not a directory.")
-
-    return pixel_dir
-
-
 def add_repartitioning_phase(
     model: ConvertToHATSModel,
     order_0: int | None = None,
@@ -933,21 +840,3 @@ def add_repartitioning_phase(
     model.add_phase(phase)
 
     return phase
-
-
-def get_dataset_nrows(
-    dataset_path: pathlib.Path,
-    orders: list[int] | None = None,
-) -> int:
-    """Returns the total number of rows in a HATS dataset."""
-
-    dataset_path = get_dataset_path(dataset_path)
-
-    lf = polars.scan_parquet(dataset_path)
-
-    if orders is not None:
-        lf = lf.filter(polars.col("Norder").is_in(orders))
-
-    n_rows = lf.select(polars.len()).collect().item()  # type: ignore
-
-    return n_rows

@@ -215,3 +215,78 @@ def convert(
         log=log,
         overwrite=overwrite,
     )
+
+
+@hats_cli.command("create-index")
+@cloup.argument(
+    "collection_path",
+    type=cloup.Path(exists=True, path_type=pathlib.Path, file_okay=False),
+)
+@cloup.argument("index_column", type=str)
+@cloup.option(
+    "--index-name",
+    "-n",
+    type=str,
+    help="Name of the index to create. Defaults to 'index_<INDEX_COLUMN>'.",
+)
+@cloup.option(
+    "--extra-columns",
+    "-e",
+    type=str,
+    default="",
+    help="Additional columns to include in the index, separated by commas. "
+    "These columns will be included in the index file.",
+)
+@cloup.option(
+    "--check-duplicates/--no-check-duplicates",
+    default=True,
+    help=("Whether to check for duplicate entries in the index."),
+)
+@cloup.option(
+    "--max-rows-per-file",
+    type=int,
+    default=10_000_000,
+    show_default=True,
+    help="The maximum number of rows per file when chunking the index.",
+)
+@cloup.option(
+    "--max-kilobytes-per-file",
+    type=int,
+    default=10 * 1024 * 1024,
+    show_default=True,
+    help="The maximum number of kilobytes per file when chunking the index.",
+)
+@cloup.option(
+    "--overwrite",
+    is_flag=True,
+    default=False,
+    help="Allow overwriting existing index dataset.",
+)
+def create_index(
+    collection_path: pathlib.Path,
+    index_column: str,
+    index_name: str | None,
+    extra_columns: str,
+    check_duplicates: bool = True,
+    max_rows_per_file: int = 10_000_000,
+    max_kilobytes_per_file: int = 10 * 1024 * 1024,
+    overwrite: bool = False,
+):
+    """Creates an index dataset from the object catalogue."""
+
+    from xmatch_rs.hats import HATS
+
+    index_column = index_column.lower()
+    index_name = index_name or f"index_{index_column.lower()}"
+
+    hats = HATS(collection_path)
+
+    hats.add_index(
+        index_name=index_name,
+        index_column=index_column,
+        extra_columns=extra_columns.strip().split(","),
+        check_duplicates=check_duplicates,
+        max_rows_per_file=max_rows_per_file,
+        max_kilobytes_per_file=max_kilobytes_per_file,
+        overwrite=overwrite,
+    )
