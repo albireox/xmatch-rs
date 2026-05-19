@@ -45,7 +45,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           command: develop
-          args: --uv -group test
+          args: --uv --group test
           sccache: true
 
       - name: Test with pytest
