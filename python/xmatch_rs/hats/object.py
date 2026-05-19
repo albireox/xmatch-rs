@@ -29,8 +29,8 @@ from rich.progress import (
 
 from sdsstools import Timer, read_yaml_file
 
+import xmatch_rs._xmatch_rs_lib.hats as _rs_hats
 from xmatch_rs import console
-from xmatch_rs._xmatch_rs_lib.hats import hats_rechunk, hats_repartition
 from xmatch_rs.convert import convert_csv_to_parquet, convert_to_parquet
 from xmatch_rs.hats.models import ConvertToHATSModel, PhaseModel
 from xmatch_rs.hats.providers import get_hats_file_provider
@@ -421,7 +421,7 @@ def _run_hats_healpix_phase(
 
     elif phase.type == "rechunk":
         log.info("Rechunking dataset files. This may take a while.")
-        hats_rechunk(
+        _rs_hats.rechunk(
             path=str(model.object_path / "dataset"),
             max_rows_per_file=phase.max_rows_per_file,
             approximate_bytes_per_file=phase.max_kilobytes_per_file * 1024
@@ -578,7 +578,7 @@ def _run_hats_repartition(
     # Now we call the Rust code.
     try:
         # List of pixels that were re-partitioned.
-        pixels: list[int] = hats_repartition(
+        pixels: list[int] = _rs_hats.repartition(
             path=str(dataset_path),
             order_0=order_0,
             order_1=order_1,

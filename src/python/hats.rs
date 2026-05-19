@@ -1,31 +1,19 @@
 /*
  *  @Author: José Sánchez-Gallego (gallegoj@uw.edu)
- *  @Date: 2026-05-16
- *  @Filename: python.rs
+ *  @Date: 2026-05-18
+ *  @Filename: hats.rs
  *  @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
  */
 
 use std::path::PathBuf;
 
 use anyhow::Result;
-use pyo3::{prelude::*, py_run};
+use pyo3::prelude::*;
 
-use crate::{hats, healpix};
+use crate::hats;
 
-/// Converts RA and Dec to HEALPix pixel.
-#[pyfunction]
-fn ra_dec_to_healpix(ra: f64, dec: f64, order: u8) -> PyResult<u64> {
-    Ok(healpix::ra_dec_to_healpix(ra, dec, order))
-}
-
-/// Returns the area of a HEALPix pixel at the given order in square degrees or steradians.
-#[pyfunction]
-fn healpix_pixel_area(order: u8, degrees: bool) -> PyResult<f64> {
-    Ok(healpix::healpix_pixel_area(order, degrees))
-}
-
-#[pyfunction]
-fn hats_repartition(
+#[pyfunction(name = "repartition")]
+pub(crate) fn hats_repartition(
     path: PathBuf,
     order_0: u8,
     order_1: u8,
@@ -48,8 +36,8 @@ fn hats_repartition(
     hats::partition::hats_repartition(path, order_0, order_1, pixels, options)
 }
 
-#[pyfunction]
-fn hats_rechunk(
+#[pyfunction(name = "rechunk")]
+pub(crate) fn hats_rechunk(
     path: PathBuf,
     is_dataset: bool,
     max_rows_per_file: Option<u32>,
@@ -65,8 +53,8 @@ fn hats_rechunk(
     hats::rechunk::rechunk_hats_dataset(path, options)
 }
 
-#[pyfunction]
-fn hats_create_index(
+#[pyfunction(name = "create_index")]
+pub(crate) fn hats_create_index(
     collection_path: PathBuf,
     index_name: &str,
     index_column: &str,
@@ -96,37 +84,11 @@ fn hats_create_index(
     Ok(())
 }
 
-// Define the Python module
-#[pymodule(name = "_xmatch_rs_lib")]
-fn xmatch_rs_pymodule(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    // xmatch_rs.healpix module
-    let xmatch_rs_healpix = PyModule::new(_py, "healpix")?;
-
-    xmatch_rs_healpix.add_function(wrap_pyfunction!(ra_dec_to_healpix, &xmatch_rs_healpix)?)?;
-    xmatch_rs_healpix.add_function(wrap_pyfunction!(healpix_pixel_area, &xmatch_rs_healpix)?)?;
-
-    py_run!(
-        _py,
-        xmatch_rs_healpix,
-        "import sys; sys.modules['xmatch_rs._xmatch_rs_lib.healpix'] = xmatch_rs_healpix"
-    );
-
-    m.add_submodule(&xmatch_rs_healpix)?;
-
-    // xmatch_rs.hats module
-    let xmatch_rs_hats = PyModule::new(_py, "hats")?;
-
-    xmatch_rs_hats.add_function(wrap_pyfunction!(hats_repartition, &xmatch_rs_hats)?)?;
-    xmatch_rs_hats.add_function(wrap_pyfunction!(hats_rechunk, &xmatch_rs_hats)?)?;
-    xmatch_rs_hats.add_function(wrap_pyfunction!(hats_create_index, &xmatch_rs_hats)?)?;
-
-    py_run!(
-        _py,
-        xmatch_rs_hats,
-        "import sys; sys.modules['xmatch_rs._xmatch_rs_lib.hats'] = xmatch_rs_hats"
-    );
-
-    m.add_submodule(&xmatch_rs_hats)?;
-
-    Ok(())
+#[pyfunction(name = "get_neighbours")]
+pub(crate) fn hats_get_neighbours(
+    dataset_path: PathBuf,
+    norder: u8,
+    npix: u64,
+) -> Result<Vec<(u8, u64)>> {
+    hats::tools::get_hats_neighbours(dataset_path, norder, npix, None)
 }

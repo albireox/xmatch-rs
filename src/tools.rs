@@ -5,9 +5,10 @@
  *  @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
  */
 
-use std::thread::available_parallelism;
+use std::{path::Path, thread::available_parallelism};
 
 use anyhow::Result;
+use polars::prelude::*;
 
 /// Creates a Rayon thread pool.
 ///
@@ -22,4 +23,8 @@ pub fn create_pool(num_threads: Option<usize>) -> Result<rayon::ThreadPool> {
         Err(e) => Err(e.into()),
         Ok(pool) => Ok(pool),
     }
+}
+
+pub fn to_pl_path<T: AsRef<Path>>(path: T) -> Result<PlRefPath> {
+    Ok(PlRefPath::from(path.as_ref().to_str().unwrap()))
 }

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Literal
 
 import sdsstools.logger
 
-from xmatch_rs._xmatch_rs_lib.hats import hats_create_index, hats_rechunk
+import xmatch_rs._xmatch_rs_lib.hats as _rs_hats
 from xmatch_rs.hats.metadata import create_partition_info, create_properties
 from xmatch_rs.hats.object import convert_to_hats_object_catalogue
 from xmatch_rs.schema import Schema
@@ -324,7 +324,7 @@ class HATS:
                 "max_kilobytes_per_file must be provided."
             )
 
-        hats_rechunk(
+        _rs_hats.rechunk(
             product_path,
             is_dataset=is_dataset,
             max_rows_per_file=max_rows_per_file,
@@ -400,7 +400,7 @@ class HATS:
                 shutil.rmtree(index_path)
 
         # Create the index dataset.
-        hats_create_index(
+        _rs_hats.create_index(
             collection_path=self.path,
             index_name=index_name,
             index_column=index_column,

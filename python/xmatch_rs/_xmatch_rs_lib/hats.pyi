@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pathlib
 
-def hats_repartition(
+def repartition(
     path: str | pathlib.Path,
     order_0: int,
     order_1: int,
@@ -64,7 +64,7 @@ def hats_repartition(
     """
     ...
 
-def hats_rechunk(
+def rechunk(
     path: str | pathlib.Path,
     is_dataset: bool,
     max_rows_per_file: int | None,
@@ -94,7 +94,7 @@ def hats_rechunk(
     """
     ...
 
-def hats_create_index(
+def create_index(
     collection_path: str | pathlib.Path,
     index_name: str,
     index_column: str,

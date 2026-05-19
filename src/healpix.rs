@@ -34,19 +34,19 @@ pub fn healpix_pixel_area(order: u8, degrees: bool) -> f64 {
 }
 
 /// Converts a HEALPix pixel index from order_0 to order_1, returning the new pixel indices.
-pub fn healpix_convert_order(pixel: i64, order_0: u8, order_1: u8) -> Vec<i64> {
+pub fn healpix_convert_order(pixel: u64, order_0: u8, order_1: u8) -> Vec<u64> {
     if order_1 == order_0 {
         vec![pixel]
     } else if order_1 < order_0 {
         // If we are reducing the order, the pixel in order_1 encompasing the initial
         // order_0 pixel can be calculated by dividing by 4^(order_0 - order_1) (integer division).
-        let factor = 4i64.pow((order_0 - order_1) as u32);
+        let factor = 4u64.pow((order_0 - order_1) as u32);
         vec![pixel / factor]
     } else {
         // If we are increasing the order, the pixels in order_1 into which the initial order_0
         // pixel is split will be [4^k * p, ..., 4^k * (p+1)−1] where k = order_1 - order_0
         // and p is the pixel index in order_0.
-        let factor = 4i64.pow((order_1 - order_0) as u32);
+        let factor = 4u64.pow((order_1 - order_0) as u32);
         (0..factor).map(|i| pixel * factor + i).collect()
     }
 }

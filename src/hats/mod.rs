@@ -6,7 +6,9 @@
  */
 
 pub mod index;
+pub mod margin;
 pub mod partition;
 pub mod rechunk;
+pub mod tools;
 
 pub(crate) mod path_providers;
