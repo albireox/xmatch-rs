@@ -1587,7 +1587,7 @@ wheels = [
 
 [[package]]
 name = "xmatch-rs"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "cloup" },
     { name = "filelock" },

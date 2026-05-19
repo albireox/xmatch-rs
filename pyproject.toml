@@ -51,7 +51,7 @@ strip = true
 features = []
 
 [tool.uv]
-package = false
+package = true
 default-groups = ["dev", "docs", "test"]
 # cache-keys = [{file = "pyproject.toml"}, {file = "Cargo.toml"}, {file = "**/*.rs"}]
 
