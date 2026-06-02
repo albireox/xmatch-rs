@@ -102,8 +102,14 @@ pub(crate) fn hats_create_margin_cache(
     margin_name: &str,
     threshold: f32,
     overwrite: bool,
+    n_workers: Option<usize>,
+    progress_file: Option<PathBuf>,
 ) -> Result<()> {
-    let options = hats::margin::MarginCacheOptions { overwrite };
+    let options = hats::margin::MarginCacheOptions {
+        n_workers,
+        progress_file,
+        overwrite,
+    };
 
     hats::margin::create_margin_cache(&collection_path, margin_name, threshold, options)
 }

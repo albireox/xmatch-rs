@@ -753,15 +753,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "float-cmp"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b09cf3155332e944990140d967ff5eceb70df778b34f77d8075db46e4704e6d8"
-dependencies = [
- "num-traits",
-]
-
-[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2360,15 +2351,6 @@ dependencies = [
  "stacker",
  "uuid",
  "version_check",
-]
-
-[[package]]
-name = "polygons"
-version = "0.3.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37fb7b55f78a8349af2a15aabfa95a8d151f3c539a8404d40a6087dc3179fe06"
-dependencies = [
- "float-cmp",
 ]
 
 [[package]]
@@ -4204,7 +4186,6 @@ dependencies = [
  "glob",
  "polars",
  "polars-rows-iter",
- "polygons",
  "pyo3",
  "pyo3-polars",
  "rayon",
