@@ -150,6 +150,10 @@ def create_properties(
         if data_path is None:
             raise ValueError("data_path is required for index properties.")
         path = pathlib.Path(data_path) / "properties"
+    elif dataproduct_type == "margin":
+        if data_path is None:
+            raise ValueError("data_path is required for margin properties.")
+        path = pathlib.Path(data_path) / "properties"
     else:
         raise NotImplementedError(f"Data type {dataproduct_type!r} is not supported.")
 
@@ -174,7 +178,7 @@ def create_properties(
     hats_order = None
     hats_max_rows = None
     hats_estsize = None
-    if dataproduct_type == "object":
+    if dataproduct_type in ["object", "margin"]:
         hats_col_ra, hats_col_dec = schema.get_ra_dec_columns()
         hats_coordinate_epoch = schema.schema.coordinate_epoch
         hats_frame = "equatorial"
@@ -189,16 +193,15 @@ def create_properties(
     hats_index_column = None
     hats_index_extra_column = None
     if dataproduct_type == "index":
-        hats_index_column = data_fields.get("hats_index_column")
+        hats_index_column = data_fields.pop("hats_index_column")
         if hats_index_column is None:
             raise ValueError(
                 "hats_index_column is required for index properties. "
                 "Please provide it in data_fields."
             )
-
-        hats_index_extra_column = data_fields.get("hats_index_extra_column")
-        if hats_index_extra_column is None or hats_index_extra_column.strip() == "":
-            hats_index_extra_column = None
+        if "hats_index_extra_column" in data_fields:
+            hats_index_extra_column = data_fields.pop("hats_index_extra_column")
+            hats_index_extra_column = hats_index_extra_column.strip()
 
         dataset_path = path.parent / "dataset" / "index"
         hats_nrows = lazy_frame_row_count(polars.scan_parquet(dataset_path))
@@ -225,6 +228,7 @@ def create_properties(
         hats_creation_date=hats_creation_date,
         hats_builder=hats_builder,
         hats_version=hats_version,
+        **data_fields,
     )
     properties.write(overwrite=overwrite)
 

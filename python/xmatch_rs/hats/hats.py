@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Literal
 import sdsstools.logger
 
 import xmatch_rs._xmatch_rs_lib.hats as _rs_hats
+from xmatch_rs.hats.margin import create_margin_cache
 from xmatch_rs.hats.metadata import create_partition_info, create_properties
 from xmatch_rs.hats.object import convert_to_hats_object_catalogue
 from xmatch_rs.schema import Schema
@@ -49,7 +50,8 @@ class HATS:
     def __repr__(self) -> str:
         return f"<HATS (path={str(self.path)!r})>"
 
-    def get_schema(self) -> Schema:
+    @property
+    def schema(self) -> Schema:
         """Returns the schema of the HATS collection."""
 
         schema_path = self.path / "_schema.yaml"
@@ -416,10 +418,96 @@ class HATS:
             "index",
             self.path,
             data_path=self.path / index_name,
-            schema=self.get_schema(),
+            schema=self.schema,
             overwrite=overwrite,
             data_fields={
                 "hats_index_column": index_column,
                 "hats_index_extra_column": " ".join(extra_columns),
             },
         )
+
+    def create_margin_cache(
+        self,
+        margin_name: str,
+        buffer: float,
+        overwrite: bool = False,
+        n_workers: int | None = None,
+        show_progress: bool = True,
+        log: sdsstools.logger.SDSSLogger | None = None,
+        quiet: bool = False,
+    ):
+        """Creates a margin cache for the HATS object catalogue.
+
+        A margin cache is a dataset that contains additional sources around the edges
+        of each HATS partition pixel. This is useful for cross-matching with other
+        datasets, as it allows sources that are close to the edge of a pixel to be
+        included in the cross-match.
+
+        The margin cache will be created under the directory
+        ``<collection_path>/<margin_name>/dataset``. Each file in the margin cache will
+        contain sources from the object catalogue that are within a certain distance
+        (the buffer) from the edge of the corresponding HATS partition pixel.
+
+        Somewhat counterintuitively, smaller buffer values can increase the
+        margin cache creation time. This is because the total runtime is dominated
+        by the time required to create the BMOC for each pixel. A smaller buffer
+        requires a higher BMOC order, which makes BMOC creation slower.
+
+        Parameters
+        ----------
+        margin_name
+            The name of the margin cache to create. This is used to identify the margin
+            cache and should be unique within the collection.
+        buffer
+            The buffer value to use for the margin cache, in arcseconds. This is the
+            maximum distance around each HATS partition pixel for which additional
+            sources will be included in the margin cache.
+        overwrite
+            If ``True``, deletes the existing margin cache if it already exists.
+            If ``False``, raises an error.
+        n_workers
+            The number of workers to use for the operation. If :obj:`None`, uses all
+            the available CPU cores.
+        show_progress
+            If ``True``, displays a progress bar during the operation.
+        log
+            An optional logger to use for logging the margin cache creation process.
+        quiet
+            If ``True``, suppresses logging output. Defaults to ``False``. Ignored
+            if a logger is provided.
+
+        """
+
+        log = log or get_xmatch_rs_logger(log_level=40 if quiet else 20)
+
+        collection_path = self.path
+        margin_path = collection_path / margin_name
+
+        create_margin_cache(
+            collection_path=collection_path,
+            margin_name=margin_name,
+            buffer=buffer,
+            overwrite=overwrite,
+            n_workers=n_workers,
+            show_progress=show_progress,
+            log=log,
+        )
+
+        # Add the partition info file for the margin cache.
+        create_partition_info(
+            "margin",
+            margin_path,
+            overwrite=overwrite,
+        )
+        log.info("Margin cache partition info file created.")
+
+        # Add the properties file for the margin cache.
+        create_properties(
+            "margin",
+            collection_path,
+            data_path=margin_path,
+            schema=self.schema,
+            overwrite=overwrite,
+            data_fields={"hats_margin_threshold": str(buffer)},
+        )
+        log.info("Margin properties file created.")
