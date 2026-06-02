@@ -7,10 +7,13 @@
 
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use pyo3::prelude::*;
 
-use crate::hats;
+use crate::hats::{
+    self,
+    margin::{CellSide, PointsStrategy, path_along_edge},
+};
 
 #[pyfunction(name = "repartition")]
 pub(crate) fn hats_repartition(
@@ -91,4 +94,45 @@ pub(crate) fn hats_get_neighbours(
     npix: u64,
 ) -> Result<Vec<(u8, u64)>> {
     hats::tools::get_hats_neighbours(dataset_path, norder, npix, None)
+}
+
+#[pyfunction(name = "create_margin_cache")]
+pub(crate) fn hats_create_margin_cache(
+    collection_path: PathBuf,
+    margin_name: &str,
+    threshold: f32,
+    overwrite: bool,
+) -> Result<()> {
+    let options = hats::margin::MarginCacheOptions { overwrite };
+
+    hats::margin::create_margin_cache(&collection_path, margin_name, threshold, options)
+}
+
+#[pyfunction(name = "path_along_edge")]
+pub(crate) fn py_path_along_edge(
+    norder: u8,
+    npix: u64,
+    grow: Option<f32>,
+    side: &str,
+) -> Result<Vec<(f64, f64)>> {
+    let cell_side = match side {
+        "NW" => CellSide::NW,
+        "SW" => CellSide::SW,
+        "NE" => CellSide::NE,
+        "SE" => CellSide::SE,
+        _ => bail!(format!(
+            "Invalid side '{}'. Valid options are 'NW', 'NE', 'SW', 'SE'.",
+            side
+        )),
+    };
+
+    Ok(path_along_edge(
+        norder,
+        npix,
+        cell_side,
+        grow,
+        true,
+        PointsStrategy::Dynamic,
+        true,
+    ))
 }

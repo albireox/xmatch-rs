@@ -43,6 +43,11 @@ fn xmatch_rs_pymodule(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         hats::hats_get_neighbours,
         &xmatch_rs_hats
     )?)?;
+    xmatch_rs_hats.add_function(wrap_pyfunction!(
+        hats::hats_create_margin_cache,
+        &xmatch_rs_hats
+    )?)?;
+    xmatch_rs_hats.add_function(wrap_pyfunction!(hats::py_path_along_edge, &xmatch_rs_hats)?)?;
 
     py_run!(
         _py,

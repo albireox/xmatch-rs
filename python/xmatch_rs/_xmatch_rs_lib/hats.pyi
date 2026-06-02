@@ -131,3 +131,28 @@ def create_index(
 
     """
     ...
+
+def create_margin_cache(
+    collection_path: str | pathlib.Path,
+    margin_name: str,
+    threshold: float,
+    overwrite: bool,
+):
+    """Creates a margin cache in a HATS collection.
+
+    Parameters
+    ----------
+    collection_path
+        The path to the HATS collection.
+    margin_name
+        The name of the margin cache to create. The margin cache dataset will be
+        created under the directory ``<collection_path>/<margin_name>/dataset``.
+    threshold
+        The threshold in arcseconds for the margin cache. This defines the buffer
+        around each object catalogue pixel for which we will collect targets.
+    overwrite
+        If ``True``, deletes the existing margin cache if it already exists.
+        If ``False``, raises an error.
+
+    """
+    ...

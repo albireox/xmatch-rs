@@ -5,7 +5,7 @@
  *  @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
  */
 
-use std::path::PathBuf;
+use std::{fs::File, path::PathBuf};
 
 use anyhow::{Result, anyhow, bail};
 use cdshealpix::nested;
@@ -13,6 +13,7 @@ use polars::prelude::*;
 
 use crate::{healpix::healpix_convert_order, tools::to_pl_path};
 
+/// Returns the path to the dataset directory.
 pub(crate) fn get_dataset_directory(path: &PathBuf) -> Result<PathBuf> {
     if path.file_name().unwrap() == "dataset" {
         Ok(path.clone())
@@ -28,15 +29,74 @@ pub(crate) fn get_dataset_directory(path: &PathBuf) -> Result<PathBuf> {
     }
 }
 
+/// Gets the path to a pixel directory in a dataset.
+pub(crate) fn get_pixel_path(dataset_path: &PathBuf, norder: u8, npix: u64) -> PathBuf {
+    let dataset_path = get_dataset_directory(dataset_path).unwrap();
+    let dir = npix / 10_000;
+    dataset_path
+        .clone()
+        .join(format!("Norder={}/Dir={}/Npix={}", norder, dir, npix))
+}
+
+/// Reads the data for a given pixel in a dataset as a `LazyFrame`.
+pub(crate) fn read_hats_pixel(dataset_path: &PathBuf, norder: u8, npix: u64) -> Result<LazyFrame> {
+    let pixel_path = get_pixel_path(dataset_path, norder, npix);
+
+    if !pixel_path.exists() {
+        bail!(format!(
+            "The pixel path {} does not exist.",
+            pixel_path.display()
+        ));
+    }
+
+    let pl_path = to_pl_path(&pixel_path)?;
+    let lf = LazyFrame::scan_parquet(pl_path, Default::default())?;
+
+    Ok(lf)
+}
+
+/// Properties for checking if a path is a collection.
+pub(crate) struct IsCollectionProps {
+    pub(crate) check_properties: bool,
+    pub(crate) check_object_catalogue: bool,
+}
+
+impl Default for IsCollectionProps {
+    /// Returns the default properties for checking if a path is a collection.
+    fn default() -> Self {
+        Self {
+            check_properties: true,
+            check_object_catalogue: false,
+        }
+    }
+}
+
+/// Checks if thr provided path is a collection.
+pub(crate) fn is_collection(path: &PathBuf, props: &IsCollectionProps) -> bool {
+    if props.check_properties && !path.join("collection.properties").exists() {
+        return false;
+    }
+
+    if props.check_object_catalogue && !path.join("object").exists() {
+        return false;
+    }
+
+    true
+}
+
 #[derive(Clone)]
 pub struct PartitionInfo {
     _lf: LazyFrame,
+    _file_path: Option<PathBuf>,
 }
 
 impl PartitionInfo {
     /// Creates a `PartitionInfo` from a `LazyFrame`.
     pub fn from(_lf: LazyFrame) -> Self {
-        Self { _lf }
+        Self {
+            _lf,
+            _file_path: None,
+        }
     }
 
     /// Creates a `PartitionInfo` from a CSV file.
@@ -55,7 +115,10 @@ impl PartitionInfo {
             .finish()?
             .sort(vec!["Norder", "Npix"], Default::default());
 
-        Ok(Self { _lf: lf })
+        Ok(Self {
+            _lf: lf,
+            _file_path: Some(path.clone()),
+        })
     }
 
     /// Creates a `PartitionInfo` from a dataset path.
@@ -107,7 +170,37 @@ impl PartitionInfo {
         ])
         .sort(vec!["Norder", "Npix"], Default::default());
 
-        Ok(Self { _lf: lf })
+        Ok(Self {
+            _lf: lf,
+            _file_path: None,
+        })
+    }
+
+    /// Writes the partition info to a CSV file.
+    pub fn to_csv(&self, path: &PathBuf) -> Result<()> {
+        let mut df = self
+            ._lf
+            .clone()
+            .sort(vec!["Norder", "Npix"], Default::default())
+            .collect()?;
+
+        let pl_path = to_pl_path(path)?;
+        CsvWriter::new(File::create(pl_path)?)
+            .with_separator(b',')
+            .include_header(true)
+            .finish(&mut df)?;
+
+        Ok(())
+    }
+
+    /// Gets the data as a `DataFrame`.
+    pub fn to_dataframe(&self) -> Result<DataFrame> {
+        let df = self._lf.clone().collect()?;
+        Ok(df)
+    }
+
+    pub fn get(&self) -> LazyFrame {
+        self._lf.clone()
     }
 
     /// Returns the minimum order found in the partition info.
@@ -141,6 +234,11 @@ impl PartitionInfo {
 
         let df = filtered.collect()?;
         Ok(df.height() > 0)
+    }
+
+    /// Did we read the partition info from a file?
+    pub fn was_read_from_file(&self) -> bool {
+        self._file_path.is_some()
     }
 }
 
