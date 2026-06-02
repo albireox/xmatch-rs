@@ -135,8 +135,10 @@ def create_index(
 def create_margin_cache(
     collection_path: str | pathlib.Path,
     margin_name: str,
-    threshold: float,
+    buffer: float,
     overwrite: bool,
+    n_workers: int | None,
+    progress_file: str | pathlib.Path | None,
 ):
     """Creates a margin cache in a HATS collection.
 
@@ -147,12 +149,22 @@ def create_margin_cache(
     margin_name
         The name of the margin cache to create. The margin cache dataset will be
         created under the directory ``<collection_path>/<margin_name>/dataset``.
-    threshold
-        The threshold in arcseconds for the margin cache. This defines the buffer
-        around each object catalogue pixel for which we will collect targets.
+    buffer
+        The buffer value to use for the margin cache, in arcseconds. This is the
+        maximum distance around each HATS partition pixel for which additional
+        sources will be included in the margin cache.
     overwrite
         If ``True``, deletes the existing margin cache if it already exists.
         If ``False``, raises an error.
+    n_workers
+        The number of workers to use for the operation. If :obj:`None`, uses all
+        the available CPU cores.
+    progress_file
+        The path to a JSON file where the progress of the operation is stored. If
+        :obj:`None`, no progress data is saved. The written file has JSON format
+        and includes keys ``n_pixels_to_process``, ``n_pixels_completed``, and
+        ``complete`, and can be used to monitor and display the progress of the
+        operation.
 
     """
     ...

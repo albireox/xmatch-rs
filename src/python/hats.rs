@@ -100,7 +100,7 @@ pub(crate) fn hats_get_neighbours(
 pub(crate) fn hats_create_margin_cache(
     collection_path: PathBuf,
     margin_name: &str,
-    threshold: f32,
+    buffer: f32,
     overwrite: bool,
     n_workers: Option<usize>,
     progress_file: Option<PathBuf>,
@@ -111,7 +111,7 @@ pub(crate) fn hats_create_margin_cache(
         overwrite,
     };
 
-    hats::margin::create_margin_cache(&collection_path, margin_name, threshold, options)
+    hats::margin::create_margin_cache(&collection_path, margin_name, buffer, options)
 }
 
 #[pyfunction(name = "path_along_edge")]

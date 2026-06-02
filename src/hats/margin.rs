@@ -61,13 +61,13 @@ pub struct HATSRepartitionProgress {
 /// * `collection_path` - The path to the collection.
 /// * `margin_name` - The name of the margin cache to create. This will be the
 ///     name of the directory inside the collection.
-/// * `threshold` - The threshold of the margin cache in arcseconds.
+/// * `buffer` - The buffer value to use for the margin cache, in arcseconds.
 /// * `options` - Options for creating the margin cache.
 ///
 pub fn create_margin_cache(
     collection_path: &PathBuf,
     margin_name: &str,
-    threshold: f32,
+    buffer: f32,
     options: MarginCacheOptions,
 ) -> Result<()> {
     // Check if the collection is valid.
@@ -153,7 +153,7 @@ pub fn create_margin_cache(
                 partition_info.clone(),
                 norder,
                 npix,
-                threshold,
+                buffer,
                 progress_file_clone,
             )
             .unwrap();
@@ -328,11 +328,11 @@ pub fn path_along_edge(
 /// # Arguments
 /// * `norder` - The HEALPix order of the original cell.
 /// * `npix` - The HEALPix pixel number.
-/// * `threshold` - The threshold for the margin, in arcseconds.
+/// * `buffer` - The buffer value to use for the margin cache, in arcseconds.
 /// * `moc_order` - The order of the MOC. If `None`, it will be determined automatically
-///   based on the threshold.
+///   based on the buffer.
 ///
-pub fn get_margin_bmoc(norder: u8, npix: u64, threshold: f32, moc_order: Option<u8>) -> BMOC {
+pub fn get_margin_bmoc(norder: u8, npix: u64, buffer: f32, moc_order: Option<u8>) -> BMOC {
     let mut vertices = Vec::new();
 
     // Get the polygon vertices along the sides of the cell.
@@ -341,7 +341,7 @@ pub fn get_margin_bmoc(norder: u8, npix: u64, threshold: f32, moc_order: Option<
             norder,
             npix,
             *side,
-            Some(threshold),
+            Some(buffer),
             true,
             PointsStrategy::Dynamic,
             false,
@@ -350,15 +350,15 @@ pub fn get_margin_bmoc(norder: u8, npix: u64, threshold: f32, moc_order: Option<
     }
 
     // Get the MOC layer. If moc_order is provided, use it. Otherwise, determine
-    // it based on the threshold. We iterate over the orders until we find the one that gives a
-    // pixel size smaller than the threshold.
+    // it based on the buffer. We iterate over the orders until we find the one that gives a
+    // pixel size smaller than the buffer.
     let layer = if let Some(moc_order) = moc_order {
         get(moc_order)
     } else {
         let order = (0u8..=29).find_map(|order| {
             let area = healpix_pixel_area(order, true);
             let res = area.sqrt() * 3600.0; // This is approximate since the pixels are not square, but it is good enough for our purposes.
-            if res <= threshold as f64 {
+            if res <= buffer as f64 {
                 Some(order)
             } else {
                 None
@@ -382,7 +382,7 @@ pub fn get_margin_bmoc(norder: u8, npix: u64, threshold: f32, moc_order: Option<
 /// * `partition_info` - The partition information for the HATS dataset.
 /// * `norder` - The HEALPix order of the pixel.
 /// * `npix` - The HEALPix pixel number.
-/// * `threshold` - The threshold for the margin, in arcseconds.
+/// * `buffer` - The buffer value to use for the margin cache, in arcseconds.
 /// * `progress_file` - An optional progress file to update with the progress
 ///     of the margin cache creation.
 ///
@@ -392,11 +392,11 @@ fn create_margin_cache_pixel(
     partition_info: hats_tools::PartitionInfo,
     norder: u8,
     npix: u64,
-    threshold: f32,
+    buffer: f32,
     progress_file: Option<Arc<Mutex<std::fs::File>>>,
 ) -> Result<()> {
     // Get the BMOC covering the margin around the cell.
-    let bmoc = get_margin_bmoc(norder, npix, threshold, None);
+    let bmoc = get_margin_bmoc(norder, npix, buffer, None);
 
     // Get the object dataset path.
     let object_dataset_path = hats_tools::get_dataset_directory(&object_dataset)?;
