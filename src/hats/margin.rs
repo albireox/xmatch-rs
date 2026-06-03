@@ -355,11 +355,13 @@ pub fn get_margin_bmoc(norder: u8, npix: u64, buffer: f32, moc_order: Option<u8>
     let layer = if let Some(moc_order) = moc_order {
         get(moc_order)
     } else {
-        let order = (0u8..=29).find_map(|order| {
+        let order = (1u8..=29).find_map(|order| {
             let area = healpix_pixel_area(order, true);
             let res = area.sqrt() * 3600.0; // This is approximate since the pixels are not square, but it is good enough for our purposes.
             if res <= buffer as f64 {
-                Some(order)
+                // Return order - 1. This should speed things up a bit while not adding too
+                // many extra targets.
+                Some(order - 1)
             } else {
                 None
             }
