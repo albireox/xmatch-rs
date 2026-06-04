@@ -250,6 +250,9 @@ def convert_to_hats_object_catalogue(
 
     convert_model.write()
 
+    if format is None:
+        format = convert_model.catalogue_model.source_catalogue.format.value
+
     # Check if conversion is complete.
     if convert_model.complete:
         log.info("Conversion to HATS object catalogue is complete. Nothing left to do.")

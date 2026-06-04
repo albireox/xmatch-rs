@@ -13,6 +13,8 @@ import glob
 import pathlib
 import re
 
+from typing import Type
+
 import polars
 
 import sdsstools.logger
@@ -36,7 +38,7 @@ def lazy_frame_row_count(lf: polars.LazyFrame) -> int:
     return lf.select(polars.len()).collect(engine="streaming").item()  # type: ignore
 
 
-def get_polars_dtype_from_string(dtype_str: str):
+def get_polars_dtype_from_string(dtype_str: str) -> Type[polars.DataType]:
     """Retrieves a Polars DataType object from its string representation.
 
     Parameters
@@ -46,8 +48,8 @@ def get_polars_dtype_from_string(dtype_str: str):
 
     Returns
     -------
-    polars.DataType
-        A Polars DataType object.
+    Type[polars.DataType]
+        A Polars DataType class.
 
     """
 

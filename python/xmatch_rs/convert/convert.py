@@ -175,7 +175,7 @@ def convert_csv_to_parquet(
     if not isinstance(schema, Schema):
         schema = Schema(schema)
 
-    polars_schema = schema.get_polars_schema(only_source_columns=True)
+    polars_schema = schema.get_polars_schema(source_catalogue=True)
 
     # Prepare the list of CSV files to convert.
     if isinstance(csv_files, (str, pathlib.Path)):
@@ -637,6 +637,49 @@ def _process_lazy_frame(
 
     columns = lf.collect_schema().names()
 
+    # Apply any casting to the source columns as defined in the schema.
+    lf_columns = lf.collect_schema().names()
+    for lf_col in lf_columns:
+        col_model = schema.get_column(lf_col)
+        if not col_model:
+            continue
+
+        cast_to = col_model.cast_to
+        if cast_to and col_model.dtype:
+            cast_to_dtype = get_polars_dtype_from_string(cast_to)
+            lf = lf.with_columns(polars.col(lf_col).cast(cast_to_dtype))
+
+        apply_functions = col_model.apply_functions or []
+        for func in apply_functions:
+            if func not in exprs:
+                raise ValueError(
+                    f"Expression function '{func}' is not defined. "
+                    f"Available expressions: {list(exprs.keys())}"
+                )
+            lf = lf.with_columns(exprs[func](lf_col).alias(lf_col))
+
+        rename_to = col_model.rename_to
+        if rename_to:
+            lf = lf.rename({lf_col: rename_to})
+        else:
+            lf = lf.rename({lf_col: lf_col.lower()})
+
+    if apply_callback is not None:
+        if not isinstance(apply_callback, (list, tuple)):
+            apply_callback = [apply_callback]
+
+        for callback_func in apply_callback:
+            if isinstance(callback_func, str):
+                if callback_func not in callbacks:
+                    raise ValueError(
+                        f"Callback function '{callback_func}' is not defined. "
+                        f"Available callbacks: {list(callbacks.keys())}"
+                    )
+
+                lf = callbacks[callback_func](lf)
+            else:
+                lf = callback_func(lf)  # ty:ignore[call-non-callable]
+
     if ra_column_unit != "degrees":
         ra_column_deg = _generate_column_name(
             f"{ra_column}_deg",
@@ -681,49 +724,6 @@ def _process_lazy_frame(
             name=row_index_column_name,
             offset=row_index_start,
         )
-
-    # Apply any casting to the source columns as defined in the schema.
-    lf_columns = lf.collect_schema().names()
-    for lf_col in lf_columns:
-        col_model = schema.get_column(lf_col)
-        if not col_model:
-            continue
-
-        cast_to = col_model.cast_to
-        if cast_to and col_model.dtype:
-            cast_to_dtype = get_polars_dtype_from_string(cast_to)
-            lf = lf.with_columns(polars.col(lf_col).cast(cast_to_dtype))
-
-        apply_functions = col_model.apply_functions or []
-        for func in apply_functions:
-            if func not in exprs:
-                raise ValueError(
-                    f"Expression function '{func}' is not defined. "
-                    f"Available expressions: {list(exprs.keys())}"
-                )
-            lf = lf.with_columns(exprs[func](lf_col).alias(lf_col))
-
-        rename_to = col_model.rename_to
-        if rename_to:
-            lf = lf.rename({lf_col: rename_to})
-        else:
-            lf = lf.rename({lf_col: lf_col.lower()})
-
-    if apply_callback is not None:
-        if not isinstance(apply_callback, (list, tuple)):
-            apply_callback = [apply_callback]
-
-        for callback_func in apply_callback:
-            if isinstance(callback_func, str):
-                if callback_func not in callbacks:
-                    raise ValueError(
-                        f"Callback function '{callback_func}' is not defined. "
-                        f"Available callbacks: {list(callbacks.keys())}"
-                    )
-
-                lf = callbacks[callback_func](lf)
-            else:
-                lf = callback_func(lf)  # ty:ignore[call-non-callable]
 
     if sink_parquet:
         if output_path:
