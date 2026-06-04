@@ -86,9 +86,8 @@ def convert_csv_to_parquet(
     output_path
         The directory where the converted Parquet files will be saved.
     schema
-        The schema to use for the conversion. It can be a path to a schema file,
-        the name of a schema in the ``schemas/`` directory, or a dictionary
-        defining the schema.
+        The schema to use for the conversion, or a path to the YAML file
+        containing the schema.
     allow_extra_columns
         Whether to allow extra columns in the CSV files that are not defined in the
         schema. The data type of the extra columns will be inferred by Polars.
@@ -314,9 +313,8 @@ def convert_to_parquet(
         a list of paths to the output Parquet files, in which case each data frame
         will be saved to the corresponding path.
     schema
-        The schema to use for the conversion. It can be a path to a schema file,
-        the name of a schema in the ``schemas/`` directory, or a dictionary
-        defining the schema.
+        The schema to use for the conversion, or a path to the YAML file
+        containing the schema.
     allow_extra_columns
         Whether to allow extra columns in the CSV files that are not defined in the
         schema. The data type of the extra columns will be inferred by Polars.
