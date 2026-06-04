@@ -14,13 +14,18 @@ extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
     "sphinx.ext.autosummary",
-    "sphinx_autodoc_typehints",
+    # "sphinx_autodoc_typehints",
     "sphinx.ext.todo",
     "sphinx.ext.viewcode",
     "sphinx.ext.mathjax",
     "sphinx.ext.intersphinx",
     "myst_parser",
     "sphinx_copybutton",
+]
+
+myst_enable_extensions = [
+    "dollarmath",
+    "fieldlist",
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -97,18 +102,15 @@ pygments_style = "sphinx"
 todo_include_todos = False
 
 # Intersphinx mappings
-intersphinx_mapping = {}
+intersphinx_mapping = {"python": ("https://docs.python.org/3", None)}
+
 
 autodoc_mock_imports = ["_tkinter"]
 autodoc_member_order = "groupwise"
 autodoc_default_options = {"members": None, "show-inheritance": None}
-# autodoc_typehints = "description"
+autodoc_typehints = "signature"
 
-simplify_optional_unions = True
-typehints_use_signature_return = True
-
-# napoleon_use_rtype = False
-# napoleon_use_ivar = True
+napoleon_use_rtype = True  # sphinx.ext.napoleon setting
 
 copybutton_prompt_text = r">>> |\$ "
 copybutton_prompt_is_regexp = True

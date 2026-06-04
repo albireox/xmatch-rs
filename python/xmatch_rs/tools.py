@@ -119,7 +119,7 @@ def parse_path(
         a regular expression against the file name.
     recursive
         If True, directories will be searched recursively. Ignored if glob patterns
-        are used, as they can already include recursive patterns (e.g., **/*.*).
+        are used, as they can already include recursive patterns (e.g., ``**/*.*``).
 
     Returns
     -------
