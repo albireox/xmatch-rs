@@ -160,15 +160,15 @@ def create_properties(
     if path.exists() and not overwrite:
         raise ValueError(f"The properties file {path!s} already exists.")
 
-    obs_collection = schema.schema.catalogue_name
+    obs_collection = schema.model.catalogue_name
 
     hats_builder = f"xmatch-rs v{xmatch_rs.__version__}"
     hats_creation_date = get_current_time(format="isot", timezone="UTC")
     hats_version = "1.0"
 
-    hats_primary_table_url = schema.schema.source_catalogue_url
-    bib_reference = schema.schema.bib_reference
-    bib_reference_url = schema.schema.bib_reference_url
+    hats_primary_table_url = schema.model.url
+    bib_reference = schema.model.bib_reference
+    bib_reference_url = schema.model.bib_reference_url
 
     hats_col_ra = None
     hats_col_dec = None
@@ -180,7 +180,7 @@ def create_properties(
     hats_estsize = None
     if dataproduct_type in ["object", "margin"]:
         hats_col_ra, hats_col_dec = schema.get_ra_dec_columns()
-        hats_coordinate_epoch = schema.schema.coordinate_epoch
+        hats_coordinate_epoch = schema.model.epoch
         hats_frame = "equatorial"
 
         hats_nrows = get_dataset_nrows(path.parent / "dataset")

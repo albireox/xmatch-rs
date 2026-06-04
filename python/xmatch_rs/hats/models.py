@@ -14,7 +14,13 @@ from typing import Annotated, Literal
 
 import yaml
 from filelock import FileLock
-from pydantic import BaseModel, Field, SerializerFunctionWrapHandler, model_serializer
+from pydantic import (
+    AnyUrl,
+    BaseModel,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+)
 
 from xmatch_rs.schema import Schema, SchemaModel
 
@@ -346,7 +352,7 @@ class HATSPropertiesModel(BaseModel):
         Field(description="Column in the association table for join side"),
     ] = None
     hats_assn_join_table_url: Annotated[
-        str | None,
+        AnyUrl | None,
         Field(description="URL to join table with original survey data"),
     ] = None
     hats_assn_leaf_files: Annotated[
@@ -356,15 +362,15 @@ class HATSPropertiesModel(BaseModel):
 
     # Supplemental table references
     hats_primary_table_url: Annotated[
-        str | None,
+        AnyUrl | None,
         Field(description="URL to the primary table with original survey data"),
     ] = None
     hats_progenitor_url: Annotated[
-        str | None,
+        AnyUrl | None,
         Field(description="URL to an associated progenitor HATS catalogue"),
     ] = None
     hats_service_url: Annotated[
-        str | None,
+        AnyUrl | None,
         Field(description="HATS access URL"),
     ] = None
 
@@ -450,7 +456,7 @@ class HATSPropertiesModel(BaseModel):
         Field(description="Copyright associated with original data"),
     ] = None
     obs_copyright_url: Annotated[
-        str | None,
+        AnyUrl | None,
         Field(description="URL to copyright information"),
     ] = None
 
@@ -460,7 +466,7 @@ class HATSPropertiesModel(BaseModel):
         Field(description="Bibliographic reference"),
     ] = None
     bib_reference_url: Annotated[
-        str | None,
+        AnyUrl | None,
         Field(description="URL to bibliographic reference"),
     ] = None
     prov_progenitor: Annotated[

@@ -18,6 +18,7 @@ import sdsstools.logger
 import xmatch_rs._xmatch_rs_lib.hats as _rs_hats
 from xmatch_rs.hats.margin import create_margin_cache
 from xmatch_rs.hats.metadata import create_partition_info, create_properties
+from xmatch_rs.hats.models import HATSPropertiesModel
 from xmatch_rs.hats.object import convert_to_hats_object_catalogue
 from xmatch_rs.schema import Schema
 from xmatch_rs.tools import get_xmatch_rs_logger
@@ -60,6 +61,17 @@ class HATS:
             raise FileNotFoundError(f"No schema file found at {schema_path!s}.")
 
         return Schema(schema_path)
+
+    @property
+    def properties(self) -> HATSPropertiesModel:
+        """Returns the properties of the HATS collection."""
+
+        properties_path = self.path / "collection.properties"
+
+        if not properties_path.exists():
+            raise FileNotFoundError(f"No properties file found at {properties_path!s}.")
+
+        return HATSPropertiesModel.read(properties_path)
 
     @classmethod
     def convert_to_hats(
@@ -421,6 +433,17 @@ class HATS:
             },
         )
 
+        # Modify the colection properties to include the new index.
+        # The all_indexes field is a space-separated map of the index column
+        # and the index directory.
+        coll_properties = self.properties
+        if coll_properties.all_indexes is None:
+            coll_properties.all_indexes = f"{index_column} {index_name}"
+        else:
+            coll_properties.all_indexes += f" {index_column} {index_name}"
+
+        coll_properties.write(self.path / "collection.properties")
+
     def create_margin_cache(
         self,
         margin_name: str,
@@ -428,6 +451,7 @@ class HATS:
         overwrite: bool = False,
         n_workers: int | None = None,
         show_progress: bool = True,
+        default_margin: bool = False,
         log: sdsstools.logger.SDSSLogger | None = None,
         quiet: bool = False,
     ):
@@ -465,6 +489,11 @@ class HATS:
             the available CPU cores.
         show_progress
             If ``True``, displays a progress bar during the operation.
+        default_margin
+            If ``True``, sets this margin cache as the default margin for the
+            collection. If this is the first margin cache being created for the
+            collection, it will be set as the default margin regardless of the value
+            of this parameter.
         log
             An optional logger to use for logging the margin cache creation process.
         quiet
@@ -506,3 +535,17 @@ class HATS:
             data_fields={"hats_margin_threshold": str(buffer)},
         )
         log.info("Margin properties file created.")
+
+        # Update the collection properties to include the new margin cache.
+        coll_properties = self.properties
+        if coll_properties.all_margins is None:
+            coll_properties.all_margins = str(margin_path.name)
+        else:
+            coll_properties.all_margins += f" {margin_path.name}"
+
+        if coll_properties.default_margin is None or default_margin:
+            coll_properties.default_margin = margin_path.name
+
+        coll_properties.write(self.path / "collection.properties")
+
+        log.info("Updated margin cache in collection properties.")
