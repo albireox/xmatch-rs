@@ -520,6 +520,10 @@ def _run_hats_min_order_phase(
 
         model.update_phase(phase_name, complete=True)
 
+        # Calculate the number of rows after initial conversion.
+        n_rows = get_dataset_nrows(output_path, orders=[order_1])
+        log.info(f"Number of rows after initial conversion: {n_rows:,}.")
+
 
 def _run_hats_repartition(
     model: ConvertToHATSModel,
