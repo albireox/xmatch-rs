@@ -705,6 +705,12 @@ def _process_lazy_frame(
                 )
             lf = lf.with_columns(exprs[func](lf_col).alias(lf_col))
 
+        rename_to = col_model.rename_to
+        if rename_to:
+            lf = lf.rename({lf_col: rename_to})
+        else:
+            lf = lf.rename({lf_col: lf_col.lower()})
+
     if apply_callback is not None:
         if not isinstance(apply_callback, (list, tuple)):
             apply_callback = [apply_callback]
