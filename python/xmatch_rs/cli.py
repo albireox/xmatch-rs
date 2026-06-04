@@ -369,6 +369,81 @@ def create_index(
     )
 
 
+@hats_cli.command("create-margin")
+@cloup.argument(
+    "collection_path",
+    type=cloup.Path(exists=True, path_type=pathlib.Path, file_okay=False),
+)
+@cloup.argument("buffer", type=float)
+@cloup.option(
+    "--margin-name",
+    "-n",
+    type=str,
+    help="Name of the margin cache to create. Defaults to 'margin_<BUFFER>arcsec'.",
+)
+@cloup.option(
+    "--default-margin",
+    is_flag=True,
+    default=False,
+    help="Sets the margin cache as the default margin in the collection properties.",
+)
+@cloup.option(
+    "--n-workers",
+    "-w",
+    type=int,
+    default=None,
+    help=(
+        "Number of worker processes to use. If not provided, automatically "
+        "determined based on the number of CPU cores."
+    ),
+)
+@cloup.option(
+    "--show-progress/--no-show-progress",
+    default=True,
+    help="Enable/disable progress tracking.",
+)
+@cloup.option(
+    "--quiet",
+    "-q",
+    is_flag=True,
+    default=False,
+    help="Suppress logging output.",
+)
+@cloup.option(
+    "--overwrite",
+    is_flag=True,
+    default=False,
+    help="Allow overwriting existing margin cache.",
+)
+def create_margin(
+    collection_path: pathlib.Path,
+    buffer: float,
+    margin_name: str | None = None,
+    default_margin: bool = False,
+    n_workers: int | None = None,
+    show_progress: bool = True,
+    quiet: bool = False,
+    overwrite: bool = False,
+):
+    """Creates a margin cache for a HATS collection."""
+
+    from xmatch_rs.hats import HATS
+
+    margin_name = margin_name or f"margin_{buffer}arcsec"
+
+    hats = HATS(collection_path)
+
+    hats.create_margin_cache(
+        margin_name=margin_name,
+        buffer=buffer,
+        n_workers=n_workers,
+        show_progress=show_progress,
+        quiet=quiet,
+        overwrite=overwrite,
+        default_margin=default_margin,
+    )
+
+
 @xmatch_rs_cli.group(
     "schema",
     cls=NaturalOrderGroup,
