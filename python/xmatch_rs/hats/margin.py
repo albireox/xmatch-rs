@@ -25,6 +25,8 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
+from sdsstools import Timer
+
 import xmatch_rs._xmatch_rs_lib.hats as _rs_hats
 from xmatch_rs import console
 from xmatch_rs.tools import get_xmatch_rs_logger
@@ -103,21 +105,26 @@ def create_margin_cache(
 
     # Call the Rust function to create the margin cache.
     try:
-        _rs_hats.create_margin_cache(
-            collection_path=collection_path,
-            margin_name=margin_name,
-            buffer=buffer,
-            overwrite=overwrite,
-            n_workers=n_workers,
-            progress_file=progress_file if show_progress else None,
-        )
+        with Timer() as timer:
+            _rs_hats.create_margin_cache(
+                collection_path=collection_path,
+                margin_name=margin_name,
+                buffer=buffer,
+                overwrite=overwrite,
+                n_workers=n_workers,
+                progress_file=progress_file if show_progress else None,
+            )
     except Exception:
         log.error("Error during margin cache creation.")
         _monitor_process.terminate()
         raise
+    finally:
+        progress_file.unlink(missing_ok=True)
 
     # Make sure the monitoring process finished.
     _monitor_process.join()
+
+    log.info(f"Margin cache {margin_name!r} created in {timer.duration:,.2f} s.")
 
 
 def _monitor_progress(progress_file: pathlib.Path | None, margin_name: str) -> None:
