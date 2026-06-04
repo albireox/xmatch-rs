@@ -25,7 +25,7 @@ __all__: list[str] = ["ConvertToHATSModel", "PhaseModel", "HATSPropertiesModel"]
 class ConvertToHATSModel(BaseModel):
     """Model representing the conversion to HATS format."""
 
-    catalogue_schema: Annotated[
+    catalogue_model: Annotated[
         SchemaModel,
         Field(description="The schema to use for the conversion."),
     ]
@@ -88,7 +88,7 @@ class ConvertToHATSModel(BaseModel):
     def get_schema(self) -> Schema:
         """Returns the schema of the conversion model."""
 
-        return Schema(self.catalogue_schema.model_dump())
+        return Schema(self.catalogue_model.model_dump())
 
     def add_phase(
         self,

@@ -201,7 +201,7 @@ def convert_to_hats_object_catalogue(
         convert_model = ConvertToHATSModel.model_validate(convert_dict)
         convert_model.object_path = object_path
         if schema is not None:
-            convert_model.catalogue_schema = schema.schema
+            convert_model.catalogue_model = schema.model
     else:
         if not dynamic_planning:
             raise FileNotFoundError(
@@ -227,7 +227,7 @@ def convert_to_hats_object_catalogue(
         )
 
         convert_model = ConvertToHATSModel(
-            catalogue_schema=schema.schema,
+            catalogue_model=schema.model,
             object_path=object_path,
             complete=False,
             reference_order=reference_order,

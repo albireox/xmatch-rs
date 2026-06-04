@@ -259,19 +259,14 @@ class HATS:
 
         if create_primary_key_index:
             if primary_key_column is not None:
-                index_column = primary_key_column
+                pk = primary_key_column
             else:
-                pks = schema.get_primary_keys()
-                if len(pks) > 1:
-                    raise ValueError("Multiple primary keys are not supported by HATS.")
+                pk = schema.get_primary_key()
 
-                index_column = pks[0]
-
-            log.info(f"Creating primary key index for column {index_column!r}.")
-
+            log.info(f"Creating primary key index for column {pk!r}.")
             obj.create_index(
-                index_name=f"index_{index_column}",
-                index_column=index_column,
+                index_name=f"index_{pk}",
+                index_column=pk,
                 extra_columns=extra_index_columns,
                 check_duplicates=check_index_duplicates,
                 overwrite=overwrite,

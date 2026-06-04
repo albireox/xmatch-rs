@@ -176,7 +176,7 @@ def convert_csv_to_parquet(
     if not isinstance(schema, Schema):
         schema = Schema(schema)
 
-    polars_schema = schema.get_polars_schema(source_columns=True)
+    polars_schema = schema.get_polars_schema(only_source_columns=True)
 
     # Prepare the list of CSV files to convert.
     if isinstance(csv_files, (str, pathlib.Path)):
@@ -199,11 +199,12 @@ def convert_csv_to_parquet(
     else:
         scan_csv_kwargs["schema"] = polars_schema
 
-    source_params = schema.schema.source_catalogue_params
-    if source_params is not None:
-        if source_params.format != "csv":
-            raise ValueError("Schema for catalogue has source_params.format != 'csv'.")
+    source_format = schema.model.source_catalogue.format
+    if source_format != "csv":
+        raise ValueError("Schema for catalogue has source_catalogue.format != 'csv'.")
 
+    source_params = schema.model.source_catalogue.read_params
+    if source_params is not None:
         if source_params.csv_has_header is not None:
             scan_csv_kwargs["has_header"] = source_params.csv_has_header
         if source_params.csv_delimiter is not None:
@@ -684,26 +685,25 @@ def _process_lazy_frame(
         )
 
     # Apply any casting to the source columns as defined in the schema.
-    schema_columns = schema.schema.columns
     lf_columns = lf.collect_schema().names()
     for lf_col in lf_columns:
-        for sch_col, sch_col_data in schema_columns.items():
-            source_cat = sch_col_data.source_catalogue_params
-            source_col = (source_cat.column_name if source_cat else None) or sch_col
-            if lf_col == source_col and source_cat:
-                cast_to = source_cat.cast_to
-                if cast_to and source_cat.dtype:
-                    cast_to_dtype = get_polars_dtype_from_string(cast_to)
-                    lf = lf.with_columns(polars.col(lf_col).cast(cast_to_dtype))
+        col_model = schema.get_column(lf_col)
+        if not col_model:
+            continue
 
-                apply_functions = source_cat.apply_functions or []
-                for func in apply_functions:
-                    if func not in exprs:
-                        raise ValueError(
-                            f"Expression function '{func}' is not defined. "
-                            f"Available expressions: {list(exprs.keys())}"
-                        )
-                    lf = lf.with_columns(exprs[func](lf_col).alias(lf_col))
+        cast_to = col_model.cast_to
+        if cast_to and col_model.dtype:
+            cast_to_dtype = get_polars_dtype_from_string(cast_to)
+            lf = lf.with_columns(polars.col(lf_col).cast(cast_to_dtype))
+
+        apply_functions = col_model.apply_functions or []
+        for func in apply_functions:
+            if func not in exprs:
+                raise ValueError(
+                    f"Expression function '{func}' is not defined. "
+                    f"Available expressions: {list(exprs.keys())}"
+                )
+            lf = lf.with_columns(exprs[func](lf_col).alias(lf_col))
 
     if apply_callback is not None:
         if not isinstance(apply_callback, (list, tuple)):

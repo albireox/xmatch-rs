@@ -12,6 +12,7 @@ dependencies = [
     "filelock>=3.25.2",
     "polars>=1.39.2",
     "pydantic>=2.12.5",
+    "questionary>=2.1.1",
     "sdsstools>=1.9.7",
 ]
 
@@ -53,7 +54,7 @@ features = []
 [tool.uv]
 package = true
 default-groups = ["dev", "docs", "test"]
-# cache-keys = [{file = "pyproject.toml"}, {file = "Cargo.toml"}, {file = "**/*.rs"}]
+cache-keys = [{file = "pyproject.toml"}, {file = "Cargo.toml"}, {file = "**/*.rs"}]
 
 [tool.ruff]
 line-length = 88

@@ -14,6 +14,10 @@ from typing import Literal
 
 import click
 import cloup
+import yaml
+from pydantic import ValidationError
+
+from xmatch_rs import console, log
 
 
 class NaturalOrderGroup(cloup.Group):
@@ -53,6 +57,8 @@ def version_callback(ctx: click.Context, _param: click.Parameter, value: bool):
 def xmatch_rs_cli():
     """CLI for xmatch-rs."""
 
+    pass
+
 
 @xmatch_rs_cli.group(
     "hats",
@@ -63,6 +69,8 @@ def xmatch_rs_cli():
 )
 def hats_cli():
     """Routines to generate and handle HATS datasets."""
+
+    pass
 
 
 @hats_cli.command("convert")
@@ -244,7 +252,6 @@ def convert(
 ):
     """Convert a dataset to HATS format."""
 
-    from xmatch_rs import log
     from xmatch_rs.hats import HATS
 
     if verbose:
@@ -360,3 +367,140 @@ def create_index(
         mode=mode,
         overwrite=overwrite,
     )
+
+
+@xmatch_rs_cli.group(
+    "schema",
+    cls=NaturalOrderGroup,
+    context_settings={"obj": {}},
+    no_args_is_help=True,
+    help="Handle catalogue schemas.",
+)
+def schema_cli():
+    """Handle catalogue schemas."""
+
+    pass
+
+
+@schema_cli.command("validate")
+@cloup.argument(
+    "schema_path",
+    type=cloup.Path(exists=True, path_type=pathlib.Path, dir_okay=False),
+)
+@cloup.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    default=False,
+    help="Show detailed output.",
+)
+def validate_schema(schema_path: pathlib.Path, verbose: bool = False):
+    """Validates a catalogue schema YAML file."""
+
+    from xmatch_rs.schema import Schema
+
+    try:
+        Schema(schema_path)
+    except ValidationError as err:
+        console.print(f"[red]Schema validation failed for {schema_path!s}[/]:\n{err}")
+        raise click.exceptions.Exit(65)  # Data format error.
+
+    if verbose:
+        print(f"Schema {schema_path} is valid.")
+
+
+@schema_cli.command("generate")
+@cloup.argument(
+    "DATA_PATH",
+    type=cloup.Path(exists=True, path_type=pathlib.Path),
+    required=False,
+)
+@cloup.option(
+    "--output-path",
+    "-o",
+    type=cloup.Path(exists=False, path_type=pathlib.Path, dir_okay=False),
+    help="Path to save the generated schema YAML file. If not provided, "
+    "the schema will be printed to stdout.",
+)
+@cloup.option(
+    "--format",
+    type=cloup.Choice(["csv", "parquet", "fits"]),
+    default=None,
+    help="Data format. If not provided, inferred from the file extension.",
+)
+@cloup.option(
+    "--skip-optional/--no-skip-optional",
+    default=False,
+    help="Whether to skip optional fields and set them to their default value.",
+)
+@cloup.option(
+    "--csv-has-header",
+    is_flag=True,
+    default=True,
+    help="For CSV files, whether the first row contains column names.",
+)
+@cloup.option(
+    "--csv-delimiter",
+    type=str,
+    default=",",
+    show_default=True,
+    help="Delimiter to use for CSV files.",
+)
+@cloup.option(
+    "--csv-comment-prefix",
+    type=str,
+    default="#",
+    show_default=True,
+    help="Comment prefix to use for CSV files.",
+)
+@cloup.option(
+    "--csv-null-values",
+    type=str,
+    multiple=True,
+    default="null",
+    help="A list of strings that should be interpreted as null values for CSV files.",
+)
+def generate_schema(
+    data_path: pathlib.Path | None = None,
+    format: Literal["csv", "parquet", "fits"] | None = None,
+    output_path: pathlib.Path | None = None,
+    skip_optional: bool = False,
+    csv_has_header: bool = True,
+    csv_delimiter: str = ",",
+    csv_comment_prefix: str = "#",
+    csv_null_values: tuple[str, ...] = ("null",),
+):
+    """Generates a catalogue schema YAML file from a sample dataset."""
+
+    from xmatch_rs import generate_schema
+
+    schema_model = generate_schema(
+        data_path,
+        format=format,
+        skip_optional=skip_optional,
+        csv_has_header=csv_has_header,
+        csv_delimiter=csv_delimiter,
+        csv_comment_prefix=csv_comment_prefix,
+        csv_null_values=list(csv_null_values),
+    )
+
+    if schema_model is None:
+        console.print("[red]Failed to generate schema.[/red]")
+        raise click.exceptions.Exit(1)
+
+    if output_path:
+        output_path = pathlib.Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(output_path, "w") as f:
+            yaml.dump(
+                schema_model.model_dump(mode="json"),
+                f,
+                sort_keys=False,
+                indent=2,
+            )
+
+        console.print(f"[green]Schema saved to {output_path!s}[/]")
+        return
+
+    print(yaml.dump(schema_model.model_dump(mode="json"), sort_keys=False, indent=2))
