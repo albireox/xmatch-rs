@@ -188,7 +188,6 @@ pub fn hats_repartition(
                     order_0,
                     order_1,
                     options.ref_order,
-                    options.keep_initial_order_directories,
                     progress_file_clone,
                 )
                 .unwrap();
@@ -204,11 +203,19 @@ pub fn hats_repartition(
                 order_0,
                 order_1,
                 options.ref_order,
-                options.keep_initial_order_directories,
                 progress_file_clone,
             )
             .unwrap();
         });
+    }
+
+    if !options.keep_initial_order_directories {
+        // Remove the original pixel directory for order_0.
+        for pixel in &pixels {
+            let dir = pixel / 10_000i64;
+            let pixel_dir = path.join(format!("Norder={}/Dir={}/Npix={}", order_0, dir, pixel));
+            std::fs::remove_dir_all(pixel_dir)?;
+        }
     }
 
     // After processing all pixels, if there is a progress file,
@@ -328,7 +335,6 @@ fn process_pixel(
     order_0: u8,
     order_1: u8,
     ref_order: u8,
-    keep_initial_order_directories: bool,
     progress_file: Option<Arc<Mutex<File>>>,
 ) -> Result<()> {
     if order_1 <= order_0 {
@@ -383,11 +389,6 @@ fn process_pixel(
         )?
         .collect_with_engine(Engine::Streaming)?;
 
-    if !keep_initial_order_directories {
-        // Remove the original pixel directory for order_0.
-        std::fs::remove_dir_all(pixel_dir)?;
-    }
-
     // If there is a progress file configured, update it with the completed pixel.
     if let Some(progress_file) = progress_file {
         update_progress_file(&progress_file, Some(pixel), None)?;
@@ -402,11 +403,12 @@ fn update_progress_file(
     complete: Option<bool>,
 ) -> Result<()> {
     // Rewind the progress file to the beginning before reading and writing.
-    progress_file.lock().unwrap().rewind().unwrap();
+    let mut p_file = progress_file.lock().unwrap();
+
+    p_file.rewind().unwrap();
 
     // Update the progress file with the completed pixel.
-    let mut progress: HATSRepartitionProgress =
-        serde_json::from_reader(BufReader::new(&*progress_file.lock().unwrap()))?;
+    let mut progress: HATSRepartitionProgress = serde_json::from_reader(BufReader::new(&*p_file))?;
 
     if let Some(pixel) = pixel {
         progress.pixels_completed.push(pixel);
@@ -417,10 +419,10 @@ fn update_progress_file(
     }
 
     // Rewind the progress file again and truncate it before writing the updated progress data.
-    progress_file.lock().unwrap().set_len(0).unwrap();
-    progress_file.lock().unwrap().rewind().unwrap();
+    p_file.set_len(0).unwrap();
+    p_file.rewind().unwrap();
 
-    serde_json::to_writer(&*progress_file.lock().unwrap(), &progress)?;
+    serde_json::to_writer(&*p_file, &progress)?;
 
     Ok(())
 }
