@@ -105,8 +105,8 @@ pub fn create_margin_cache(
     // Create an iterator over the rows of the partition (i.e., the pixels to process).
     let pixels = partition_info.get().collect()?;
     let norder = pixels.column("Norder")?.u8()?.iter();
-    let npixel = pixels.column("Npixel")?.u64()?.iter();
-    let norder_npixel = multizip((norder, npixel));
+    let npix = pixels.column("Npix")?.u64()?.iter();
+    let norder_npix = multizip((norder, npix));
 
     // If there is a progress file configured, write the initial progress information
     // with the list of pixels to process.
@@ -145,7 +145,7 @@ pub fn create_margin_cache(
     pool.install(|| {
         use rayon::prelude::*;
 
-        norder_npixel.par_bridge().for_each(|row| {
+        norder_npix.par_bridge().for_each(|row| {
             let (norder, npix) = row;
             let progress_file_clone = progress_file.clone();
 
