@@ -95,6 +95,7 @@ def create_margin_cache(
     )
 
     progress_file = margin_path / "_progress.json"
+    progress_file.unlink(missing_ok=True)
 
     _monitor_process = multiprocessing.Process(
         target=_monitor_progress,
@@ -118,11 +119,10 @@ def create_margin_cache(
         log.error("Error during margin cache creation.")
         _monitor_process.terminate()
         raise
-    finally:
-        progress_file.unlink(missing_ok=True)
 
     # Make sure the monitoring process finished.
     _monitor_process.join()
+    progress_file.unlink(missing_ok=True)
 
     log.info(f"Margin cache {margin_name!r} created in {timer.duration:,.2f} s.")
 
