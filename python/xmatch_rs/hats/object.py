@@ -679,7 +679,7 @@ def _monitor_progress(progress_file: pathlib.Path | None, log: SDSSLogger) -> No
                     n_pixels = len(to_process)
                     log.info(
                         f"Re-partitioning {n_pixels} pixels from order {order_0} "
-                        f"to order {order_1}: {to_process}"
+                        f"to order {order_1}."
                     )
                     message_shown = True
 
