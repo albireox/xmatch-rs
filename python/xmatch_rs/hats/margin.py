@@ -115,14 +115,17 @@ def create_margin_cache(
                 n_workers=n_workers,
                 progress_file=progress_file if show_progress else None,
             )
+
+        # Make sure the monitoring process finished.
+        _monitor_process.join()
+
     except Exception:
         log.error("Error during margin cache creation.")
         _monitor_process.terminate()
         raise
 
-    # Make sure the monitoring process finished.
-    _monitor_process.join()
-    progress_file.unlink(missing_ok=True)
+    finally:
+        progress_file.unlink(missing_ok=True)
 
     log.info(f"Margin cache {margin_name!r} created in {timer.duration:,.2f} s.")
 
