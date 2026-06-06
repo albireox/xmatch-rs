@@ -101,6 +101,7 @@ def create_index(
     extra_columns: list[str] | None,
     mode: str | None,
     check_duplicates: bool | None,
+    sort: bool,
     max_rows_per_file: int | None,
     max_kilobytes_per_file: int | None,
 ) -> None:
@@ -124,6 +125,9 @@ def create_index(
         The mode for creating the index. Can be "sequential" or "full".
     check_duplicates
         Whether to check for duplicate rows in the index. Only applies to "full" mode.
+    sort
+        If ``True``, sorts the index by the index column. Sorting can cause OOM
+        errors for large datasets, so it is disabled by default.
     max_rows_per_file
         The maximum number of rows per file.
     max_kilobytes_per_file
