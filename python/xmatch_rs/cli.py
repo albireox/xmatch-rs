@@ -390,7 +390,7 @@ def create_index(
     "collection_path",
     type=cloup.Path(exists=True, path_type=pathlib.Path, file_okay=False),
 )
-@cloup.argument("buffer", type=float)
+@cloup.argument("buffer", type=int)
 @cloup.option(
     "--margin-name",
     "-n",
@@ -433,7 +433,7 @@ def create_index(
 )
 def create_margin(
     collection_path: pathlib.Path,
-    buffer: float,
+    buffer: int,
     margin_name: str | None = None,
     default_margin: bool = False,
     n_workers: int | None = None,
@@ -445,7 +445,7 @@ def create_margin(
 
     from xmatch_rs.hats import HATS
 
-    margin_name = margin_name or f"margin_{buffer}arcsec"
+    margin_name = margin_name or f"margin_{int(buffer)}arcsec"
 
     hats = HATS(collection_path)
 
