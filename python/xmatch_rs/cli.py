@@ -183,6 +183,14 @@ def hats_cli():
         help="Whether to check for duplicate entries in the primary key index. "
         "This may lead to high memory use for large datasets.",
     ),
+    cloup.option(
+        "--sort-index",
+        is_flag=True,
+        default=False,
+        help="Whether to sort the primary key index by the primary key column. "
+        "Sorting can cause OOM errors for large datasets, so it is disabled by "
+        "default.",
+    ),
 )
 @cloup.option(
     "--dynamic-planning/--no-dynamic-planning",
@@ -236,6 +244,7 @@ def convert(
     primary_key_column: str | None,
     extra_index_columns: str,
     check_index_duplicates: bool,
+    sort_index: bool,
     n_workers: int | None,
     dynamic_planning: bool,
     show_progress: bool,
@@ -254,7 +263,11 @@ def convert(
     else:
         log.set_level(20)
 
-    extra_index_columns_list = extra_index_columns.strip().split(",")
+    extra_index_columns_list = (
+        extra_index_columns.strip().split(",")
+        if extra_index_columns.strip() != ""
+        else []
+    )
 
     HATS.convert_to_hats(
         data_path=list(data_path),
@@ -278,6 +291,7 @@ def convert(
         primary_key_column=primary_key_column,
         extra_index_columns=extra_index_columns_list,
         check_index_duplicates=check_index_duplicates,
+        sort_index=sort_index,
     )
 
 
@@ -315,6 +329,13 @@ def convert(
     help=("Whether to check for duplicate entries in the index."),
 )
 @cloup.option(
+    "--sort",
+    is_flag=True,
+    default=False,
+    help="Whether to sort the index by the index column. Sorting can cause OOM errors "
+    "for large datasets, so it is disabled by default.",
+)
+@cloup.option(
     "--max-rows-per-file",
     type=int,
     help="The maximum number of rows per file when chunking the index.",
@@ -337,6 +358,7 @@ def create_index(
     extra_columns: str,
     mode: Literal["sequential", "full"],
     check_duplicates: bool = False,
+    sort: bool = False,
     max_rows_per_file: int | None = None,
     max_kilobytes_per_file: int | None = None,
     overwrite: bool = False,
@@ -344,7 +366,6 @@ def create_index(
     """Creates an index dataset from the object catalogue."""
 
     from xmatch_rs.hats import HATS
-    sort: bool = False,
 
     index_column = index_column.lower()
     index_name = index_name or f"index_{index_column.lower()}"
@@ -360,6 +381,7 @@ def create_index(
         max_kilobytes_per_file=max_kilobytes_per_file,
         mode=mode,
         overwrite=overwrite,
+        sort=sort,
     )
 
 
@@ -367,7 +389,6 @@ def create_index(
 @cloup.argument(
     "collection_path",
     type=cloup.Path(exists=True, path_type=pathlib.Path, file_okay=False),
-        sort=sort,
 )
 @cloup.argument("buffer", type=float)
 @cloup.option(
