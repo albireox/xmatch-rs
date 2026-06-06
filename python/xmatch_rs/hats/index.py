@@ -24,6 +24,7 @@ def create_index(
     index_column: str,
     extra_columns: list[str] = [],
     check_duplicates: bool = False,
+    sort: bool = False,
     max_rows_per_file: int = 10_000_000,
     max_kilobytes_per_file: int = 10 * 1024 * 1024,
 ) -> None:
@@ -43,6 +44,9 @@ def create_index(
         Whether to check for duplicate entries in the index. If ``True``, an error
         will be raised if duplicates are found. This can significantly slow down the
         index generation for large datasets.
+    sort
+        Whether to sort the index by the index column. Sorting can cause OOM errors
+        for large datasets, so it is disabled by default.
     max_rows_per_file
         The maximum number of rows per file when chunking the index.
         Defaults to 10 million rows per file.
@@ -82,7 +86,10 @@ def create_index(
     # Add the extra columns to the groupby aggregation.
     index_lf = index_lf.agg(polars.col(extra_columns).first())
 
-    index_lf.sort(index_column).sink_parquet(
+    if sort:
+        index_lf = index_lf.sort(index_column)
+
+    index_lf.sink_parquet(
         polars.PartitionBy(
             base_path=index_path,
             file_path_provider=lambda args: str(

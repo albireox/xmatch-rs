@@ -23,6 +23,9 @@ pub struct HATSCreateIndexOptions {
     pub mode: String,
     /// Whether to check for duplicate rows in the index. Only applies to "full" mode.
     pub check_duplicates: bool,
+    /// Whether to sort the index. This can cause OOM errors for large datasets, so it
+    /// is disabled by default.
+    pub sort: bool,
     /// Maximum number of rows per file.
     pub max_rows_per_file: usize,
     /// Maximum size of each file in kilobytes.
@@ -34,6 +37,7 @@ impl HATSCreateIndexOptions {
         Self {
             mode: "sequential".to_string(),
             check_duplicates: false,
+            sort: false,
             max_rows_per_file: 10_000_000,
             max_kilobytes_per_file: 10 * 1024 * 1024,
         }
@@ -196,7 +200,11 @@ fn _create_hats_index_sequential(
         is_dataset: false,
         max_rows_per_file: Some(options.max_rows_per_file as u32),
         approximate_bytes_per_file: Some(options.max_kilobytes_per_file * 1024),
-        sort_by: Some(index_column.to_string()),
+        sort_by: if options.sort {
+            Some(index_column.to_string())
+        } else {
+            None
+        },
     };
     rechunk_hats_dataset(index_path.clone(), rechunk_options)?;
 
@@ -239,16 +247,21 @@ fn _create_hats_index_full(
     }
 
     // Add the extra columns to the index.
-    let lf = lf
-        .agg(
-            extra_columns
-                .as_ref()
-                .unwrap_or(&Vec::new())
-                .iter()
-                .map(|col_name| col(col_name).first().alias(col_name))
-                .collect::<Vec<_>>(),
-        )
-        .sort(vec![index_column], Default::default());
+    let lf = lf.agg(
+        extra_columns
+            .as_ref()
+            .unwrap_or(&Vec::new())
+            .iter()
+            .map(|col_name| col(col_name).first().alias(col_name))
+            .collect::<Vec<_>>(),
+    );
+
+    // Optionally sort the index by the index column.
+    let lf = if options.sort {
+        lf.sort(vec![index_column], Default::default())
+    } else {
+        lf
+    };
 
     // Write the index to parquet files.
     _sink_index_lf(lf.clone(), index_path, options, "part")?;

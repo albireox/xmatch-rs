@@ -92,6 +92,7 @@ class HATS:
         primary_key_column: str | None = None,
         extra_index_columns: list[str] = [],
         check_index_duplicates: bool = False,
+        sort_index: bool = False,
         n_workers: int | None = None,
         dynamic_planning: bool = True,
         apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None = None,
@@ -166,6 +167,9 @@ class HATS:
         check_index_duplicates
             Whether to check for duplicate entries in the primary key index.
             This may lead to high memory use for large datasets.
+        sort_index
+            If ``True``, sorts the index by the index column. Sorting can cause OOM
+            errors for large datasets, so it is disabled by default.
         n_workers
             The number of worker processes to use for the conversion. If not provided,
             uses recommended defaults based on the system's resources. ``n_workers=1``
@@ -285,6 +289,7 @@ class HATS:
                 mode="full" if check_index_duplicates else "sequential",
                 max_rows_per_file=max_rows_per_file,
                 max_kilobytes_per_file=max_kilobytes_per_file,
+                sort=sort_index,
             )
 
         return obj
@@ -348,6 +353,7 @@ class HATS:
         index_column: str,
         extra_columns: list[str] = [],
         check_duplicates: bool = False,
+        sort: bool = False,
         max_rows_per_file: int | None = None,
         max_kilobytes_per_file: int | None = None,
         mode: Literal["sequential", "full"] = "sequential",
@@ -368,6 +374,9 @@ class HATS:
             Whether to check for duplicate entries in the index. If ``True``, an error
             will be raised if duplicates are found. This can significantly slow down the
             index generation for large datasets.
+        sort
+            If ``True``, sorts the index by the index column. Sorting can cause OOM
+            errors for large datasets, so it is disabled by default.
         max_rows_per_file
             The maximum number of rows per file when chunking the index.
             Defaults to 10 million rows per file.
@@ -416,6 +425,7 @@ class HATS:
             extra_columns=extra_columns,
             mode=mode,
             check_duplicates=check_duplicates,
+            sort=sort,
             max_rows_per_file=max_rows_per_file,
             max_kilobytes_per_file=max_kilobytes_per_file,
         )

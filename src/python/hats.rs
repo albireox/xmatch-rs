@@ -64,6 +64,7 @@ pub(crate) fn hats_create_index(
     extra_columns: Option<Vec<String>>,
     mode: Option<String>,
     check_duplicates: Option<bool>,
+    sort: bool,
     max_rows_per_file: Option<usize>,
     max_kilobytes_per_file: Option<u64>,
 ) -> Result<()> {
@@ -74,6 +75,7 @@ pub(crate) fn hats_create_index(
         check_duplicates: check_duplicates.unwrap_or(def_opts.check_duplicates),
         max_rows_per_file: max_rows_per_file.unwrap_or(def_opts.max_rows_per_file),
         max_kilobytes_per_file: max_kilobytes_per_file.unwrap_or(def_opts.max_kilobytes_per_file),
+        sort,
     };
 
     hats::index::create_hats_index(

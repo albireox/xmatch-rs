@@ -344,6 +344,7 @@ def create_index(
     """Creates an index dataset from the object catalogue."""
 
     from xmatch_rs.hats import HATS
+    sort: bool = False,
 
     index_column = index_column.lower()
     index_name = index_name or f"index_{index_column.lower()}"
@@ -366,6 +367,7 @@ def create_index(
 @cloup.argument(
     "collection_path",
     type=cloup.Path(exists=True, path_type=pathlib.Path, file_okay=False),
+        sort=sort,
 )
 @cloup.argument("buffer", type=float)
 @cloup.option(
