@@ -48,7 +48,7 @@ python-source = "python"
 module-name = "xmatch_rs._xmatch_rs_lib"
 profile = "release"
 editable-profile = "release"
-strip = true
+# strip = true
 features = []
 
 [tool.uv]

@@ -228,7 +228,12 @@ fn _create_hats_index_full(
             .clone()
             .agg([col(index_column).count().alias("n")])
             .filter(col("n").gt(1));
-        if dupes.collect_with_engine(Engine::Streaming)?.height() > 0 {
+        if dupes
+            .collect_with_engine(Engine::Streaming)?
+            .unwrap_single()
+            .height()
+            > 0
+        {
             bail!("Duplicate rows found in index column.");
         }
     }

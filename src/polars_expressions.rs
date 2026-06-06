@@ -5,12 +5,11 @@
  *  @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
  */
 
-use polars::prelude::arity::broadcast_binary_elementwise;
-use polars::prelude::*;
-use pyo3_polars::derive::polars_expr;
-use serde::Deserialize;
-
 use super::healpix;
+use pyo3_polars::derive::polars_expr;
+use pyo3_polars::export::polars_core::prelude::arity::broadcast_binary_elementwise;
+use pyo3_polars::export::polars_core::prelude::*;
+use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct GetHEALPixKwargs {

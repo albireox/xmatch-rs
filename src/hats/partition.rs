@@ -256,12 +256,13 @@ fn list_pixels_to_repartition(
             .filter(col("count").gt(lit(max_rows_per_pixel as i64)))
             .select([col("Npix")])
             .sort(["Npix"], Default::default())
-            .collect_with_engine(Engine::Streaming)?;
+            .collect_with_engine(Engine::Streaming)?
+            .unwrap_single();
 
         let max_rows_pixels = lf_pixels
             .column("Npix")?
             .i64()?
-            .into_iter()
+            .iter()
             .flatten()
             .collect::<Vec<i64>>();
 

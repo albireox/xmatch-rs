@@ -16,8 +16,8 @@ use cdshealpix::compass_point::Cardinal;
 use cdshealpix::nested::bmoc::BMOC;
 use cdshealpix::nested::bmoc::Status;
 use cdshealpix::nested::{center, get};
+use itertools::multizip;
 use polars::prelude::*;
-use polars_rows_iter::*;
 use serde::{Deserialize, Serialize};
 
 use crate::hats::path_providers::{file_path_provider_fn, path_provider_part};
@@ -104,7 +104,9 @@ pub fn create_margin_cache(
 
     // Create an iterator over the rows of the partition (i.e., the pixels to process).
     let pixels = partition_info.get().collect()?;
-    let pixels_iter = df_rows_iter!(&pixels, "Norder" => u8, "Npix" => u64)?;
+    let norder = pixels.column("Norder")?.u8()?.iter();
+    let npixel = pixels.column("Npixel")?.u64()?.iter();
+    let norder_npixel = multizip((norder, npixel));
 
     // If there is a progress file configured, write the initial progress information
     // with the list of pixels to process.
@@ -143,16 +145,16 @@ pub fn create_margin_cache(
     pool.install(|| {
         use rayon::prelude::*;
 
-        pixels_iter.par_bridge().for_each(|row| {
-            let (norder, npix) = row.unwrap();
+        norder_npixel.par_bridge().for_each(|row| {
+            let (norder, npix) = row;
             let progress_file_clone = progress_file.clone();
 
             create_margin_cache_pixel(
                 object_dataset.clone(),
                 margin_cache_path.clone(),
                 partition_info.clone(),
-                norder,
-                npix,
+                norder.unwrap(),
+                npix.unwrap(),
                 buffer,
                 progress_file_clone,
             )
