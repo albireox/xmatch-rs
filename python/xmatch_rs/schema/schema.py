@@ -433,7 +433,7 @@ class Schema:
         path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(path, "w") as f:
-            yaml.dump(self.model.model_dump(), f, sort_keys=False, indent=2)
+            yaml.dump(self.model.model_dump(mode="json"), f, sort_keys=False, indent=2)
 
     def to_dict(self) -> dict:
         """Returns the schema as a dictionary.
@@ -448,7 +448,7 @@ class Schema:
 
         model = self.model.model_copy()
 
-        return model.model_dump()
+        return model.model_dump(mode="json")
 
     def get_primary_key(self) -> str:
         """Returns the primary key column name."""
