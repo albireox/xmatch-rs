@@ -19,6 +19,12 @@ dependencies = [
 [project.scripts]
 xmatch-rs = "xmatch_rs.cli:xmatch_rs_cli"
 
+[project.optional-dependencies]
+db = [
+    "adbc-driver-postgresql>=1.11.0",
+    "psycopg-binary>=3.3.4",
+]
+
 [dependency-groups]
 dev = [
     "ipdb>=0.13.13",

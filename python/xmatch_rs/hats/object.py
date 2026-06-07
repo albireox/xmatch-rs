@@ -623,7 +623,7 @@ def _run_hats_repartition(
     if phase.keep_lower_order_directories is False:
         log.info(f"Removing order {order_0} directories.")
         for pixel in pixels:
-            pixel_dir = get_pixel_path(dataset_path, order_0, pixel, check=False)
+            pixel_dir = get_pixel_path(dataset_path, order_0, pixel)
             if pixel_dir.exists() and pixel_dir.is_dir():
                 shutil.rmtree(pixel_dir)
 

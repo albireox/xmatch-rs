@@ -13,6 +13,8 @@ import shutil
 
 from typing import TYPE_CHECKING, Literal
 
+import polars
+
 import sdsstools.logger
 
 import xmatch_rs._xmatch_rs_lib.hats as _rs_hats
@@ -559,3 +561,56 @@ class HATS:
         coll_properties.write(self.path / "collection.properties")
 
         log.info("Updated margin cache in collection properties.")
+
+    def write_to_database(
+        self,
+        dbname: str,
+        username: str,
+        host: str | None = None,
+        show_progress: bool = True,
+        n_workers: int | None = 4,
+    ) -> None:
+        """Loads the HATS dataset into a database.
+
+        Parameters
+        ----------
+        dbname
+            The name of the database to load into.
+        username
+            The username to use to connect to the database. The password will be read
+            from ``.pgpass``.
+        host
+            The host to connect to the database. If None, it will connect to localhost.
+        show_progress
+            Whether to show a progress bar while loading the data.
+        n_workers
+            The number of workers to use for loading the data. If None, uses all
+            available CPU cores.
+
+        """
+
+        from xmatch_rs.database.load import write_dataset_to_database
+
+        write_dataset_to_database(
+            self,
+            dbname=dbname,
+            username=username,
+            host=host,
+            show_progress=show_progress,
+            n_workers=n_workers,
+        )
+
+    def read_partition_info(self, product: str = "object") -> polars.DataFrame:
+        """Reads the partition info file for a given product."""
+
+        partition_info_path = self.path / product / "partition_info.csv"
+
+        if not partition_info_path.exists():
+            raise FileNotFoundError(
+                f"No partition info file found for product {product!r}."
+            )
+
+        return polars.read_csv(
+            partition_info_path,
+            schema={"Norder": polars.Int8, "Npix": polars.Int64},
+        )

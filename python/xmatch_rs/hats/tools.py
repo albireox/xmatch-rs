@@ -95,20 +95,24 @@ def get_pixel_path(
     dataset_path: pathlib.Path,
     order: int,
     npix: int,
-    check: bool = False,
 ) -> pathlib.Path:
-    """Returns the path to a pixel directory in a HATS dataset."""
+    """Returns the path to a pixel directory in a HATS dataset.
+
+    No check is performed to verify that the pixel directory exists but the
+    dataset path must exits.
+
+    """
 
     dataset_path = get_dataset_path(dataset_path)
 
     dir_order = npix // 10_000
     pixel_dir = dataset_path / f"Norder={order}" / f"Dir={dir_order}" / f"Npix={npix}"
 
-    if check:
-        if not pixel_dir.exists():
-            raise ValueError(f"Pixel directory {pixel_dir!s} does not exist.")
-        elif not pixel_dir.is_dir():
-            raise ValueError(f"Pixel path {pixel_dir!s} is not a directory.")
+    # HATS supports the pixel path being .../Norder=<norder>/Dir=<dir>/Npix=<npix>/
+    # or .../Norder=<order>/Dir=<dir>/Npix=<npix>.parquet. xmatch-rs always uses
+    # the former but here we support both.
+    if not pixel_dir.exists() and pixel_dir.with_suffix(".parquet").exists():
+        pixel_dir = pixel_dir.with_suffix(".parquet")
 
     return pixel_dir
 

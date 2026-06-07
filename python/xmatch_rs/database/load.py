@@ -1,0 +1,179 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+#
+# @Author: José Sánchez-Gallego (gallegoj@uw.edu)
+# @Date: 2026-06-06
+# @Filename: load.py
+# @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
+
+from __future__ import annotations
+
+import functools
+import multiprocessing
+import pathlib
+
+from typing import TYPE_CHECKING
+
+import polars
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeRemainingColumn,
+)
+
+from xmatch_rs import console
+from xmatch_rs.hats.tools import get_pixel_path
+
+
+if TYPE_CHECKING:
+    from xmatch_rs import HATS
+
+
+__all__ = ["write_dataset_to_database"]
+
+
+def get_database_uri(
+    dbname: str,
+    host: str | None = None,
+    port: int | None = None,
+    user: str | None = None,
+    password: str | None = None,
+):
+    """Returns the URI to the database."""
+
+    if user is None and password is None:
+        auth: str = ""
+    elif password is None:
+        auth: str = f"{user}@"
+    else:
+        auth: str = f"{user}:{password}@"
+
+    host_port: str = f"{host or ''}" if port is None else f"{host or ''}:{port}"
+
+    return f"postgresql://{auth}{host_port}/{dbname}"
+
+
+def write_dataset_to_database(
+    hats: HATS,
+    dbname: str,
+    username: str,
+    host: str | None = None,
+    show_progress: bool = True,
+    n_workers: int | None = None,
+) -> None:
+    """Loads a HATS dataset into a database.
+
+    Parameters
+    ----------
+    hats
+        The HATS dataset to load.
+    dbname
+        The name of the database to load into.
+    username
+        The username to use to connect to the database. The password will be read from
+        ``.pgpass``.
+    host
+        The host to connect to the database. If None, it will connect to the localhost.
+    show_progress
+        Whether to show a progress bar while loading the data.
+    n_workers
+        The number of workers to use for loading the data. If None, uses all
+        available CPU cores.
+
+    """
+
+    dataset_path = hats.path / "object"
+    if not dataset_path.is_dir():
+        raise FileNotFoundError(f"No dataset found at {dataset_path!r}.")
+
+    schema = hats.schema.model.database.schema_
+    table_name = hats.schema.model.database.table_name
+
+    partition_info = hats.read_partition_info()
+    pixel_data: list[tuple[int, int]] = []
+    for row in partition_info.iter_rows(named=True):
+        norder = row["Norder"]
+        npix = row["Npix"]
+
+        pixel_data.append((norder, npix))
+
+    db_uri = get_database_uri(dbname=dbname, host=host, user=username)
+
+    pbar = Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeRemainingColumn(),
+        console=console,
+        transient=True,
+    )
+
+    pbar_task: int | None = None
+    if show_progress:
+        pbar_task = pbar.add_task(
+            "Loading dataset into database...",
+            total=partition_info.height,
+        )
+
+        pbar.start()
+
+    try:
+        _write_pixel_to_database_partial = functools.partial(
+            _write_pixel_to_database,
+            dataset_path=dataset_path,
+            db_uri=db_uri,
+            schema=schema,
+            table_name=table_name,
+        )
+
+        if n_workers is None:
+            n_workers = multiprocessing.cpu_count()
+
+        with multiprocessing.Pool(n_workers) as pool:
+            for _ in pool.imap_unordered(
+                _write_pixel_to_database_partial,
+                pixel_data,
+            ):
+                if pbar_task is not None:
+                    pbar.update(pbar_task, advance=1)
+    except Exception:
+        if pbar_task is not None:
+            pbar.stop()
+        raise
+
+    if pbar_task is not None:
+        pbar.stop()
+
+
+def _write_pixel_to_database(
+    pixel_data: tuple[int, int],
+    dataset_path: pathlib.Path,
+    db_uri: str,
+    schema: str,
+    table_name: str,
+) -> None:
+    """Writes a single pixel to the database. This is used for multiprocessing."""
+
+    norder, npix = pixel_data
+    dir_ = npix // 10_000
+
+    pixel_path = get_pixel_path(dataset_path, norder, npix)
+
+    data = polars.read_parquet(pixel_path)
+    data = data.rename({"_healpix_29": "healpix_29"})
+    data = data.with_columns(
+        polars.lit(norder, dtype=polars.UInt8).alias("hats_norder"),
+        polars.lit(dir_, dtype=polars.UInt32).alias("hats_dir"),
+        polars.lit(npix, dtype=polars.UInt64).alias("hats_npix"),
+    )
+
+    data.write_database(
+        table_name=f"{schema}.{table_name}",
+        connection=db_uri,
+        if_table_exists="append",
+        engine="adbc",
+    )

@@ -267,6 +267,11 @@ class ColumnModel(BaseModel):
         ),
     ] = None
 
+    database_name: Annotated[
+        str | None,
+        Field(description="The name of the column in the database."),
+    ] = None
+
     apply_functions: Annotated[
         list[str],
         Field(
@@ -341,7 +346,13 @@ class Schema:
 
         self.model = SchemaModel(**self._raw_schema)
 
-    def get_columns(self, only_source_columns: bool = False) -> dict[str, ColumnModel]:
+    def get_columns(
+        self,
+        only_source_columns: bool = False,
+        apply_rename_to: bool = True,
+        use_database_name: bool = False,
+        apply_cast_to: bool = True,
+    ) -> dict[str, ColumnModel]:
         """Returns a dictionary of column names and their parameters."""
 
         columns = self.model.source_catalogue.columns.copy()
@@ -349,19 +360,53 @@ class Schema:
         if not only_source_columns:
             columns.update(self.model.extra_columns.copy())
 
-        return columns
+        new_columns: dict[str, ColumnModel] = {}
+        for column_name, column in columns.items():
+            new_column_name = column_name
 
-    def get_column(self, column_name: str) -> ColumnModel | None:
+            if use_database_name and column.database_name is not None:
+                new_column_name = column.database_name
+            elif column.rename_to is not None and apply_rename_to:
+                new_column_name = column.rename_to
+
+            new_columns[new_column_name] = column
+
+            if apply_cast_to and column.cast_to is not None:
+                new_col = column.model_copy(update={"dtype": column.cast_to})
+                new_col.cast_to = None
+                new_columns[new_column_name] = new_col
+
+        return new_columns
+
+    def get_column(
+        self,
+        column_name: str,
+        apply_rename_to: bool = True,
+        use_database_name: bool = False,
+        apply_cast_to: bool = True,
+    ) -> ColumnModel | None:
         """Returns the model for a specific column.
 
         Parameters
         ----------
         column_name
             The name of the column.
+        apply_rename_to
+            Whether to apply the renaming specified in the schema to the column names.
+        use_database_name
+            Whether to use the database column names instead of the original
+            column names.
+        apply_cast_to
+            Whether to apply the casting specified in the schema to the column
+            data types.
 
         """
 
-        columns = self.get_columns()
+        columns = self.get_columns(
+            apply_rename_to=apply_rename_to,
+            apply_cast_to=apply_cast_to,
+            use_database_name=use_database_name,
+        )
         if column_name not in columns:
             return None
 
