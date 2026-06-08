@@ -228,6 +228,14 @@ class ReadParamsModel(BaseModel):
         ),
     ]
 
+    nan_to_null: Annotated[
+        bool,
+        Field(
+            description="Whether to convert NaN values to null values when reading "
+            "the source data."
+        ),
+    ] = False
+
 
 class ColumnModel(BaseModel):
     """Model representing a column in the schema."""
