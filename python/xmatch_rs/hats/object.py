@@ -31,7 +31,11 @@ from sdsstools import Timer, read_yaml_file
 
 import xmatch_rs._xmatch_rs_lib.hats as _rs_hats
 from xmatch_rs import console
-from xmatch_rs.convert import convert_csv_to_parquet, convert_to_parquet
+from xmatch_rs.convert import (
+    convert_csv_to_parquet,
+    convert_fits_to_parquet,
+    convert_to_parquet,
+)
 from xmatch_rs.hats.models import ConvertToHATSModel, PhaseModel
 from xmatch_rs.hats.providers import get_hats_file_provider
 from xmatch_rs.hats.tools import (
@@ -57,7 +61,7 @@ def convert_to_hats_object_catalogue(
     data_path: DATA_PATH_T,
     collection_path: str | pathlib.Path,
     schema: Schema | None,
-    format: Literal["csv", "parquet"] | None = None,
+    format: Literal["csv", "parquet", "fits"] | None = None,
     initial_order: int = 2,
     reference_order: int = 29,
     max_order: int | None = None,
@@ -354,7 +358,7 @@ def _run_hats_healpix_phase(
     model: ConvertToHATSModel,
     phase_name: str,
     log: SDSSLogger,
-    format: Literal["csv", "parquet"] | None = None,
+    format: Literal["csv", "parquet", "fits"] | None = None,
     apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None = None,
     show_progress: bool = True,
     n_workers: int | None = None,
@@ -442,7 +446,7 @@ def _run_hats_min_order_phase(
     phase_name: str,
     order_1: int,
     log: SDSSLogger,
-    format: Literal["csv", "parquet"] | None = None,
+    format: Literal["csv", "parquet", "fits"] | None = None,
     apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None = None,
     show_progress: bool = True,
     n_workers: int | None = None,
@@ -460,6 +464,13 @@ def _run_hats_min_order_phase(
     output_path = model.object_path / "dataset"
     output_path.mkdir(parents=True, exist_ok=True)
 
+    ra_column, dec_column = schema.get_ra_dec_columns()
+
+    ra_column_unit = schema.model.ra_column_unit.value
+    dec_column_unit = schema.model.dec_column_unit.value
+    if dec_column_unit == "hours":
+        raise ValueError("Dec column cannot have units of hours.")
+
     with Timer() as timer:
         if format == "csv":
             log.info("Converting CSV files to HATS.")
@@ -476,6 +487,10 @@ def _run_hats_min_order_phase(
                 partition_include_key=False,
                 parallelise=True if n_workers is not None and n_workers > 1 else False,
                 n_workers=n_workers,
+                ra_column=ra_column,
+                dec_column=dec_column,
+                ra_column_unit=ra_column_unit,
+                dec_column_unit=dec_column_unit,
                 healpix_orders=[model.reference_order, order_1],
                 healpix_column_name="_healpix_{order}",
                 apply_callback=apply_callback,
@@ -503,6 +518,10 @@ def _run_hats_min_order_phase(
                 partition_include_key=False,
                 parallelise=True,
                 n_workers=n_workers,
+                ra_column=ra_column,
+                dec_column=dec_column,
+                ra_column_unit=ra_column_unit,
+                dec_column_unit=dec_column_unit,
                 healpix_orders=[model.reference_order, order_1],
                 healpix_column_name="_healpix_{order}",
                 apply_callback=apply_callback,
@@ -510,10 +529,35 @@ def _run_hats_min_order_phase(
                 show_progress=show_progress,
             )
 
+        elif format == "fits":
+            log.info("Converting FITS files to HATS.")
+            log.info(f"Performing initial convertion to order {order_1}.")
+
+            convert_fits_to_parquet(
+                fits_files=data_path,
+                schema=schema,
+                output_path=output_path,
+                mode="partition",
+                partition_key=f"_healpix_{order_1}",
+                file_path_provider=hats_file_provider,
+                partition_include_key=False,
+                parallelise=True if n_workers is not None and n_workers > 1 else False,
+                n_workers=n_workers,
+                ra_column=ra_column,
+                dec_column=dec_column,
+                ra_column_unit=ra_column_unit,
+                dec_column_unit=dec_column_unit,
+                healpix_orders=[model.reference_order, order_1],
+                healpix_column_name="_healpix_{order}",
+                apply_callback=apply_callback,
+                show_progress=show_progress,
+                log=log,
+            )
+
         else:
             raise ValueError(
                 f"Invalid format {format!r}. Currently supported formats "
-                "are 'csv' and 'parquet'.",
+                "are 'csv', 'parquet', and 'fits'.",
             )
 
         log.info(f"Phase {phase_name!r} completed in {timer.elapsed:,.1f} seconds.")

@@ -34,7 +34,7 @@ class HATS:
     """A representation of a dataset in the HATS format."""
 
     def __init__(self, path: str | pathlib.Path):
-        """Initializes the HATS dataset.
+        """A representation of a HATS collection.
 
         Parameters
         ----------
@@ -81,7 +81,7 @@ class HATS:
         data_path: list[str | pathlib.Path] | str | pathlib.Path,
         collection_path: str | pathlib.Path,
         schema: Schema | str | pathlib.Path | dict | None = None,
-        format: Literal["csv", "parquet"] | None = None,
+        format: Literal["csv", "parquet", "fits"] | None = None,
         initial_order: int = 2,
         reference_order: int = 29,
         max_order: int | None = None,
