@@ -548,7 +548,7 @@ def validate_schema(schema_path: pathlib.Path, verbose: bool = False):
     "--csv-null-values",
     type=str,
     multiple=True,
-    default="null",
+    default=("null",),
     help="A list of strings that should be interpreted as null values for CSV files.",
 )
 def generate_schema(
@@ -563,7 +563,7 @@ def generate_schema(
 ):
     """Generates a catalogue schema YAML file from a sample dataset."""
 
-    from xmatch_rs import generate_schema
+    from xmatch_rs.schema import generate_schema
 
     schema_model = generate_schema(
         data_path,
