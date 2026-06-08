@@ -109,14 +109,14 @@ def generate_schema(
     csv_comment_prefix: str = "#",
     csv_null_values: list[str] = [],
 ) -> SchemaModel | None:
-    """Interactively generates a schema from a sample dataset.
+    """Interactively generates a schema from a sample data file.
 
     Parameters
     ----------
     data_path
-        Path to the sample dataset. Used to infer column names and types.
+        Path to the sample data file. Used to infer column names and types.
     format
-        The format of the sample dataset. If not provided, it will be inferred
+        The format of the sample data file. If not provided, it will be inferred
         from the file extension.
     skip_optional
         If `True`, optional fields will be skipped and set to the default value.
@@ -135,6 +135,8 @@ def generate_schema(
         The generated schema model.
 
     """
+
+    from xmatch_rs.convert import read_fits_to_dataframe
 
     data_path = pathlib.Path(data_path) if data_path is not None else None
 
@@ -168,21 +170,21 @@ def generate_schema(
     if not skip_optional:
         bib_reference: str | None = (
             questionary.text(
-                "Bibliographic reference (optional)\n",
+                "Bibliographic reference\n",
                 qmark="📚",
             ).unsafe_ask()
             or None
         )
         bib_reference_url: str | None = (
             questionary.text(
-                "URL of the bibliographic reference (optional)\n",
+                "URL of the bibliographic reference\n",
                 qmark="🔗",
             ).unsafe_ask()
             or None
         )
         comments: str | None = (
             questionary.text(
-                "Comments (optional)\n",
+                "Comments\n",
                 qmark="💬",
             ).unsafe_ask()
             or None
@@ -218,7 +220,7 @@ def generate_schema(
             elif format == "parquet":
                 df = polars.read_parquet(data_path, n_rows=1000)
             elif format == "fits":
-                console.print("[yellow]FITS is not yet supported.[/]")
+                df = read_fits_to_dataframe(data_path).head(10)
             else:
                 console.print(f"[red]Unsupported format {format!r}.[/]")
                 return None
@@ -249,23 +251,42 @@ def generate_schema(
     if not skip_optional:
         ra_column: str | None = (
             questionary.text(
-                "Right ascension column (optional)\n",
+                "Right ascension column\n",
                 qmark="🧭",
                 default="ra" if "ra" in source_columns else "",
             ).unsafe_ask()
             or None
         )
+        ra_column_unit: str | None = questionary.select(
+            "Right ascension column unit\n",
+            qmark="🧭",
+            default="degrees",
+            choices=[
+                questionary.Choice("Degrees", value="degrees"),
+                questionary.Choice("Hours", value="hours"),
+                questionary.Choice("Radians", value="radians"),
+            ],
+        ).unsafe_ask()
         dec_column: str | None = (
             questionary.text(
-                "Declination column (optional)\n",
+                "Declination column\n",
                 qmark="🧭",
                 default="dec" if "dec" in source_columns else "",
             ).unsafe_ask()
             or None
         )
+        dec_column_unit: str | None = questionary.select(
+            "Declination column unit\n",
+            qmark="🧭",
+            default="degrees",
+            choices=[
+                questionary.Choice("Degrees", value="degrees"),
+                questionary.Choice("Hours", value="hours"),
+            ],
+        ).unsafe_ask()
         pmra_column: str | None = (
             questionary.text(
-                "Proper motion in right ascension column (optional)\n",
+                "Proper motion in right ascension column\n",
                 qmark="🧭",
                 default="pmra" if "pmra" in source_columns else "",
             ).unsafe_ask()
@@ -273,7 +294,7 @@ def generate_schema(
         )
         pmdec_column: str | None = (
             questionary.text(
-                "Proper motion in declination column (optional)\n",
+                "Proper motion in declination column\n",
                 qmark="🧭",
                 default="pmdec" if "pmdec" in source_columns else "",
             ).unsafe_ask()
@@ -290,7 +311,7 @@ def generate_schema(
 
         epoch: str | None = (
             questionary.text(
-                "Epoch of the coordinates (optional)\n",
+                "Epoch of the coordinates\n",
                 qmark="📅",
             ).unsafe_ask()
             or None
@@ -299,7 +320,7 @@ def generate_schema(
         if not epoch:
             epoch_column: str | None = (
                 questionary.text(
-                    "Epoch column (optional)\n",
+                    "Epoch column\n",
                     qmark="📅",
                 ).unsafe_ask()
                 or None
@@ -308,7 +329,7 @@ def generate_schema(
             epoch_column = None
 
         epoch_format: str = questionary.select(
-            "Epoch format (optional)\n",
+            "Epoch format\n",
             qmark="📅",
             choices=[
                 questionary.Choice("Julian year", value="jyear"),
@@ -318,6 +339,8 @@ def generate_schema(
     else:
         ra_column: str | None = None
         dec_column: str | None = None
+        ra_column_unit: str | None = None
+        dec_column_unit: str | None = None
         pmra_column: str | None = None
         pmdec_column: str | None = None
         pmra_is_cosdec: bool = True
@@ -395,6 +418,8 @@ def generate_schema(
             "comments": comments,
             "ra_column": ra_column,
             "dec_column": dec_column,
+            "ra_column_unit": ra_column_unit,
+            "dec_column_unit": dec_column_unit,
             "pmra_column": pmra_column,
             "pmdec_column": pmdec_column,
             "pmra_is_cosdec": pmra_is_cosdec,
@@ -407,7 +432,7 @@ def generate_schema(
                 "format": format,
                 "columns": source_columns,
             },
-            "extra_columns": {},
+            "extra_columns": extra_columns,
             "database": {
                 "table_name": table_name,
                 "schema": db_schema,

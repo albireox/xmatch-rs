@@ -37,6 +37,15 @@ class SourceCatalogueFormat(str, enum.Enum):
 
     CSV = "csv"
     PARQUET = "parquet"
+    FITS = "fits"
+
+
+class CoordUnit(str, enum.Enum):
+    """Enumeration of possible coordinate units."""
+
+    DEGREES = "degrees"
+    HOURS = "hours"
+    RADIANS = "radians"
 
 
 class Dtype(str, enum.Enum):
@@ -96,10 +105,20 @@ class SchemaModel(BaseModel):
         Field(description="The name of the RA column in the catalogue (in degrees)."),
     ] = None
 
+    ra_column_unit: Annotated[
+        CoordUnit,
+        Field(description="The unit of the RA column."),
+    ] = CoordUnit.DEGREES
+
     dec_column: Annotated[
         str | None,
         Field(description="The name of the Dec column in the catalogue."),
     ] = None
+
+    dec_column_unit: Annotated[
+        CoordUnit,
+        Field(description="The unit of the Dec column."),
+    ] = CoordUnit.DEGREES
 
     pmra_column: Annotated[
         str | None,
