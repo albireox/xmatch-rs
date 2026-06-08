@@ -325,6 +325,40 @@ def generate_schema(
         epoch_column: str | None = None
         epoch_format: str | None = None
 
+    # Add HATS extra columns.
+    if not skip_optional:
+        add_hats_columns: bool = questionary.confirm(
+            "Add HATS extra columns (_healpy_29, etc.)?\n",
+            qmark="✨",
+        ).unsafe_ask()
+        if add_hats_columns:
+            extra_columns = {
+                "_healpy_29": {
+                    "dtype": "UInt64",
+                    "unit": None,
+                    "description": "HEALPix index at depth 29",
+                    "database_name": "healpix_29",
+                },
+                "Norder": {
+                    "dtype": "Int8",
+                    "description": "HEALPix order of the target in the HATS partition",
+                    "database_name": "hats_norder",
+                },
+                "Dir": {
+                    "dtype": "UInt32",
+                    "description": "HATS directory grouping",
+                    "database_name": "hats_dir",
+                },
+                "Npix": {
+                    "dtype": "UInt32",
+                    "description": "HEALPix pixel of order norder in which this target "
+                    "is included in the HATS partition.",
+                    "database_name": "hats_npix",
+                },
+            }
+    else:
+        extra_columns: dict[str, dict[str, str | None]] = {}
+
     # Database questions.
     table_name: str = questionary.text(
         "Database table name\n",
