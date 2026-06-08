@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from xmatch_rs import HATS
 
 
-__all__ = ["write_dataset_to_database"]
+__all__ = ["write_dataset_to_database", "get_database_uri"]
 
 
 def get_database_uri(
