@@ -105,7 +105,7 @@ def get_pixel_path(
 
     dataset_path = get_dataset_path(dataset_path)
 
-    dir_order = npix // 10_000
+    dir_order = npix // 10_000 * 10_000
     pixel_dir = dataset_path / f"Norder={order}" / f"Dir={dir_order}" / f"Npix={npix}"
 
     # HATS supports the pixel path being .../Norder=<norder>/Dir=<dir>/Npix=<npix>/

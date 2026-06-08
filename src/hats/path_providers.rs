@@ -25,7 +25,7 @@ pub(crate) fn path_provider_uuid_pixel(
         .unwrap();
 
     // Calculate the Dir= directory based on the pixel index.
-    let dir = pixel / 10_000i64;
+    let dir = pixel / 10_000i64 * 10_000i64;
 
     let mut uuid_part = uuid::Uuid::new_v4().to_string();
     uuid_part = uuid_part.replace("-", "");

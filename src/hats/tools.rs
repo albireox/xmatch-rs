@@ -32,7 +32,7 @@ pub(crate) fn get_dataset_directory(path: &PathBuf) -> Result<PathBuf> {
 /// Gets the path to a pixel directory in a dataset.
 pub(crate) fn get_pixel_path(dataset_path: &PathBuf, norder: u8, npix: u64) -> PathBuf {
     let dataset_path = get_dataset_directory(dataset_path).unwrap();
-    let dir = npix / 10_000;
+    let dir = npix / 10_000 * 10_000;
     dataset_path
         .clone()
         .join(format!("Norder={}/Dir={}/Npix={}", norder, dir, npix))

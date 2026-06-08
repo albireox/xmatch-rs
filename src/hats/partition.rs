@@ -212,7 +212,7 @@ pub fn hats_repartition(
     if !options.keep_initial_order_directories {
         // Remove the original pixel directory for order_0.
         for pixel in &pixels {
-            let dir = pixel / 10_000i64;
+            let dir = pixel / 10_000i64 * 10_000i64;
             let pixel_dir = path.join(format!("Norder={}/Dir={}/Npix={}", order_0, dir, pixel));
             std::fs::remove_dir_all(pixel_dir)?;
         }
@@ -343,7 +343,7 @@ fn process_pixel(
     }
 
     // Get the directory for the pixel at order_0.
-    let dir = pixel / 10_000i64;
+    let dir = pixel / 10_000i64 * 10_000i64;
     let pixel_dir = dataset_path.join(format!("Norder={}/Dir={}/Npix={}", order_0, dir, pixel));
 
     if !pixel_dir.exists() {
