@@ -131,7 +131,7 @@ def hats_cli():
     ),
     cloup.option(
         "--n-workers",
-        "-n",
+        "-w",
         type=int,
         default=None,
         help=(
