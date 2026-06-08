@@ -12,6 +12,8 @@ import os
 import pathlib
 import re
 
+from typing import overload
+
 import polars
 
 
@@ -133,3 +135,49 @@ def get_dataset_nrows(
     n_rows = lf.select(polars.len()).collect().item()  # type: ignore
 
     return n_rows
+
+
+@overload
+def check_duplicates(
+    dataset_path: pathlib.Path,
+    column_name: str,
+    return_duplicates: bool = False,
+) -> polars.DataFrame: ...
+
+
+@overload
+def check_duplicates(
+    dataset_path: pathlib.Path,
+    column_name: str,
+    return_duplicates: bool = True,
+) -> bool: ...
+
+
+def check_duplicates(
+    dataset_path: pathlib.Path,
+    column_name: str,
+    return_duplicates: bool = False,
+) -> polars.DataFrame | bool:
+    """Checks for duplicate rows in a HATS dataset."""
+
+    dataset_path = get_dataset_path(dataset_path)
+
+    lf = polars.scan_parquet(dataset_path)
+
+    duplicates = lf.select(
+        polars.col(column_name),
+        polars.col(column_name).is_duplicated().alias("is_duplicated"),
+    )
+
+    duplicates = duplicates.filter(polars.col("is_duplicated")).select(column_name)
+
+    if return_duplicates:
+        return duplicates.collect(engine="streaming")
+
+    n_duplicates = duplicates = (
+        duplicates.select(polars.col(column_name).len())
+        .collect(engine="streaming")
+        .item(0, 0)
+    )
+
+    return n_duplicates > 0
