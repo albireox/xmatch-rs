@@ -63,6 +63,9 @@ def write_dataset_to_database(
     host: str | None = None,
     show_progress: bool = True,
     n_workers: int | None = None,
+    table_name: str | None = None,
+    schema: str | None = None,
+    load_hats_columns: bool = True,
 ) -> None:
     """Loads a HATS dataset into a database.
 
@@ -82,6 +85,15 @@ def write_dataset_to_database(
     n_workers
         The number of workers to use for loading the data. If None, uses all
         available CPU cores.
+    table_name
+        The name of the table to load the data into. This can be used to override
+        the table name defined in the HATS schema.
+    schema
+        The name of the schema to load the data into. This can be used to override
+        the schema name defined in the HATS schema.
+    load_hats_columns
+        Whether to load the HATS-specific columns (``healpix_29``,
+        ``hats_norder``, ...).
 
     """
 
@@ -89,8 +101,8 @@ def write_dataset_to_database(
     if not dataset_path.is_dir():
         raise FileNotFoundError(f"No dataset found at {dataset_path!r}.")
 
-    schema = hats.schema.model.database.schema_
-    table_name = hats.schema.model.database.table_name
+    schema = schema or hats.schema.model.database.schema_
+    table_name = table_name or hats.schema.model.database.table_name
 
     partition_info = hats.read_partition_info()
     pixel_data: list[tuple[int, int]] = []
@@ -128,6 +140,7 @@ def write_dataset_to_database(
             db_uri=db_uri,
             schema=schema,
             table_name=table_name,
+            load_hats_columns=load_hats_columns,
         )
 
         if n_workers is None:
@@ -155,21 +168,26 @@ def _write_pixel_to_database(
     db_uri: str,
     schema: str,
     table_name: str,
+    load_hats_columns: bool,
 ) -> None:
     """Writes a single pixel to the database. This is used for multiprocessing."""
 
     norder, npix = pixel_data
-    dir_ = npix // 10_000
+    dir_ = npix // 10_000 * 10_000
 
     pixel_path = get_pixel_path(dataset_path, norder, npix)
 
     data = polars.read_parquet(pixel_path)
-    data = data.rename({"_healpix_29": "healpix_29"})
-    data = data.with_columns(
-        polars.lit(norder, dtype=polars.UInt8).alias("hats_norder"),
-        polars.lit(dir_, dtype=polars.UInt32).alias("hats_dir"),
-        polars.lit(npix, dtype=polars.UInt64).alias("hats_npix"),
-    )
+
+    if load_hats_columns:
+        data = data.rename({"_healpix_29": "healpix_29"})
+        data = data.with_columns(
+            polars.lit(norder, dtype=polars.UInt8).alias("hats_norder"),
+            polars.lit(dir_, dtype=polars.UInt32).alias("hats_dir"),
+            polars.lit(npix, dtype=polars.UInt64).alias("hats_npix"),
+        )
+    else:
+        data = data.drop(["_healpix_29"])
 
     data.write_database(
         table_name=f"{schema}.{table_name}",
