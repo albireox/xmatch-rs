@@ -410,7 +410,7 @@ fn create_margin_cache_pixel(
         object_dataset_path.clone(),
         norder,
         npix,
-        Some(partition_info.clone()),
+        Some(partition_info),
     )?;
 
     // Iterate over the neighbours and collect the targets that fall within the margin.

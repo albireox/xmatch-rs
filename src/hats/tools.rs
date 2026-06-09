@@ -282,9 +282,20 @@ pub fn get_hats_neighbours(
             // Convert the neighbour pixel to a list of pixels in the current order.
             let test_pixels = healpix_convert_order(neigh_npix, norder, order);
 
+            // Get the pixels in the partition info for the current order.
+            let partition_order = partition_info
+                .get()
+                .filter(col("Norder").eq(lit(order)))
+                .select([col("Npix")])
+                .sort(["Npix"], Default::default())
+                .collect()?[0]
+                .u64()?
+                .into_no_null_iter()
+                .collect::<Vec<u64>>();
+
             // Check if any of the converted pixels are in the partition info for the dataset.
             test_pixels.iter().for_each(|p| {
-                if partition_info.contains(order, *p).unwrap_or(false) {
+                if partition_order.iter().find(|q| p == *q).is_some() {
                     neighbours.push((order, *p));
                 }
             });
