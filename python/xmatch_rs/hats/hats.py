@@ -266,7 +266,6 @@ class HATS:
 
         # Add the partition info file for the object catalogue.
         create_partition_info(
-            "object",
             collection_path / "object",
             overwrite=overwrite,
         )
@@ -531,7 +530,6 @@ class HATS:
 
         # Add the partition info file for the margin cache.
         create_partition_info(
-            "margin",
             margin_path,
             overwrite=overwrite,
         )

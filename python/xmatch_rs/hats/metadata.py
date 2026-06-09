@@ -233,26 +233,17 @@ def create_properties(
     properties.write(overwrite=overwrite)
 
 
-def create_partition_info(
-    dataproduct_type: Literal["object", "margin"],
-    dataset_path: str | pathlib.Path,
-    overwrite: bool = False,
-):
+def create_partition_info(dataset_path: str | pathlib.Path, overwrite: bool = False):
     """Creates the partition info file for the given product.
 
     Parameters
     ----------
-    dataproduct_type
-        The type of HATS product (e.g., "object", "margin").
     dataset_path
         The path to the HATS dataset.
     overwrite
         Whether to overwrite the partition info file if it already exists.
 
     """
-
-    if dataproduct_type not in ["object", "margin"]:
-        raise NotImplementedError(f"Data type {dataproduct_type!r} is not supported.")
 
     dataset_path = pathlib.Path(dataset_path)
     if not dataset_path.exists():
