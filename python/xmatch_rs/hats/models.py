@@ -170,7 +170,7 @@ class PhaseModel(BaseModel):
     ]
 
     type: Annotated[
-        Literal["healpix_partitioning", "rechunk"],
+        Literal["healpix_partitioning", "rechunk", "add_primary_key"],
         Field(description="The type of the phase."),
     ] = "healpix_partitioning"
 

@@ -268,6 +268,7 @@ class HATS:
         create_partition_info(
             collection_path / "object",
             overwrite=overwrite,
+            write_csv=True,
         )
         log.info("Object catalogue partition info file created.")
 
@@ -532,6 +533,7 @@ class HATS:
         create_partition_info(
             margin_path,
             overwrite=overwrite,
+            write_csv=True,
         )
         log.info("Margin cache partition info file created.")
 

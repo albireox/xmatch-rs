@@ -45,7 +45,7 @@ from xmatch_rs.hats.tools import (
     get_pixel_path,
 )
 from xmatch_rs.schema import Schema
-from xmatch_rs.tools import get_xmatch_rs_logger, parse_path
+from xmatch_rs.tools import get_xmatch_rs_logger, lazy_frame_row_count, parse_path
 
 
 if TYPE_CHECKING:
@@ -252,6 +252,20 @@ def convert_to_hats_object_catalogue(
                 )
             )
 
+        # Check if we need to add a primary key. We cannot generally do this during
+        # the initial conversion because it's parallelised and there is no good
+        # way to ensure that the primary key values are unique across the different
+        # processes.
+        primary_key = schema.model.primary_key
+        source_columns = schema.get_columns(only_source_columns=True)
+        if primary_key not in source_columns:
+            if schema.model.create_primary_key:
+                convert_model.add_phase(
+                    name="add_primary_key",
+                    type="add_primary_key",
+                    description="Add primary key column.",
+                )
+
     convert_model.write()
 
     if format is None:
@@ -435,6 +449,14 @@ def _run_hats_healpix_phase(
             if phase.max_kilobytes_per_file is not None
             else None,
             is_dataset=True,
+        )
+        model.update_phase(phase_name, complete=True)
+
+    elif phase.type == "add_primary_key":
+        log.info("Adding primary key column to dataset.")
+        add_sequential_primary_key(
+            path=model.object_path / "dataset",
+            primary_key_column=model.catalogue_model.primary_key,
         )
         model.update_phase(phase_name, complete=True)
 
@@ -880,3 +902,28 @@ def add_repartitioning_phase(
     model.add_phase(phase, add_after=add_after)
 
     return phase
+
+
+def add_sequential_primary_key(path: pathlib.Path, primary_key_column: str) -> None:
+    """Adds a sequential primary key column to the dataset."""
+
+    # Get a list of Parquet files inside the dataset directory.
+    files = list(sorted(path.glob("**/*.parquet")))
+
+    # Loop over each file and add the primary key column.
+    pk = 1
+    for file in files:
+        lf = polars.scan_parquet(file)
+        nrows = lazy_frame_row_count(lf)
+
+        # Add the primary key column as a range starting from the current pk value
+        # and as the first column.
+        lf = lf.select(
+            polars.arange(pk, pk + nrows, dtype=polars.UInt64).alias(
+                primary_key_column
+            ),
+            polars.all(),
+        )
+        lf.sink_parquet(file, engine="streaming")
+
+        pk += nrows

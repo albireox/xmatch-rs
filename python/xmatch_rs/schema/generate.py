@@ -155,11 +155,13 @@ def generate_schema(
         qmark="🏷️",
         validate=NameValidator,
     ).unsafe_ask()
+
     url: str = questionary.text(
         "URL of the catalogue\n",
         qmark="🔗",
         validate=NameValidator,
     ).unsafe_ask()
+
     data_url: str = questionary.text(
         "URL of the source data\n",
         qmark="💾",
@@ -175,6 +177,7 @@ def generate_schema(
             ).unsafe_ask()
             or None
         )
+
         bib_reference_url: str | None = (
             questionary.text(
                 "URL of the bibliographic reference\n",
@@ -182,6 +185,7 @@ def generate_schema(
             ).unsafe_ask()
             or None
         )
+
         comments: str | None = (
             questionary.text(
                 "Comments\n",
@@ -247,6 +251,21 @@ def generate_schema(
     else:
         read_params = {}
 
+    # Primary key.
+    primary_key: str = questionary.text(
+        "Primary key column\n",
+        qmark="🔑",
+        validate=NameValidator,
+    ).unsafe_ask()
+
+    create_primary_key: bool = False
+    if primary_key not in source_columns:
+        create_primary_key: bool = questionary.confirm(
+            f"Primary key column {primary_key!r} not found in the sample data. "
+            "Create it as an auto-incrementing integer?\n",
+            qmark="🔑",
+        ).unsafe_ask()
+
     # Coordinate and epoch information.
     if not skip_optional:
         ra_column: str | None = (
@@ -257,6 +276,7 @@ def generate_schema(
             ).unsafe_ask()
             or None
         )
+
         ra_column_unit: str | None = questionary.select(
             "Right ascension column unit\n",
             qmark="🧭",
@@ -267,6 +287,7 @@ def generate_schema(
                 questionary.Choice("Radians", value="radians"),
             ],
         ).unsafe_ask()
+
         dec_column: str | None = (
             questionary.text(
                 "Declination column\n",
@@ -275,6 +296,7 @@ def generate_schema(
             ).unsafe_ask()
             or None
         )
+
         dec_column_unit: str | None = questionary.select(
             "Declination column unit\n",
             qmark="🧭",
@@ -284,6 +306,7 @@ def generate_schema(
                 questionary.Choice("Hours", value="hours"),
             ],
         ).unsafe_ask()
+
         pmra_column: str | None = (
             questionary.text(
                 "Proper motion in right ascension column\n",
@@ -292,6 +315,7 @@ def generate_schema(
             ).unsafe_ask()
             or None
         )
+
         pmdec_column: str | None = (
             questionary.text(
                 "Proper motion in declination column\n",
@@ -300,6 +324,7 @@ def generate_schema(
             ).unsafe_ask()
             or None
         )
+
         pmra_is_cosdec: bool = questionary.select(
             "Is the proper motion in right ascension column as true angle?\n",
             qmark="🧭",
@@ -336,6 +361,7 @@ def generate_schema(
                 questionary.Choice("JD", value="JD"),
             ],
         ).unsafe_ask()
+
     else:
         ra_column: str | None = None
         dec_column: str | None = None
@@ -382,6 +408,13 @@ def generate_schema(
     else:
         extra_columns: dict[str, dict[str, str | None]] = {}
 
+    if primary_key not in source_columns and create_primary_key:
+        extra_columns[primary_key] = {
+            "dtype": "UInt64",
+            "unit": None,
+            "description": "Auto-incrementing primary key",
+        }
+
     # Database questions.
     table_name: str = questionary.text(
         "Database table name\n",
@@ -389,15 +422,11 @@ def generate_schema(
         default=catalogue_name.lower(),
         validate=NameValidator,
     ).unsafe_ask()
+
     db_schema: str = questionary.text(
         "Database schema\n",
         qmark="🗄️",
         default="catalogdb",
-        validate=NameValidator,
-    ).unsafe_ask()
-    primary_key: str = questionary.text(
-        "Primary key column\n",
-        qmark="🗄️",
         validate=NameValidator,
     ).unsafe_ask()
 
@@ -416,6 +445,8 @@ def generate_schema(
             "bib_reference": bib_reference,
             "bib_reference_url": bib_reference_url,
             "comments": comments,
+            "primary_key": primary_key,
+            "create_primary_key": create_primary_key,
             "ra_column": ra_column,
             "dec_column": dec_column,
             "ra_column_unit": ra_column_unit,
@@ -436,7 +467,6 @@ def generate_schema(
             "database": {
                 "table_name": table_name,
                 "schema": db_schema,
-                "primary_key": primary_key,
                 "indices": indices.strip().split() if indices else [],
             },
         }

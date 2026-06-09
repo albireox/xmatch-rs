@@ -100,6 +100,19 @@ class SchemaModel(BaseModel):
         Field(description="Any comments about the catalogue."),
     ] = None
 
+    primary_key: Annotated[
+        str,
+        Field(description="The column that will be used as the primary key."),
+    ]
+
+    create_primary_key: Annotated[
+        bool,
+        Field(
+            description="Whether to create a primary key column if it does not "
+            "exist in the source data"
+        ),
+    ] = False
+
     ra_column: Annotated[
         str | None,
         Field(description="The name of the RA column in the catalogue (in degrees)."),
@@ -328,11 +341,6 @@ class DatabaseModel(BaseModel):
         ),
     ]
 
-    primary_key: Annotated[
-        str,
-        Field(description="The column that will be used as the primary key."),
-    ]
-
     indices: Annotated[
         list[str | list[str]],
         Field(description="A list of columns to be indexed.", default_factory=list),
@@ -525,7 +533,7 @@ class Schema:
     def get_primary_key(self) -> str:
         """Returns the primary key column name."""
 
-        return self.model.database.primary_key
+        return self.model.primary_key
 
     def get_polars_schema(self, source_catalogue: bool = False) -> polars.Schema:
         """Returns the schema as a Polars Schema.
