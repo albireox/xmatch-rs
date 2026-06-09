@@ -233,7 +233,11 @@ def create_properties(
     properties.write(overwrite=overwrite)
 
 
-def create_partition_info(dataset_path: str | pathlib.Path, overwrite: bool = False):
+def create_partition_info(
+    dataset_path: str | pathlib.Path,
+    overwrite: bool = False,
+    write_csv: bool = False,
+) -> polars.DataFrame:
     """Creates the partition info file for the given product.
 
     Parameters
@@ -242,6 +246,13 @@ def create_partition_info(dataset_path: str | pathlib.Path, overwrite: bool = Fa
         The path to the HATS dataset.
     overwrite
         Whether to overwrite the partition info file if it already exists.
+    write_csv
+        Whether to write the partition info file as a CSV file.
+
+    Returns
+    -------
+    DataFrame
+        A DataFrame with the partition info.
 
     """
 
@@ -250,10 +261,13 @@ def create_partition_info(dataset_path: str | pathlib.Path, overwrite: bool = Fa
         raise ValueError(f"The dataset path {dataset_path!r} does not exist.")
 
     partition_info_path = dataset_path / "partition_info.csv"
-    if partition_info_path.exists() and not overwrite:
+    if partition_info_path.exists() and not overwrite and write_csv:
         raise ValueError(f"The file {partition_info_path!r} already exists.")
 
     data = get_dataset_df(dataset_path, include_size=False)
     data = data.select(["Norder", "Npix"]).sort(["Norder", "Npix"])
 
-    data.write_csv(partition_info_path)
+    if write_csv:
+        data.write_csv(partition_info_path)
+
+    return data
