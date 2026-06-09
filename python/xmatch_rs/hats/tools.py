@@ -138,7 +138,7 @@ def get_dataset_nrows(
 
 
 @overload
-def check_duplicates(
+def dataset_has_duplicates(
     dataset_path: pathlib.Path,
     column_name: str,
     return_duplicates: bool = False,
@@ -146,14 +146,14 @@ def check_duplicates(
 
 
 @overload
-def check_duplicates(
+def dataset_has_duplicates(
     dataset_path: pathlib.Path,
     column_name: str,
     return_duplicates: bool = True,
 ) -> bool: ...
 
 
-def check_duplicates(
+def dataset_has_duplicates(
     dataset_path: pathlib.Path,
     column_name: str,
     return_duplicates: bool = False,
@@ -172,12 +172,12 @@ def check_duplicates(
     duplicates = duplicates.filter(polars.col("is_duplicated")).select(column_name)
 
     if return_duplicates:
-        return duplicates.collect(engine="streaming")
+        return duplicates.collect(engine="streaming")  # type: ignore
 
     n_duplicates = duplicates = (
         duplicates.select(polars.col(column_name).len())
         .collect(engine="streaming")
-        .item(0, 0)
+        .item(0, 0)  # type: ignore
     )
 
     return n_duplicates > 0
