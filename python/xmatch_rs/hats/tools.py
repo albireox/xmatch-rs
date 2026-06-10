@@ -132,7 +132,7 @@ def get_dataset_nrows(
     if orders is not None:
         lf = lf.filter(polars.col("Norder").is_in(orders))
 
-    n_rows = lf.select(polars.len()).collect().item()  # type: ignore
+    n_rows = lf.select(polars.len()).collect().item()
 
     return n_rows
 
@@ -172,12 +172,12 @@ def dataset_has_duplicates(
     duplicates = duplicates.filter(polars.col("is_duplicated")).select(column_name)
 
     if return_duplicates:
-        return duplicates.collect(engine="streaming")  # type: ignore
+        return duplicates.collect(engine="streaming")
 
-    n_duplicates = duplicates = (
+    n_duplicates = (
         duplicates.select(polars.col(column_name).len())
         .collect(engine="streaming")
-        .item(0, 0)  # type: ignore
+        .item(0, 0)
     )
 
     return n_duplicates > 0
