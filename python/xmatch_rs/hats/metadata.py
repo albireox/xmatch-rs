@@ -180,7 +180,11 @@ def create_properties(
     hats_estsize = None
     if dataproduct_type in ["object", "margin"]:
         hats_col_ra, hats_col_dec = schema.get_ra_dec_columns()
+
         hats_coordinate_epoch = schema.model.epoch
+        if hats_coordinate_epoch is not None:
+            hats_coordinate_epoch = str(hats_coordinate_epoch)
+
         hats_frame = "equatorial"
 
         hats_nrows = get_dataset_nrows(path.parent / "dataset")
