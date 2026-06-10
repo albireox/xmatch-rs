@@ -127,7 +127,7 @@ def create_margin_cache(
     finally:
         progress_file.unlink(missing_ok=True)
 
-    log.info(f"Margin cache {margin_name!r} created in {timer.duration:,.2f} s.")
+    log.info(f"Margin cache {margin_name!r} created in {timer.elapsed:,.2f} s.")
 
 
 def _monitor_progress(progress_file: pathlib.Path | None, margin_name: str) -> None:
