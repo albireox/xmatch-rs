@@ -53,15 +53,13 @@ test = [
 [tool.maturin]
 python-source = "python"
 module-name = "xmatch_rs._xmatch_rs_lib"
-profile = "release"
-editable-profile = "release"
 # strip = true
 features = []
 
 [tool.uv]
-package = true
+package = false
 default-groups = ["dev", "docs", "test"]
-cache-keys = [{file = "pyproject.toml"}, {file = "Cargo.toml"}, {file = "**/*.rs"}]
+# cache-keys = [{file = "pyproject.toml"}, {file = "Cargo.toml"}, {file = "**/*.rs"}]
 
 [tool.ruff]
 line-length = 88
