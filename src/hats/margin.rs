@@ -16,7 +16,6 @@ use cdshealpix::compass_point::Cardinal;
 use cdshealpix::nested::bmoc::BMOC;
 use cdshealpix::nested::bmoc::Status;
 use cdshealpix::nested::{center, get};
-use itertools::multizip;
 use polars::prelude::*;
 use polars_rows_iter::df_rows_iter;
 use serde::{Deserialize, Serialize};
