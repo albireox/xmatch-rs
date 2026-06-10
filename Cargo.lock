@@ -2540,32 +2540,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "polars-row"
-version = "0.54.4"
+name = "polars-rows-iter"
+version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d4e3254450024078e10c919ecd3b467bdcfdd5cf386c2ca6eedec89bd4771d2"
+checksum = "18741972befa8657169ca88feb5e9bf3d8e98e2173c67427e081332de8667ab0"
 dependencies = [
- "bitflags 2.13.0",
- "bytemuck",
- "polars-arrow 0.54.4",
- "polars-buffer",
- "polars-compute 0.54.4",
- "polars-dtype 0.54.4",
- "polars-error 0.54.4",
- "polars-utils 0.54.4",
+ "convert_case",
+ "polars",
+ "polars-rows-iter-derive",
 ]
 
 [[package]]
-name = "polars-schema"
-version = "0.52.0"
+name = "polars-rows-iter-derive"
+version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f73e21d429ae1c23f442b0220ccfe773a9734a44e997b5062a741842909d9441"
+checksum = "43ba602527e5e53e0f98b1ff98fcc8532503a63320fab520ab09c2c9b926e125"
 dependencies = [
- "indexmap",
- "polars-error 0.52.0",
- "polars-utils 0.52.0",
- "serde",
- "version_check",
+ "convert_case",
+ "deluxe",
+ "itertools 0.14.0",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -4710,8 +4706,7 @@ dependencies = [
  "anyhow",
  "cdshealpix",
  "glob",
- "itertools",
- "polars 0.54.4",
+ "polars-rows-iter",
  "pyo3",
  "pyo3-polars",
  "rayon",
