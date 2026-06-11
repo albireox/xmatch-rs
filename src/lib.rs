@@ -7,6 +7,7 @@
 
 pub mod hats;
 pub mod healpix;
+pub mod knn;
 pub mod polars_expressions;
 
 mod python;

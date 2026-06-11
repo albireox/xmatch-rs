@@ -9,6 +9,7 @@ use pyo3::{prelude::*, py_run};
 
 mod hats;
 mod healpix;
+mod knn;
 
 // Define the Python module
 #[pymodule(name = "_xmatch_rs_lib")]
@@ -56,6 +57,12 @@ fn xmatch_rs_pymodule(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     );
 
     m.add_submodule(&xmatch_rs_hats)?;
+
+    // xmatch_rs.knn module
+    let xmatch_rs_knn = PyModule::new(_py, "knn")?;
+    xmatch_rs_knn.add_function(wrap_pyfunction!(knn::py_match_sky, &xmatch_rs_knn)?)?;
+    xmatch_rs_knn.add_function(wrap_pyfunction!(knn::py_match_sky_radius, &xmatch_rs_knn)?)?;
+    m.add_submodule(&xmatch_rs_knn)?;
 
     Ok(())
 }
