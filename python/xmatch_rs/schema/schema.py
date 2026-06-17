@@ -22,7 +22,16 @@ from sdsstools import read_yaml_file
 from xmatch_rs.tools import get_polars_dtype_from_string
 
 
-__all__: list[str] = ["SchemaModel", "Schema"]
+__all__: list[str] = [
+    "SchemaModel",
+    "Schema",
+    "EpochFormat",
+    "SourceCatalogueFormat",
+    "CoordUnit",
+    "Dtype",
+    "ColumnModel",
+    "DatabaseModel",
+]
 
 
 class EpochFormat(str, enum.Enum):
@@ -65,6 +74,11 @@ class Dtype(str, enum.Enum):
     FLOAT64 = "Float64"
     BOOLEAN = "Boolean"
 
+    def to_polars_dtype(self) -> Type[polars.DataType]:
+        """Converts the Dtype to a Polars data type."""
+
+        return get_polars_dtype_from_string(self.value)
+
 
 TableColumn = Annotated[
     str,
@@ -79,6 +93,16 @@ class SchemaModel(BaseModel):
         str,
         Field(description="Short version of the name of the catalogue."),
     ]
+
+    short_name: Annotated[
+        str,
+        Field(description="Short version of the name of the catalogue."),
+    ]
+
+    description: Annotated[
+        str | None,
+        Field(description="A description of the catalogue."),
+    ] = None
 
     url: Annotated[
         AnyUrl,

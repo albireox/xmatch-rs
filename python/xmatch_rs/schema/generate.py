@@ -156,6 +156,21 @@ def generate_schema(
         validate=NameValidator,
     ).unsafe_ask()
 
+    short_name: str = questionary.text(
+        "Catalogue short name\n",
+        qmark="🏷️",
+        default=catalogue_name.lower().replace(" ", "_"),
+    ).unsafe_ask()
+
+    description: str | None = (
+        questionary.text(
+            "Catalogue description (optional)\n",
+            qmark="📝",
+            default="",
+        ).unsafe_ask()
+        or None
+    )
+
     url: str = questionary.text(
         "URL of the catalogue\n",
         qmark="🔗",
@@ -441,6 +456,8 @@ def generate_schema(
     schema = SchemaModel.model_validate(
         {
             "catalogue_name": catalogue_name,
+            "short_name": short_name,
+            "description": description,
             "url": url,
             "bib_reference": bib_reference,
             "bib_reference_url": bib_reference_url,
