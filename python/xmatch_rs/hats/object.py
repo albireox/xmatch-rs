@@ -36,8 +36,8 @@ from xmatch_rs.convert import (
     convert_fits_to_parquet,
     convert_to_parquet,
 )
+from xmatch_rs.file_providers import get_hats_file_provider
 from xmatch_rs.hats.models import ConvertToHATSModel, PhaseModel
-from xmatch_rs.hats.providers import get_hats_file_provider
 from xmatch_rs.hats.tools import (
     get_dataset_df,
     get_dataset_nrows,
