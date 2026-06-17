@@ -17,7 +17,7 @@ import cloup
 import yaml
 from pydantic import ValidationError
 
-from xmatch_rs import console, log
+from xmatch_rs import console
 
 
 class NaturalOrderGroup(cloup.Group):
@@ -255,6 +255,9 @@ def convert(
     """Convert a dataset to HATS format."""
 
     from xmatch_rs.hats import HATS
+    from xmatch_rs.tools import get_xmatch_rs_logger
+
+    log = get_xmatch_rs_logger("xmatch_rs.cli.convert")
 
     if verbose:
         log.set_level(10)

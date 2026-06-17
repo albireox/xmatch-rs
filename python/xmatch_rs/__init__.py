@@ -19,9 +19,6 @@ NAME = "xmatch_rs"
 
 console = rich.console.Console()
 
-log = get_logger("xmatch_rs", use_rich_handler=True)
-log.rich_console = console
-
 XMATCH_RS_ROOT = pathlib.Path(__file__).parent
 
 __version__ = get_package_version(package_name=NAME)
