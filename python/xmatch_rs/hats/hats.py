@@ -46,9 +46,9 @@ class HATS:
         self.path = pathlib.Path(path)
 
         if not self.path.exists():
-            raise ValueError(f"The provided path {self.path!r} does not exist.")
+            raise FileNotFoundError(f"The path {self.path!r} does not exist.")
         elif not self.path.is_dir():
-            raise ValueError(f"The provided path {self.path!r} is not a directory.")
+            raise FileNotFoundError(f"The path {self.path!r} is not a directory.")
 
     def __repr__(self) -> str:
         return f"<HATS (path={str(self.path)!r})>"
@@ -74,6 +74,67 @@ class HATS:
             raise FileNotFoundError(f"No properties file found at {properties_path!s}.")
 
         return HATSPropertiesModel.read(properties_path)
+
+    def validate(self):
+        """Validates the HATS collection."""
+
+        if not (self.path / "object").exists():
+            raise ValueError("The HATS collection must contain an 'object' product.")
+
+        if not (self.path / "collection.properties").exists():
+            raise ValueError("Missing 'collection.properties' file.")
+
+        if not (self.path / "_schema.yaml").exists():
+            raise ValueError("Missing '_schema.yaml' file.")
+
+        properties = self.properties
+        if properties.all_margins is not None:
+            for margin in properties.all_margins.split(" "):
+                if not (self.path / margin).exists():
+                    raise ValueError(
+                        f"Margin {margin!r} listed in collection properties but "
+                        f"not found in collection."
+                    )
+
+        if properties.all_indexes is not None:
+            for index in properties.all_indexes.split(" ")[1::2]:
+                if not (self.path / index).exists():
+                    raise ValueError(
+                        f"Index {index!r} listed in collection properties but "
+                        f"not found in collection."
+                    )
+
+    def list_products(self) -> list[str]:
+        """Lists the products available in the HATS collection."""
+
+        products = []
+
+        # If the collection validates it must have an object product.
+        self.validate()
+        products.append("object")
+
+        properties = self.properties
+        if properties.all_margins is not None:
+            for margin in properties.all_margins.split(" "):
+                products.append(margin)
+
+        if properties.all_indexes is not None:
+            for index in properties.all_indexes.split(" ")[1::2]:
+                products.append(index)
+
+        return products
+
+    def get_lazyframe(self, product: str = "object") -> polars.LazyFrame:
+        """Returns a lazy frame for a given product."""
+
+        if product not in self.list_products():
+            raise ValueError(f"Product {product!r} not found in collection.")
+
+        dataset_path = self.path / product / "dataset"
+        if not dataset_path.exists():
+            raise FileNotFoundError(f"No dataset found for product {product!r}.")
+
+        return polars.scan_parquet(dataset_path)
 
     @classmethod
     def convert_to_hats(
