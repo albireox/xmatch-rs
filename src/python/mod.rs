@@ -5,16 +5,17 @@
  *  @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
  */
 
-use pyo3::{prelude::*, py_run};
-
 mod hats;
 mod healpix;
 mod knn;
+mod xmatch;
 
 // Define the Python module
 #[pyo3::pymodule(name = "_xmatch_rs_lib")]
 mod xmatch_rs_pymodule {
     #[pymodule_export]
+    use super::xmatch::py_xmatch;
+
     #[pymodule_export]
     use super::hats::py_hats;
 

@@ -8,15 +8,16 @@ edition = "2024"
 name = "xmatch_rs"
 crate-type = ["cdylib"]
 
-[profile.dev]
-opt-level = 1
+# [profile.dev]
+# opt-level = 1
 
-[profile.dev.package."*"]
-opt-level = 3
+# [profile.dev.package."*"]
+# opt-level = 3
 
 [dependencies]
 anyhow = "1"
 cdshealpix = "0.9.1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 glob = "0.3.3"
 polars = { version = "0.54.4", features = ["lazy", "default", "dtype-u8", "object", "parquet", "strings"] }
 pyo3 = { version = "0.28.3", features = ["abi3-py311", "anyhow"] }
@@ -24,9 +25,12 @@ pyo3-polars = { version = "0.27", features = ["derive", "lazy"] }
 rayon = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
 uuid = { version = "1", features = ["v4", "fast-rng"] }
 regex = "1"
 itertools = "0.14.0"
 kdtree = "0.8.0"
 numpy = "0.28.0"
 polars-rows-iter = "0.13.3"
+pyo3-log = "0.13.4"
+log = "0.4.32"

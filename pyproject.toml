@@ -53,7 +53,7 @@ test = [
 [tool.maturin]
 python-source = "python"
 module-name = "xmatch_rs._xmatch_rs_lib"
-# strip = true
+strip = true
 features = []
 
 [tool.uv]

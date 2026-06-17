@@ -9,6 +9,7 @@ pub mod hats;
 pub mod healpix;
 pub mod knn;
 pub mod polars_expressions;
+pub mod xmatch;
 
 mod python;
 mod tools;
