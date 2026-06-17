@@ -265,12 +265,10 @@ class XMatch:
                     "XMatch product."
                 )
 
-        self._process_catalogue(cat_model, overwrite=overwrite)
-        # try:
-        #     self._process_catalogue(cat_model, overwrite=overwrite)
-        # except Exception as err:
-        #     raise
-        #     self._raise_with_logfile(err)
+        try:
+            self._process_catalogue(cat_model, overwrite=overwrite)
+        except Exception as err:
+            self._raise_with_logfile(err)
 
     def catalogue_model_from_hats(
         self,
