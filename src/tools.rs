@@ -65,23 +65,36 @@ pub fn sink_lf_to_partitioned_parquet(
     keys: Vec<String>,
     options: PartitionedParquetSinkOptions,
 ) -> Result<()> {
-    let _ = lf
-        .sink(
-            SinkDestination::Partitioned {
-                base_path: to_pl_path(output_path)?,
-                file_path_provider: options.file_path_provider,
-                partition_strategy: PartitionStrategy::Keyed {
-                    keys: keys.into_iter().map(col).collect(),
-                    include_keys: false,
-                    keys_pre_grouped: false,
-                },
-                max_rows_per_file: options.max_rows_per_file,
-                approximate_bytes_per_file: options.approximate_bytes_per_file,
+    lf.sink(
+        SinkDestination::Partitioned {
+            base_path: to_pl_path(output_path)?,
+            file_path_provider: options.file_path_provider,
+            partition_strategy: PartitionStrategy::Keyed {
+                keys: keys.into_iter().map(col).collect(),
+                include_keys: false,
+                keys_pre_grouped: false,
             },
-            FileWriteFormat::Parquet(Arc::new(ParquetWriteOptions::default())),
-            UnifiedSinkArgs::default(),
-        )?
-        .collect_with_engine(Engine::Streaming)?;
+            max_rows_per_file: options.max_rows_per_file,
+            approximate_bytes_per_file: options.approximate_bytes_per_file,
+        },
+        FileWriteFormat::Parquet(Arc::new(ParquetWriteOptions::default())),
+        UnifiedSinkArgs::default(),
+    )?
+    .collect_with_engine(Engine::Streaming)?;
 
     Ok(())
+}
+
+pub fn lf_row_count(lf: &LazyFrame) -> Result<u32> {
+    let n_rows = lf
+        .clone()
+        .select([len().cast(DataType::UInt32).alias("n_rows")])
+        .collect_with_engine(Engine::Streaming)?
+        .unwrap_single()
+        .column("n_rows")?
+        .u32()?
+        .get(0)
+        .unwrap();
+
+    Ok(n_rows as u32)
 }

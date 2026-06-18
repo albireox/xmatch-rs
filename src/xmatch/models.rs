@@ -36,7 +36,7 @@ pub enum EpochFormat {
     #[serde(rename = "jyear")]
     JulianYear,
     #[serde(rename = "jd")]
-    Jd,
+    JD,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -208,10 +208,26 @@ pub static CATALOG_SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
     ])
 });
 
+pub static CATALOG_TO_TABLE_SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
+    Schema::from_iter(vec![
+        Field::new("catalogid".into(), DataType::UInt64),
+        Field::new("healpix_29".into(), DataType::UInt64),
+        Field::new("version".into(), DataType::String),
+        Field::new("distance".into(), DataType::Float64),
+        Field::new("best".into(), DataType::Boolean),
+        Field::new("added_by_phase".into(), DataType::UInt8),
+        Field::new(
+            "added_on".into(),
+            DataType::Datetime(TimeUnit::Milliseconds, Some(TimeZone::UTC)),
+        ),
+    ])
+});
+
+/// Casts the input `LazyFrame` to match the target schema and reorders the columns accordingly.
 pub fn cast_and_reorder(lf: LazyFrame, target_schema: &Schema) -> Result<LazyFrame> {
     // Create a hashmap with the target schema fields and datatypes.
     let cast_from_schema = PlHashMap::from_iter(
-        CATALOG_SCHEMA
+        target_schema
             .iter()
             .map(|field| (field.0.as_str(), field.1.clone())),
     );
@@ -234,4 +250,14 @@ pub fn cast_and_reorder(lf: LazyFrame, target_schema: &Schema) -> Result<LazyFra
     );
 
     Ok(lf)
+}
+
+/// Gets the datatype of a column in a `LazyFrame`.
+pub fn get_column_dtype(lf: &LazyFrame, column_name: &str) -> Result<DataType> {
+    let schema = lf.clone().collect_schema()?;
+    if let Some(dtype) = schema.get(column_name) {
+        Ok(dtype.clone())
+    } else {
+        bail!("Column {column_name} not found in the LazyFrame.")
+    }
 }

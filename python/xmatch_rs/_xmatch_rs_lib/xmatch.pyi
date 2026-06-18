@@ -70,14 +70,33 @@ def scan_pixel_from_dataset(
     """
     ...
 
+def delete_catalogue_from_dataset(
+    xmatch_path: str | pathlib.Path,
+    catalogue_name: str,
+    version: str,
+):
+    """Deletes a catalogue from the cross-match dataset.
+
+    Parameters
+    ----------
+    xmatch_path
+        The path to the cross-match dataset.
+    catalogue_name
+        The name of the catalogue to delete.
+    version
+        The version of the cross-match process.
+
+    """
+    ...
+
 def run_phase_3(
     xmatch_path: str | pathlib.Path,
     version: str,
     epoch: float,
     pixelation_order: int,
     catalog_data: str,
-    output_path: str | pathlib.Path,
     n_workers: int,
+    move_data: bool,
 ):
     """Runs phase 3 of the cross-match process.
 
@@ -91,10 +110,10 @@ def run_phase_3(
         The order of the pixelation.
     catalog_data
         A JSON string representing the catalogue model.
-    output_path
-        The path where the output will be stored.
     n_workers
         The number of worker threads to use.
+    move_data
+        Whether to move the data to the final output path.
 
     """
     ...

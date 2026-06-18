@@ -19,7 +19,7 @@ anyhow = "1"
 cdshealpix = "0.9.1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 glob = "0.3.3"
-polars = { version = "0.54.4", features = ["lazy", "default", "dtype-u8", "object", "parquet", "strings"] }
+polars = { version = "0.54.4", features = ["lazy", "default", "dtype-u8", "object", "parquet", "strings", "trigonometry", "semi_anti_join"] }
 pyo3 = { version = "0.28.3", features = ["abi3-py311", "anyhow"] }
 pyo3-polars = { version = "0.27", features = ["derive", "lazy"] }
 rayon = "1"
@@ -34,3 +34,4 @@ numpy = "0.28.0"
 polars-rows-iter = "0.13.3"
 pyo3-log = "0.13.4"
 log = "0.4.32"
+num-format = "0.4.4"

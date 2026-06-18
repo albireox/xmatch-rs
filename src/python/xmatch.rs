@@ -65,6 +65,17 @@ pub(crate) mod py_xmatch {
         }
     }
 
+    #[pyfunction(name = "delete_catalogue_from_dataset")]
+    pub fn py_delete_catalogue_from_dataset(
+        xmatch_path: PathBuf,
+        catalogue_name: &str,
+        version: &str,
+    ) -> Result<()> {
+        xmatch::tools::delete_catalogue_from_dataset(xmatch_path, catalogue_name, version)?;
+
+        Ok(())
+    }
+
     #[pyfunction(name = "run_phase_3")]
     pub fn py_run_xmatch_phase_3(
         xmatch_path: PathBuf,
@@ -72,8 +83,8 @@ pub(crate) mod py_xmatch {
         epoch: f32,
         pixelation_order: u8,
         catalog_data: String,
-        output_path: PathBuf,
         n_workers: Option<usize>,
+        move_data: bool,
     ) -> Result<()> {
         let cat_model: CatalogueModel = serde_json::from_str(&catalog_data)?;
         let xmatch_options = XMatchOptions {
@@ -83,7 +94,7 @@ pub(crate) mod py_xmatch {
             n_workers,
         };
 
-        let _ = xmatch::phase_3::run_phase_3(xmatch_path, cat_model, output_path, xmatch_options)?;
+        let _ = xmatch::phase_3::run_phase_3(xmatch_path, cat_model, xmatch_options, move_data)?;
 
         Ok(())
     }

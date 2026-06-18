@@ -31,7 +31,6 @@ CATALOG_SCHEMA = polars.Schema(
 
 CATALOG_TO_TABLE_SCHEMA = polars.Schema(
     {
-        "pk": polars.UInt64,
         "catalogid": polars.UInt64,
         "healpix_29": polars.UInt64,
         "version": polars.String,

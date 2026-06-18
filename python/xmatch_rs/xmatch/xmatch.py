@@ -8,33 +8,24 @@
 
 from __future__ import annotations
 
-import datetime
 import logging
 import os
 import pathlib
 import shutil
 from uuid import uuid4
 
-import numpy
 import polars
-from astropy.time import Time
 
 from sdsstools.logger import SDSSLogger
 
 from xmatch_rs._xmatch_rs_lib import xmatch as xmatch_lib
-from xmatch_rs.file_providers import get_hats_file_provider
 from xmatch_rs.hats.hats import HATS
-from xmatch_rs.schema import CoordUnit, EpochFormat
 from xmatch_rs.tools import get_xmatch_rs_logger, lazy_frame_row_count
 from xmatch_rs.xmatch.models import CatalogueModel, PhaseModel, XMatchModel
-from xmatch_rs.xmatch.schemas import CATALOG_SCHEMA, CATALOG_TO_TABLE_SCHEMA
+from xmatch_rs.xmatch.schemas import CATALOG_SCHEMA
 
 
 __all__ = ["XMatch"]
-
-
-# Reserve the last 11 bits of a catalogid uint64 for the run ID.
-RUN_ID_BIT_SHIFT = 64 - 11
 
 
 class XMatch:
@@ -88,6 +79,12 @@ class XMatch:
                     f"Pixelation order mismatch: provided pixelation order "
                     f"{pixelation_order} does not match pixelation order in "
                     f"xmatch.yaml {self.model.pixelation_order}."
+                )
+
+            if self.model.epoch != epoch:
+                self.log.warning(
+                    f"Epoch mismatch: provided epoch {epoch} does not match epoch "
+                    f"in xmatch.yaml {self.model.epoch}."
                 )
 
         else:
@@ -188,9 +185,6 @@ class XMatch:
 
         """
 
-        # if name in [cat.name for cat in self.model.catalogues]:
-        #     raise ValueError(f"Catalogue {name!r} already exists in xmatch.yaml.")
-
         if verbose and quiet:
             raise ValueError("Cannot set both verbose and quiet to True.")
 
@@ -227,6 +221,10 @@ class XMatch:
         # Initialise the logger in Rust.
         xmatch_lib.init_logger(self.log.name)
 
+        # Check if the catalogue already exists in the model.
+        if name in self.model.list_catalogue_names():
+            raise ValueError(f"Catalogue {name!r} has already been cross-matched.")
+
         phases: list[PhaseModel] = []
         for phase in [1, 2, 3]:
             if skip_phases is not None and phase in skip_phases:
@@ -247,6 +245,18 @@ class XMatch:
             run_id=run_id,
             phases=phases,
         )
+
+        # Check the temporary path.
+        tmp_path = self._get_temporary_path(cat_model)
+        if tmp_path.exists():
+            if overwrite:
+                self.log.warning(f"Overwriting temporary path {tmp_path!s}.")
+                shutil.rmtree(tmp_path)
+            else:
+                raise FileExistsError(f"Temporary path {tmp_path!s} already exists.")
+
+        # Create the temporary path.
+        tmp_path.mkdir(parents=True, exist_ok=True)
 
         is_first = len(self.model.catalogues) == 0
         if self.is_empty():
@@ -340,7 +350,7 @@ class XMatch:
             elif phase.phase == 2:
                 self._run_phase_2(cat_model, phase, overwrite=overwrite)
             elif phase.phase == 3:
-                self._run_phase_3(cat_model, phase, overwrite=overwrite)
+                self._run_phase_3(cat_model)
 
         self.model.catalogues.append(cat_model)
         self.model.write()
@@ -365,15 +375,8 @@ class XMatch:
 
         self.log.info(f"Running phase 2 for catalogue {cat_model.name!r}.")
 
-    def _run_phase_3(
-        self,
-        cat_model: CatalogueModel,
-        phase: PhaseModel,
-        overwrite: bool = False,
-    ):
+    def _run_phase_3(self, cat_model: CatalogueModel):
         """Runs phase 3 of the cross-matching process for a catalogue."""
-
-        self.log.info(f"Running phase 3 for catalogue {cat_model.name!r}.")
 
         xmatch_lib.run_phase_3(
             xmatch_path=str(self.path),
@@ -381,285 +384,9 @@ class XMatch:
             epoch=self.epoch,
             pixelation_order=self.pixelation_order,
             catalog_data=cat_model.model_dump_json(),
-            output_path=str(self._get_temporary_path(cat_model)),
             n_workers=10,
+            move_data=True,
         )
-
-        self.log.info(f"Phase 3 for catalogue {cat_model.name!r} completed.")
-
-        return
-
-        cat_hats = HATS(cat_model.hats_path)
-        primary_key = cat_model.primary_key
-
-        lf = cat_hats.get_lazyframe()
-
-        if len(self.model.catalogues) == 0:
-            # If this is the first catalogue we are cross-matching things are a bit
-            # easiert because we don't need to filter it in any way.
-            pass
-        else:
-            raise NotImplementedError
-
-        # Add catalogid to the catalog dataset.
-        self.log.debug("Adding catalogid to the catalog dataset.")
-        lf = self._add_catalogid(lf, cat_model)
-
-        # Select the catalog_to_table columns.
-        utc_now = datetime.datetime.now(datetime.timezone.utc)
-        added_on = polars.lit(
-            utc_now,
-            dtype=polars.Datetime(
-                time_unit="ms",
-                time_zone="UTC",
-            ),
-        )
-
-        self.log.debug("Selecting catalog_to_table columns.")
-        lf_catalog_to_table = (
-            lf.clone()
-            .with_row_index(offset=1, name="pk")
-            .select(
-                polars.col.pk.cast(polars.UInt64),
-                polars.col.catalogid,
-                polars.col(primary_key),
-                healpix_29=polars.col._healpix_29,
-                version=polars.lit(self.version, dtype=polars.String),
-                distance=polars.lit(None, dtype=polars.Float64),
-                best=polars.lit(True, dtype=polars.Boolean),
-                added_by_phase=polars.lit(phase.phase, dtype=polars.Int8),
-                added_on=added_on,
-            )
-        )
-        lf_catalog_to_table = self._ensure_schema(
-            lf_catalog_to_table,
-            CATALOG_TO_TABLE_SCHEMA,
-            allow_extra_columns=True,
-        )
-
-        # Write the catalog_to_table dataset to a temporary location.
-        base_path = (
-            self._get_temporary_path(cat_model)
-            / f"catalog_to_{cat_model.name}"
-            / "dataset"
-        )
-        self._check_temporary_path(base_path, overwrite=overwrite)
-
-        self.log.info(f"Partitioning catalog_to_table dataset to {base_path!s}.")
-        self.partition_frame(
-            lf_catalog_to_table,
-            base_path=base_path,
-            use_uuid=True,
-            use_detailed_filename=True,
-            catalogue=cat_model,
-        )
-
-        # Select the catalog dataset columns and write it to a temporary location.
-        self.log.debug("Selecting catalog dataset columns.")
-        lf_catalog = lf.clone().select(
-            polars.col.catalogid,
-            healpix_29=polars.col._healpix_29,
-            ra=polars.col(cat_model.ra_column).cast(polars.Float64),
-            dec=polars.col(cat_model.dec_column).cast(polars.Float64),
-            pmra=self._col_or_none(cat_model, "pmra_column", polars.Float64),
-            pmdec=self._col_or_none(cat_model, "pmdec_column", polars.Float64),
-            epoch_column=self._col_or_none(cat_model, "epoch_column", polars.Float32),
-            added_by=polars.lit(cat_model.name, dtype=polars.String),
-            added_on=added_on,
-            version=polars.lit(self.version, dtype=polars.String),
-        )
-        lf_catalog = self._propagate_coordinates(lf_catalog, cat_model)
-
-        # Drop the epoch_column and add the xmatch epoch column.
-        lf_catalog = lf_catalog.drop(["epoch_column"]).with_columns(
-            epoch=polars.lit(self.epoch, dtype=polars.Float32)
-        )
-
-        lf_catalog = self._ensure_schema(lf_catalog, CATALOG_SCHEMA)
-
-        # Write the catalog dataset to a temporary location.
-        base_path = self._get_temporary_path(cat_model) / "catalog" / "dataset"
-        self._check_temporary_path(base_path, overwrite=overwrite)
-
-        self.log.info(f"Partitioning catalog dataset to {base_path!s}.")
-        self.partition_frame(
-            lf_catalog,
-            base_path=base_path,
-            use_uuid=True,
-            use_detailed_filename=True,
-            catalogue=cat_model,
-        )
-
-    def _add_catalogid(
-        self,
-        lf: polars.LazyFrame,
-        cat_model: CatalogueModel,
-    ) -> polars.LazyFrame:
-        """Adds the catalogid column to the catalog dataset for a catalogue."""
-
-        max_catalogid = self.get_max_catalogid(run_id=cat_model.run_id)
-
-        lf = lf.with_row_index(name="catalogid").with_columns(
-            catalogid=(polars.col.catalogid + max_catalogid + 1).cast(polars.UInt64)
-        )
-
-        return lf
-
-    def _col_or_none(
-        self,
-        model: CatalogueModel,
-        field: str,
-        dtype: type[polars.DataType] = polars.Float64,
-    ) -> polars.Expr:
-        """Returns a polars expression for a model field or `None`."""
-
-        value = getattr(model, field)
-        if value is None:
-            return polars.lit(None, dtype=dtype)
-
-        return polars.col(value).cast(dtype)
-
-    def _ensure_schema(
-        self,
-        lf: polars.LazyFrame,
-        schema: polars.Schema,
-        allow_extra_columns: bool = False,
-    ) -> polars.LazyFrame:
-        """Ensures that a lazy frame has the given schema."""
-
-        lf_schema = lf.collect_schema()
-
-        for name, dtype in schema.items():
-            if name not in lf_schema:
-                lf = lf.with_columns(polars.lit(None, dtype=dtype).alias(name))
-            else:
-                lf = lf.with_columns(polars.col(name).cast(dtype))
-
-        columns: list[str] = []
-        for name in lf.collect_schema().keys():
-            if name in schema:
-                columns.append(name)
-            elif allow_extra_columns:
-                columns.append(name)
-            else:
-                pass
-
-        # Ensure the columns are in the same order as the schema.
-        lf = lf.select(columns)
-
-        return lf
-
-    def _propagate_coordinates(
-        self,
-        lf: polars.LazyFrame,
-        cat_model: CatalogueModel,
-    ) -> polars.LazyFrame:
-        """Propagates the coordinates of a catalogue to the common epoch.
-
-        This expects a lazy frame with the columns ``ra```, `dec`, `pmra`, `pmdec`, and
-        ``epoch_column`` are populated, and determines the best way to propagate the
-        coordinates. The ``ra`` and ``dec`` columns are transformed. ``ra`` and
-        ``dec`` are converted to degrees if necessary. An additional column, ``epoch``,
-        is added to the dataset.
-
-        """
-
-        to_epoch = self.epoch
-
-        ra_expr = polars.col.ra
-        dec_expr = polars.col.dec
-
-        # Replace all NaN with nulls.
-        ra_expr = ra_expr.fill_nan(None)
-        dec_expr = dec_expr.fill_nan(None)
-        pmra_expr = polars.col.pmra.fill_nan(None)
-        pmdec_expr = polars.col.pmdec.fill_nan(None)
-        epoch_col_expr = polars.col.epoch_column.fill_nan(None)
-
-        # Convert to degrees if necessary.
-        if cat_model.ra_column_unit == CoordUnit.HOURS:
-            ra_expr = ra_expr * 15.0
-        elif cat_model.ra_column_unit == CoordUnit.RADIANS:
-            ra_expr = ra_expr.degrees()
-
-        if cat_model.dec_column_unit == CoordUnit.RADIANS:
-            dec_expr = dec_expr.degrees()
-
-        # If the catalogue has a fixed epoch, use that.
-        if cat_model.epoch is not None:
-            if cat_model.epoch_format == EpochFormat.JD:
-                ref_jyear = float(Time(cat_model.epoch, format="jd").jyear)
-
-            elif cat_model.epoch_format == EpochFormat.JULIAN_YEAR:
-                ref_jyear = cat_model.epoch
-            else:
-                raise ValueError(f"Invalid epoch format {cat_model.epoch_format!r}.")
-
-            ref_year = polars.lit(ref_jyear, dtype=polars.Float32)
-
-        elif cat_model.epoch_column is not None:
-            if cat_model.epoch_format == EpochFormat.JD:
-                raise NotImplementedError(
-                    "Epoch format JD in epoch column is not implemented yet."
-                )
-            elif cat_model.epoch_format == EpochFormat.JULIAN_YEAR:
-                ref_jyear = epoch_col_expr.cast(polars.Float32)
-            else:
-                raise ValueError(f"Invalid epoch format {cat_model.epoch_format!r}.")
-
-        else:
-            # There is not enough information to propagate the coordinates since
-            # we don't know the reference epoch. We leave the coordinates unchanged.
-            self.log.warning("Not enough information to propagate coordinates.")
-
-        # If pmra is not a true angle, convert it to it.
-        if not cat_model.pmra_is_cosdec:
-            pmra_expr = pmra_expr * dec_expr.radians().cos()
-
-        # Now actually propagate the coordinates to the common epoch.
-        diff_years = (to_epoch - ref_year).fill_null(0.0)
-
-        # For RA we need convert the pmra again to a non-great-circle angle and
-        # convert from mas to degrees.
-        ra_expr = (
-            ra_expr
-            + (pmra_expr.fill_null(0.0) / dec_expr.radians().cos() * diff_years)
-            / 3600.0
-            / 1000
-        )
-
-        dec_expr = dec_expr + (pmdec_expr.fill_null(0.0) * diff_years) / 3600.0 / 1000
-
-        # Overwrite the ra, dec, and pm columns.
-        lf = lf.with_columns(
-            ra=ra_expr,
-            dec=dec_expr,
-            pmra=pmra_expr,
-            pmdec=pmdec_expr,
-        )
-
-        return lf
-
-    def _check_temporary_path(self, path: pathlib.Path, overwrite: bool = False):
-        """Checks if a temporary path exists."""
-
-        if path.exists():
-            if overwrite:
-                self.log.warning(f"Overwriting temporary path {path!s}.")
-                shutil.rmtree(path)
-            else:
-                raise FileExistsError(f"Temporary path {path!s} already exists.")
-
-    def _get_temporary_lazyframe(self, cat_model: CatalogueModel) -> polars.LazyFrame:
-        """Returns a temporary lazy frame for a catalogue."""
-
-        path = self._get_temporary_path(cat_model) / cat_model.name / "dataset"
-
-        if path.exists():
-            return polars.scan_parquet(path)
-
-        table_schema = self._get_catalog_to_table_schema(cat_model)
-        return polars.LazyFrame(None, schema=table_schema)
 
     def _get_temporary_path(self, cat_model: CatalogueModel) -> pathlib.Path:
         """Returns a temporary path for a catalogue."""
@@ -669,7 +396,6 @@ class XMatch:
         version = self.version
 
         path = self.path / "tmp" / f"{name}_{version}_{run_id}"
-        path.mkdir(parents=True, exist_ok=True)
 
         return path
 
@@ -716,73 +442,6 @@ class XMatch:
 
         raise exception_class(message)
 
-    def partition_frame(
-        self,
-        lf: polars.LazyFrame,
-        base_path: pathlib.Path | str,
-        use_uuid: bool = True,
-        use_detailed_filename: bool = False,
-        catalogue: CatalogueModel | None = None,
-    ):
-        """Partitions a lazy frame by the pixelation order and writes it to disk.
-
-        Parameters
-        ----------
-        lf
-            The lazy frame to partition.
-        base_path
-            The base path where to write the partitioned files. The files will be
-            written as a Parquet hive-style partitioned dataset, with
-            partition keys ``Norder=<pixelation_order>``, ``Dir=<dir_n>``, and
-            ``Npix=<pixel>``.
-        use_uuid
-            Whether to use a UUID in the file name to ensure uniqueness.
-        use_detailed_filename
-            If `True`, the files written to the ``Npix=<pixel>`` partition will
-            include the catalogue name, version, and run ID.
-        catalogue
-            The catalogue for which to write the partitioned files. Required if
-            `use_detailed_filename` is `True`.
-
-        """
-
-        if use_detailed_filename:
-            if catalogue is None:
-                raise ValueError("catalogue must be passed with use_detailed_filename.")
-            suffix = f"{catalogue.name}-{self.version}-{catalogue.run_id}"
-        else:
-            suffix = None
-
-        healpix_column = f"_healpix_{self.pixelation_order}"
-
-        schema = lf.collect_schema()
-        if healpix_column not in schema:
-            # Number of orders of difference.
-            n_diff = 29 - self.pixelation_order
-            lf = lf.with_columns(
-                (polars.col.healpix_29 / 4**n_diff)
-                .cast(polars.UInt64)
-                .alias(healpix_column)
-            )
-
-        file_provider = get_hats_file_provider(
-            order=self.pixelation_order,
-            column_name=healpix_column,
-            use_uuid=use_uuid,
-            suffix=suffix,
-        )
-
-        lf.sink_parquet(
-            polars.PartitionBy(
-                base_path=base_path,
-                file_path_provider=file_provider,
-                key=[healpix_column],
-                include_key=False,
-                max_rows_per_file=1_000_000,
-            ),
-            engine="streaming",
-        )
-
     def is_empty(self):
         """Returns `True` if the xmatch directory does not exist or is empty."""
 
@@ -799,86 +458,3 @@ class XMatch:
         )
         if lazy_frame_row_count(lf) == 0:
             return True
-
-    def get_max_catalogid(
-        self,
-        run_id: int | None = None,
-        use_cache: bool = True,
-    ) -> int:
-        """Returns the maximum catalogid for a given run ID.
-
-        Parameters
-        ----------
-        run_id : int | None
-            The run ID for which to find the maximum catalogid. If not provided,
-            the maximum catalogid across all run IDs will be returned.
-        use_cache : bool, optional
-            Whether to use the cached value, if available.
-
-        Returns
-        -------
-        int
-            The maximum catalogid for the given run ID.
-
-        """
-
-        if run_id is not None and run_id in self._max_catalogid and use_cache:
-            return self._max_catalogid[run_id]
-
-        lf = self.get_lazyframe()
-
-        if lazy_frame_row_count(lf) == 0:
-            if run_id is None:
-                return 0
-            else:
-                max_cid = run_id << RUN_ID_BIT_SHIFT
-                self._max_catalogid[run_id] = max_cid
-                return max_cid
-
-        if run_id is not None:
-            # Filter the lazy frame to only include rows with the given run ID.
-            max_cid_df = (
-                lf.filter(
-                    numpy.right_shift(polars.col.catalogid, RUN_ID_BIT_SHIFT) == run_id  # ty: ignore[no-matching-overload]
-                )
-                .select(polars.col.catalogid)
-                .max()
-                .collect(engine="streaming")
-                .item(0, 0)
-            )
-
-            if max_cid_df is None:
-                max_cid = run_id << RUN_ID_BIT_SHIFT
-            else:
-                max_cid = int(max_cid_df)
-
-            self._max_catalogid[run_id] = max_cid
-            return max_cid
-
-        max_cid = (
-            lf.select(polars.col.catalogid).max().collect(engine="streaming").item(0, 0)
-            or 0
-        )
-
-        return int(max_cid)
-
-    def _get_catalog_to_table_schema(self, catalog: CatalogueModel):
-        """Returns the schema to use for the ``catalog_to_table`` dataset."""
-
-        primary_key = catalog.primary_key
-
-        hats_catalogue = HATS(catalog.hats_path)
-        catalogue_pk_column = hats_catalogue.schema.get_column(primary_key)
-
-        if catalogue_pk_column is None:
-            raise ValueError(
-                f"Primary key column {primary_key!r} not found in HATS catalogue "
-                f"{catalog.hats_path!s}."
-            )
-
-        dtype = catalogue_pk_column.dtype.to_polars_dtype()
-
-        table_schema = CATALOG_TO_TABLE_SCHEMA.copy()
-        table_schema[primary_key] = dtype
-
-        return table_schema

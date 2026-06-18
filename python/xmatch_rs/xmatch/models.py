@@ -109,6 +109,11 @@ class XMatchModel(BaseModel):
 
         self._file_path = path
 
+    def list_catalogue_names(self) -> list[str]:
+        """Returns a list of the names of the catalogues included in the model."""
+
+        return [catalogue.name for catalogue in self.catalogues]
+
 
 class CatalogueModel(BaseModel):
     """Pydantic model for a catalogue included in the XMatch product."""

@@ -7,14 +7,39 @@
 
 use anyhow::{Result, bail};
 use chrono::Utc;
+use glob::glob;
 use polars::prelude::*;
+use regex::Regex;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     sync::{LazyLock, Mutex},
 };
 
-use crate::{hats::tools::PartitionInfo, tools::to_pl_path};
+use crate::{
+    hats::tools::PartitionInfo,
+    tools::{lf_row_count, to_pl_path},
+    xmatch::models::{CatalogueModel, CoordUnit, EpochFormat},
+};
+
+/// Returns the path of a temporary directory for the xmatch dataset.
+pub fn get_temp_dir_path(
+    xmatch_path: PathBuf,
+    catalogue_name: &str,
+    version: &str,
+    run_id: usize,
+    create: bool,
+) -> Result<PathBuf> {
+    let temp_dir_path = get_xmatch_path_root(xmatch_path)?
+        .join("tmp")
+        .join(format!("{}_{}_{}", catalogue_name, version, run_id));
+
+    if create {
+        std::fs::create_dir_all(&temp_dir_path)?;
+    }
+
+    Ok(temp_dir_path)
+}
 
 /// Returns a `LazyFrame` for pixel in a HATS dataset.
 ///
@@ -86,6 +111,7 @@ pub fn scan_pixel_from_hats_dataset(
     Some(lf)
 }
 
+/// Helper function to find the root of a path by looking for a specific file in the directory or its parents.
 fn get_root_path(base_path: PathBuf, check_file: &str) -> Result<PathBuf> {
     let mut current_path = base_path.clone();
 
@@ -219,19 +245,29 @@ pub fn get_max_catalogid(
     }
 }
 
+/// Adds a `catalogid` column to the input `LazyFrame`.
 pub fn add_catalogid(
     xmatch_path: Option<PathBuf>,
-    cat_lf: LazyFrame,
+    cat_lf: &LazyFrame,
     run_id: usize,
+    update_cache: bool,
 ) -> Result<LazyFrame> {
     let max_cat_id = get_max_catalogid(xmatch_path, Some(run_id), true)?;
     let cat_lf = cat_lf
+        .clone()
         .with_row_index(PlSmallStr::from("catalogid"), None)
         .with_column(col("catalogid") + lit(max_cat_id + 1));
+
+    if update_cache {
+        let n_rows = lf_row_count(&cat_lf)? as u64;
+        let new_max_cat_id = max_cat_id + 1 + n_rows;
+        update_run_id_cache(run_id, new_max_cat_id);
+    }
 
     Ok(cat_lf)
 }
 
+/// Checks if a directory is empty. If the directory does not exist, returns true.
 pub fn is_directory_empty(path: impl AsRef<Path>) -> bool {
     match std::fs::read_dir(path) {
         Ok(mut entries) => entries.next().is_none(),
@@ -239,7 +275,208 @@ pub fn is_directory_empty(path: impl AsRef<Path>) -> bool {
     }
 }
 
+/// Returns the current unix timestamp in milliseconds.
 pub fn get_unix_timestamp_ms() -> i64 {
     let now = Utc::now();
     now.timestamp_millis()
+}
+
+/// Propagates RA/Dec coordinates from pmra/pmdec.
+pub fn propagate_coordinates(
+    cat_lf: LazyFrame,
+    cat_model: &CatalogueModel,
+    to_epoch: f32,
+) -> Result<LazyFrame> {
+    // If the ref_epoch values are in JD, convert them to Julian year.
+    // 2451545 is the JD for 2000.0 and a Julian year is 365.25 days.
+    let cat_lf = if cat_model.epoch_format.is_some()
+        && cat_model.epoch_format.clone().unwrap() == EpochFormat::JD
+    {
+        cat_lf.with_column(
+            ((col("ref_epoch") - lit(2451545.0)) / lit(365.25) + lit(2000.0)).alias("ref_epoch"),
+        )
+    } else {
+        cat_lf
+    };
+
+    // cos_dec factor
+    let cos_dec = col("dec").radians().cos();
+
+    // If pmra is not a great circle angle, convert it now.
+    let cat_lf = if cat_model.pmra_is_cosdec.is_some() && !cat_model.pmra_is_cosdec.unwrap() {
+        cat_lf.with_column((col("pmra") * cos_dec.clone()).alias("pmra"))
+    } else {
+        cat_lf
+    };
+
+    // Ensure RA and Dec are in degrees.
+    let cat_lf = match cat_model.ra_column_unit {
+        CoordUnit::Radians => cat_lf.with_column(col("ra").degrees().alias("ra")),
+        CoordUnit::Hours => cat_lf.with_column((col("ra") * lit(15.0)).alias("ra")),
+        _ => cat_lf,
+    };
+
+    let cat_lf = match cat_model.dec_column_unit {
+        CoordUnit::Radians => cat_lf.with_column(col("dec").degrees().alias("dec")),
+        _ => cat_lf,
+    };
+
+    // Epoch difference.
+    let epoch_diff = lit(to_epoch) - col("ref_epoch");
+
+    // ra difference. Note that we need to convert back to on-dec angle and convert to deg/yr.
+    let ra_diff = col("pmra") / cos_dec.clone() * epoch_diff.clone() / lit(3600.0) / lit(1000.0);
+
+    // dec difference in deg/yr.
+    let dec_diff = col("pmdec") * epoch_diff.clone() / lit(3600.0) / lit(1000.0);
+
+    // Update RA and Dec.
+    let cat_lf = cat_lf.with_columns([
+        (col("ra") + ra_diff).alias("ra"),
+        (col("dec") + dec_diff).alias("dec"),
+    ]);
+
+    Ok(cat_lf)
+}
+
+/// Move files from a temporary directory to the final path.
+pub fn move_temp_files(
+    temp_path: PathBuf,
+    final_path: PathBuf,
+    suffix: Option<String>,
+) -> Result<()> {
+    std::fs::create_dir_all(&final_path)?;
+
+    if let Ok(paths) = glob(
+        format!(
+            "{}/Norder=*/Dir=*/Npix=*/*.parquet",
+            temp_path.to_string_lossy()
+        )
+        .as_str(),
+    ) {
+        for path in paths {
+            if let Ok(path) = path {
+                let new_path = PathBuf::from(
+                    path.to_string_lossy()
+                        .replace(temp_path.to_str().unwrap(), &final_path.to_string_lossy()),
+                );
+
+                let new_path = if suffix.is_some() {
+                    let new_path_parent = new_path.parent().unwrap();
+                    let file_name = new_path.file_name().unwrap().to_str().unwrap();
+
+                    let re = Regex::new(r"^([a-z0-9]+)(\-\d+\.parquet)$").unwrap();
+                    let new_file_name =
+                        re.replace(file_name, format!("$1-{}$2", suffix.clone().unwrap()));
+
+                    new_path_parent.join(new_file_name.into_owned())
+                } else {
+                    new_path
+                };
+
+                std::fs::create_dir_all(new_path.parent().unwrap())?;
+                std::fs::rename(path, new_path)?;
+            }
+        }
+    } else {
+        bail!("Unexpected glob result when moving temp files.")
+    }
+
+    Ok(())
+}
+
+fn _list_files(vec: &mut Vec<PathBuf>, path: PathBuf) -> Result<()> {
+    if path.is_dir() {
+        let paths = std::fs::read_dir(&path)?;
+        for path_result in paths {
+            let full_path = path_result?.path();
+            _list_files(vec, full_path)?;
+        }
+    } else {
+        vec.push(path);
+    }
+    Ok(())
+}
+
+/// Lists all files (excluding directories) in a directory and its subdirectories.
+pub fn list_files<T: Into<PathBuf>>(path: T) -> Result<Vec<PathBuf>> {
+    let mut vec = Vec::new();
+    let path = path.into();
+    _list_files(&mut vec, path)?;
+    Ok(vec)
+}
+
+/// Deletes a directory if it and its subdirectories are empty.
+pub fn delete_dir_if_empty(path: impl AsRef<Path>) -> Result<()> {
+    if list_files(path.as_ref())?.is_empty() {
+        std::fs::remove_dir_all(path)?;
+    }
+
+    Ok(())
+}
+
+/// Delete all entries for a catalogue in the xmatch dataset.
+pub fn delete_catalogue_from_dataset(
+    xmatch_path: PathBuf,
+    catalogue_name: &str,
+    version: &str,
+) -> Result<()> {
+    let xmatch_path = get_xmatch_path_root(xmatch_path)?;
+
+    // For the catalog dataset, iterate over each Parquet file and filter out the
+    // entries for the catalogue. This should be faster than repartitioning.
+    if let Ok(paths) = glob::glob(&format!(
+        "{}/Norder=*/Dir=*/Npix=*/*.parquet",
+        xmatch_path.join("catalog/dataset").to_string_lossy()
+    )) {
+        for path in paths {
+            if let Ok(path) = path {
+                let lf = LazyFrame::scan_parquet(to_pl_path(&path)?, Default::default())?;
+                let filtered_lf = lf
+                    .filter(col("added_by").eq(lit(catalogue_name)).not())
+                    .filter(col("version").eq(lit(version)).not());
+
+                filtered_lf
+                    .sink(
+                        SinkDestination::File {
+                            target: SinkTarget::Path(to_pl_path(path)?),
+                        },
+                        FileWriteFormat::Parquet(Arc::new(ParquetWriteOptions::default())),
+                        UnifiedSinkArgs::default(),
+                    )?
+                    .collect_with_engine(Engine::Streaming)?;
+            }
+        }
+    }
+
+    // Same for the catalog_to_table dataset.
+    // For the catalog dataset, iterate over each Parquet file and filter out the
+    // entries for the catalogue. This should be faster than repartitioning.
+    let catalogue_to_table_path = xmatch_path
+        .join(format!("catalog_to_{}", catalogue_name))
+        .join("dataset");
+
+    if let Ok(paths) = glob::glob(&format!(
+        "{}/Norder=*/Dir=*/Npix=*/*.parquet",
+        catalogue_to_table_path.to_string_lossy()
+    )) {
+        for path in paths {
+            if let Ok(path) = path {
+                let lf = LazyFrame::scan_parquet(to_pl_path(&path)?, Default::default())?;
+                let filtered_lf = lf.filter(col("version").eq(lit(version)).not());
+
+                filtered_lf
+                    .sink(
+                        SinkDestination::File {
+                            target: SinkTarget::Path(to_pl_path(path)?),
+                        },
+                        FileWriteFormat::Parquet(Arc::new(ParquetWriteOptions::default())),
+                        UnifiedSinkArgs::default(),
+                    )?
+                    .collect_with_engine(Engine::Streaming)?;
+            }
+        }
+    }
+
+    Ok(())
 }
