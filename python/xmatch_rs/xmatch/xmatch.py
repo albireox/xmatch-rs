@@ -397,12 +397,10 @@ class XMatch:
 
         xmatch_lib.run_phase_3(
             xmatch_path=str(self.path),
-            version=self.version,
-            epoch=self.epoch,
-            pixelation_order=self.pixelation_order,
-            catalog_data=cat_model.model_dump_json(),
+            xmatch_model_data=self.model.model_dump_json(),
+            cat_model_data=cat_model.model_dump_json(),
             n_workers=10,
-            move_data=True,
+            move_files=True,
         )
 
     def _get_temporary_path(self, cat_model: CatalogueModel) -> pathlib.Path:

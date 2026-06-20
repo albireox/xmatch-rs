@@ -16,8 +16,8 @@ use crate::tools::{
     to_pl_path,
 };
 use crate::xmatch::models::{
-    CATALOG_SCHEMA, CATALOG_TO_TABLE_SCHEMA, CatalogueModel, XMatchOptions, cast_and_reorder,
-    get_column_dtype,
+    CATALOG_SCHEMA, CATALOG_TO_TABLE_SCHEMA, CatalogueModel, XMatchModel, XMatchOptions,
+    cast_and_reorder, get_column_dtype,
 };
 use crate::xmatch::tools::{
     add_catalogid, delete_dir_if_empty, get_hats_path_root, get_temp_dir_path,
@@ -27,15 +27,15 @@ use crate::xmatch::tools::{
 
 pub fn run_phase_3(
     xmatch_path: PathBuf,
-    cat_model: CatalogueModel,
+    xmatch_data: XMatchModel,
+    cat_data: CatalogueModel,
     xmatch_options: XMatchOptions,
-    move_files: bool,
 ) -> Result<()> {
-    log::info!("Running phase 3 for catalogue {}.", cat_model.name);
+    log::info!("Running phase 3 for catalogue {}.", cat_data.name);
 
     // Load the xmatch dataset.
     let catalog_dataset_path = get_xmatch_path_root(xmatch_path.clone())?.join("catalog/dataset");
-    let hats_dataset_path = get_hats_path_root(cat_model.hats_path.clone())?.join("object/dataset");
+    let hats_dataset_path = get_hats_path_root(cat_data.hats_path.clone())?.join("object/dataset");
 
     // Check that the HATS dataset exists.
     if !hats_dataset_path.exists() {
@@ -47,21 +47,21 @@ pub fn run_phase_3(
 
     let tmp_path = get_temp_dir_path(
         xmatch_path.clone(),
-        &cat_model.name,
-        &xmatch_options.version.clone(),
-        cat_model.run_id as usize,
+        &cat_data.name,
+        &xmatch_data.version.clone(),
+        cat_data.run_id as usize,
         true,
     )?;
 
     // Ensure that the max catalogid cache is update for this run_id.
     log::debug!(
         "Updating max catalogid cache for run_id {}.",
-        cat_model.run_id
+        cat_data.run_id
     );
 
     crate::xmatch::tools::get_max_catalogid(
         Some(catalog_dataset_path.clone()),
-        Some(cat_model.run_id as usize),
+        Some(cat_data.run_id as usize),
         true,
     )?;
 
@@ -79,7 +79,7 @@ pub fn run_phase_3(
         log::info!("XMatch dataset is empty. Processing entire catalogue dataset.");
 
         let cat_lf = LazyFrame::scan_parquet(to_pl_path(hats_dataset_path)?, Default::default())?;
-        _xmatch_phase3_process_lf(&cat_lf, None, &cat_model, &tmp_path, &xmatch_options)?;
+        _xmatch_phase3_process_lf(&cat_lf, None, &xmatch_data, &cat_data, &tmp_path)?;
     } else {
         bail!("Parallel processing of catalogue dataset is not implemented yet.");
     }
@@ -93,15 +93,15 @@ pub fn run_phase_3(
 
     log::info!(
         "Phase 3 for catalogue {} completed. Added {} entries to catalog.",
-        cat_model.name,
+        cat_data.name,
         n_rows_catalog.to_formatted_string(&Locale::en)
     );
 
     // Copy the data from the temp path to the final xmatch path if requested.
-    if move_files {
+    if xmatch_options.move_files {
         let suffix = format!(
             "{}-{}-{}",
-            cat_model.name, xmatch_options.version, cat_model.run_id
+            cat_data.name, xmatch_data.version, cat_data.run_id
         );
 
         // catalog directory
@@ -122,7 +122,7 @@ pub fn run_phase_3(
         )?;
 
         // catalog_to_table directory
-        let catalog_to_table_name = format!("catalog_to_{}", cat_model.name);
+        let catalog_to_table_name = format!("catalog_to_{}", cat_data.name);
 
         let catalog_to_table_path = get_xmatch_path_root(xmatch_path.clone())?
             .join(format!("{}/dataset", catalog_to_table_name));
@@ -154,16 +154,16 @@ pub fn run_phase_3(
 fn _xmatch_phase3_process_lf(
     cat_lf: &LazyFrame,
     catalog_to_table_lf: Option<&LazyFrame>,
-    cat_model: &CatalogueModel,
+    xmatch_data: &XMatchModel,
+    cat_data: &CatalogueModel,
     output_path: &PathBuf,
-    xmatch_options: &XMatchOptions,
 ) -> Result<()> {
     let cat_lf = cat_lf.clone();
 
     // If a catalog_to_table frame is passed, use it to discard sources that are already
     // in the xmatch dataset.
     let cat_lf = if let Some(catalog_to_table_lf) = catalog_to_table_lf {
-        let primary_key = cat_model.primary_key.clone();
+        let primary_key = cat_data.primary_key.clone();
         let catalog_to_table_lf = catalog_to_table_lf.clone().select([col(&primary_key)]);
 
         cat_lf.join(
@@ -180,10 +180,10 @@ fn _xmatch_phase3_process_lf(
     };
 
     // Add the catalogid column.
-    let cat_lf = add_catalogid(None, &cat_lf, cat_model.run_id as usize, true)?;
+    let cat_lf = add_catalogid(None, &cat_lf, cat_data.run_id as usize, true)?;
 
     // Build the catalog lf.
-    let catalog_lf = _get_catalog_lf(cat_lf, &cat_model, &xmatch_options)?;
+    let catalog_lf = _get_catalog_lf(cat_lf, &xmatch_data, &cat_data)?;
 
     // Drop the pk from the catalog_lf that we'll sink but keep in the original because
     // we will need it for catalog_to_table.
@@ -202,13 +202,13 @@ fn _xmatch_phase3_process_lf(
 
     sink_lf_to_partitioned_parquet(
         catalog_lf_no_pk,
-        &catalog_path.join(format!("Norder={}", xmatch_options.pixelation_order)),
+        &catalog_path.join(format!("Norder={}", xmatch_data.pixelation_order)),
         vec!["healpix_xmatch".into()],
         PartitionedParquetSinkOptions::default(),
     )?;
 
     // Prepare the catalog_to_table frame.
-    let primary_key = cat_model.primary_key.clone();
+    let primary_key = cat_data.primary_key.clone();
 
     let pk_dtype = get_column_dtype(&catalog_lf, "pk")?;
     let mut catalog_to_table_schema = CATALOG_TO_TABLE_SCHEMA.clone();
@@ -231,17 +231,17 @@ fn _xmatch_phase3_process_lf(
     // This is the HEALPix pixel at the xmatch pixelation order.
     let catalog_to_table_lf = catalog_to_table_lf.with_column(
         (col("healpix_29")
-            / lit(4_u64.pow((29 - xmatch_options.pixelation_order) as u32)).cast(DataType::UInt64))
+            / lit(4_u64.pow((29 - xmatch_data.pixelation_order) as u32)).cast(DataType::UInt64))
         .alias("healpix_xmatch"),
     );
 
     // Sink the catalog_to_table lf to partitioned parquet.
-    let catalog_to_table_name = format!("catalog_to_{}", cat_model.name);
+    let catalog_to_table_name = format!("catalog_to_{}", cat_data.name);
     let catalog_to_table_path = output_path.join(format!("{}/dataset", catalog_to_table_name));
 
     sink_lf_to_partitioned_parquet(
         catalog_to_table_lf,
-        &catalog_to_table_path.join(format!("Norder={}", xmatch_options.pixelation_order)),
+        &catalog_to_table_path.join(format!("Norder={}", xmatch_data.pixelation_order)),
         vec!["healpix_xmatch".into()],
         PartitionedParquetSinkOptions::default(),
     )?;
@@ -251,45 +251,45 @@ fn _xmatch_phase3_process_lf(
 
 fn _get_catalog_lf(
     cat_lf: LazyFrame,
-    cat_model: &CatalogueModel,
-    xmatch_options: &XMatchOptions,
+    xmatch_data: &XMatchModel,
+    cat_data: &CatalogueModel,
 ) -> Result<LazyFrame> {
     // Initial columns for the catalog lf.
     let mut columns = vec![
         col("catalogid"),
-        col(&cat_model.primary_key).alias("pk"),
-        col(&cat_model.ra_column).alias("ra"),
-        col(&cat_model.dec_column).alias("dec"),
+        col(&cat_data.primary_key).alias("pk"),
+        col(&cat_data.ra_column).alias("ra"),
+        col(&cat_data.dec_column).alias("dec"),
         col("_healpix_29").alias("healpix_29"),
-        lit(xmatch_options.version.clone()).alias("version"),
-        lit(xmatch_options.epoch.clone()).alias("epoch"),
-        lit(cat_model.name.clone()).alias("added_by"),
+        lit(xmatch_data.version.clone()).alias("version"),
+        lit(xmatch_data.epoch.clone()).alias("epoch"),
+        lit(cat_data.name.clone()).alias("added_by"),
         lit(get_unix_timestamp_ms()).alias("added_on"), // Will cast to datetime.
     ];
 
     // pmra column
-    if let Some(pmra_column) = &cat_model.pmra_column {
+    if let Some(pmra_column) = &cat_data.pmra_column {
         columns.push(col(pmra_column).alias("pmra"))
     } else {
         columns.push(lit(Null {}).cast(DataType::Float64).alias("pmra"))
     };
 
     // pmdec column
-    if let Some(pmdec_column) = &cat_model.pmdec_column {
+    if let Some(pmdec_column) = &cat_data.pmdec_column {
         columns.push(col(pmdec_column).alias("pmdec"))
     } else {
         columns.push(lit(Null {}).cast(DataType::Float64).alias("pmdec"))
     };
 
     // Reference epoch column
-    if let Some(ref_epoch) = &cat_model.epoch {
+    if let Some(ref_epoch) = &cat_data.epoch {
         columns.push(
             lit((*ref_epoch).clone())
                 .cast(DataType::Float32)
                 .alias("ref_epoch"),
         )
     } else {
-        if let Some(ref_epoch) = &cat_model.epoch {
+        if let Some(ref_epoch) = &cat_data.epoch {
             columns.push(
                 lit((*ref_epoch).clone())
                     .cast(DataType::Float32)
@@ -304,7 +304,7 @@ fn _get_catalog_lf(
     let catalog_lf = cat_lf.select(columns);
 
     // Propagate coordinates.
-    let catalog_lf = propagate_coordinates(catalog_lf, &cat_model, xmatch_options.epoch)?;
+    let catalog_lf = propagate_coordinates(catalog_lf, &cat_data, xmatch_data.epoch)?;
 
     // Add the pk column to the catalog schema. This is not totally trivial because we
     // need to get the dtype first from the live schema.
@@ -319,7 +319,7 @@ fn _get_catalog_lf(
     // This is the HEALPix pixel at the xmatch pixelation order.
     let catalog_lf = catalog_lf.with_column(
         (col("healpix_29")
-            / lit(4_u64.pow((29 - xmatch_options.pixelation_order) as u32)).cast(DataType::UInt64))
+            / lit(4_u64.pow((29 - xmatch_data.pixelation_order) as u32)).cast(DataType::UInt64))
         .alias("healpix_xmatch"),
     );
 

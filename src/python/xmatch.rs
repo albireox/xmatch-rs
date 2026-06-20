@@ -103,22 +103,19 @@ pub(crate) mod py_xmatch {
     #[pyfunction(name = "run_phase_3")]
     pub fn py_run_xmatch_phase_3(
         xmatch_path: PathBuf,
-        version: String,
-        epoch: f32,
-        pixelation_order: u8,
-        catalog_data: String,
+        xmatch_model_data: String,
+        cat_model_data: String,
         n_workers: Option<usize>,
-        move_data: bool,
+        move_files: bool,
     ) -> Result<()> {
-        let cat_model: CatalogueModel = serde_json::from_str(&catalog_data)?;
+        let xmatch_data: XMatchModel = serde_json::from_str(&xmatch_model_data)?;
+        let cat_data: CatalogueModel = serde_json::from_str(&cat_model_data)?;
         let xmatch_options = XMatchOptions {
-            version,
-            epoch,
-            pixelation_order,
+            move_files,
             n_workers,
         };
 
-        let _ = xmatch::phase_3::run_phase_3(xmatch_path, cat_model, xmatch_options, move_data)?;
+        let _ = xmatch::phase_3::run_phase_3(xmatch_path, xmatch_data, cat_data, xmatch_options)?;
 
         Ok(())
     }

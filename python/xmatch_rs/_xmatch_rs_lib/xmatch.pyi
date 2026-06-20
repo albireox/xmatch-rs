@@ -95,28 +95,24 @@ def delete_catalogue_from_dataset(
 
 def run_phase_3(
     xmatch_path: str | pathlib.Path,
-    version: str,
-    epoch: float,
-    pixelation_order: int,
-    catalog_data: str,
+    xmatch_model_data: str,
+    cat_model_data: str,
     n_workers: int,
-    move_data: bool,
+    move_files: bool,
 ):
     """Runs phase 3 of the cross-match process.
 
     Parameters
     ----------
-    version
-        The version of the cross-match process.
-    epoch
-        The epoch of the catalogue.
-    pixelation_order
-        The order of the pixelation.
-    catalog_data
+    xmatch_path
+        The path to the cross-match dataset.
+    xmatch_model_data
+        A JSON string representing the cross-match model.
+    cat_model_data
         A JSON string representing the catalogue model.
     n_workers
         The number of worker threads to use.
-    move_data
+    move_files
         Whether to move the data to the final output path.
 
     """
