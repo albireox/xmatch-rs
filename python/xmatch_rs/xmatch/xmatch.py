@@ -262,9 +262,10 @@ class XMatch:
             phases=phases,
         )
 
-        # Check the temporary path.
+        # Check the temporary path. If it exists and has files in it, raise an error
+        # unless overwrite is True.
         tmp_path = self._get_temporary_path(cat_model)
-        if tmp_path.exists():
+        if tmp_path.exists() and any(tmp_path.iterdir()):
             if overwrite:
                 self.log.warning(f"Overwriting temporary path {tmp_path!s}.")
                 shutil.rmtree(tmp_path)
@@ -472,5 +473,8 @@ class XMatch:
             catalog_dataset,
             schema=CATALOG_SCHEMA,
         )
-        if lazy_frame_row_count(lf) == 0:
+        if (
+            lf.select(polars.col.catalogid).limit(1).collect(engine="streaming").height
+            == 0
+        ):
             return True
