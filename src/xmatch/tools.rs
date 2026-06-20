@@ -197,9 +197,11 @@ pub fn get_max_catalogid(
         to_pl_path(xmatch_path.join("catalog/dataset"))?,
         ScanArgsParquet {
             schema: Some(Arc::new(schema)),
+            allow_missing_columns: true,
             ..Default::default()
         },
-    )?;
+    )?
+    .select([col("catalogid")]);
 
     if let Some(run_id) = run_id {
         // Calculate the maximum catalogid for the given run_id.
@@ -600,13 +602,18 @@ pub struct CompletionModel {
     pub n_completed: i32,
 }
 
+/// Struct for tracking the progress of a long-running operation and writing it to a file.
 pub struct ProgressTracker {
     progress_file: Mutex<File>,
+    n_total: i32,
+    n_completed: i32,
 }
 
+/// Implementation of the `ProgressTracker` struct.
 impl ProgressTracker {
-    pub fn new(progress_file: PathBuf, n_total: Option<i32>) -> Self {
-        let obj = Self {
+    /// Creates a new `ProgressTracker` instance with the given progress file path and total count.
+    pub fn new(progress_file: PathBuf, n_total: i32) -> Self {
+        let mut obj = Self {
             progress_file: Mutex::new(
                 OpenOptions::new()
                     .read(true)
@@ -616,26 +623,32 @@ impl ProgressTracker {
                     .open(progress_file)
                     .unwrap(),
             ),
+            n_completed: 0,
+            n_total,
         };
 
-        if let Some(n_total) = n_total {
-            obj.update_progress(0, Some(n_total)).unwrap();
-        }
+        obj.update_progress(0, n_total).unwrap();
 
         obj
     }
 
-    pub fn update_progress(&self, n_completed: i32, n_total: Option<i32>) -> Result<()> {
+    /// Updates the progress of the operation and writes it to the progress file.
+    pub fn update_progress(&mut self, n_completed: i32, n_total: i32) -> Result<()> {
         let completion_model = CompletionModel {
-            n_total: n_total.unwrap_or(-1),
+            n_total,
             n_completed,
         };
         let file = self.progress_file.lock().unwrap();
         serde_json::to_writer(&*file, &completion_model)?;
+
+        self.n_completed = n_completed;
+        self.n_total = n_total;
+
         Ok(())
     }
 
-    pub fn increment(&self) -> Result<()> {
+    /// Increments the number of completed tasks by one and updates the progress file.
+    pub fn increment(&mut self) -> Result<()> {
         let mut file = self.progress_file.lock().unwrap();
 
         file.seek(SeekFrom::Start(0))?;
@@ -652,6 +665,14 @@ impl ProgressTracker {
 
         serde_json::to_writer(&*file, &completion_model)?;
 
+        self.n_completed = completion_model.n_completed;
+
+        Ok(())
+    }
+
+    /// Sets `n_completed` to `n_total` and updates the progress file.
+    pub fn terminate(&mut self) -> Result<()> {
+        self.update_progress(self.n_total, self.n_total)?;
         Ok(())
     }
 }

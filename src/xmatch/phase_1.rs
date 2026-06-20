@@ -6,14 +6,19 @@
  */
 
 use anyhow::{Result, bail};
+use core::time;
+use num_format::Locale::en;
+use num_format::ToFormattedString;
 use polars::{chunked_array::cast::CastOptions, prelude::*};
 use regex::Regex;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
+use std::thread::sleep;
 use std::{collections::HashMap, path::PathBuf, thread::available_parallelism};
 
 use crate::hats;
 use crate::tools;
 use crate::xmatch;
+use crate::xmatch::tools::ProgressTracker;
 use xmatch::models::{CatalogueModel, XMatchModel, XMatchOptions};
 
 static LOG_PREFIX: OnceLock<String> = OnceLock::new();
@@ -95,6 +100,74 @@ pub fn run_phase_1(
             &xmatch_options,
         )?;
     }
+
+    // Report the number of rows in the catalog_to_table after processing all join paths.
+    let tmp_path = xmatch::tools::get_temp_dir_path(
+        xmatch_path.clone(),
+        &cat_data.name,
+        &xmatch_data.version.clone(),
+        cat_data.run_id as usize,
+        true,
+    )?;
+
+    let catalog_to_table_name = format!("catalog_to_{}", cat_data.name);
+
+    let catalog_to_table_path = xmatch::tools::get_xmatch_path_root(xmatch_path.clone())?
+        .join(format!("{}/dataset", catalog_to_table_name));
+
+    if catalog_to_table_path.exists() {
+        let catalog_to_lf = LazyFrame::scan_parquet(
+            tools::to_pl_path(catalog_to_table_path)?,
+            Default::default(),
+        )?;
+
+        let n_rows = tools::lf_row_count(&catalog_to_lf)?;
+
+        log::info!(
+            "{} Finished phase 1 for catalogue {}. catalog_to_{} table has {} rows.",
+            LOG_PREFIX.get().unwrap(),
+            cat_data.name,
+            cat_data.name,
+            n_rows.to_formatted_string(&en)
+        );
+    }
+
+    // Move the original catalogue files if requested.
+    if xmatch_options.move_files {
+        log::info!(
+            "{} Moving temporary catalog_to_{} files to xmatch dataset.",
+            LOG_PREFIX.get().unwrap(),
+            cat_data.name
+        );
+
+        let suffix = format!(
+            "{}-{}-{}",
+            cat_data.name, xmatch_data.version, cat_data.run_id
+        );
+
+        // catalog_to_table directory
+        let catalog_to_table_name = format!("catalog_to_{}", cat_data.name);
+
+        let catalog_to_table_path = xmatch::tools::get_xmatch_path_root(xmatch_path.clone())?
+            .join(format!("{}/dataset", catalog_to_table_name));
+        std::fs::create_dir_all(&catalog_to_table_path)?;
+
+        let tmp_catalog_to_table_path = tmp_path.join(format!("{}/dataset", catalog_to_table_name));
+
+        log::debug!(
+            "{} Moving {} dataset from {} to {}.",
+            LOG_PREFIX.get().unwrap(),
+            catalog_to_table_name,
+            tmp_catalog_to_table_path.display(),
+            catalog_to_table_path.display()
+        );
+
+        xmatch::tools::move_temp_files(
+            tmp_catalog_to_table_path.clone(),
+            catalog_to_table_path.clone(),
+            Some(suffix.clone()),
+        )?;
+    }
     Ok(())
 }
 
@@ -109,7 +182,8 @@ fn _xmatch_phase1_process_join_path(
     xmatch_options: &XMatchOptions,
 ) -> Result<()> {
     log::info!(
-        "Processing join path for phase 1: {} -> {}.{}",
+        "{} Processing join path {} -> {}.{}",
+        LOG_PREFIX.get().unwrap(),
         from_join_column,
         to_table,
         to_join_column
@@ -146,7 +220,7 @@ fn _xmatch_phase1_process_join_path(
         )?;
     } else {
         bail!(
-            "{} Non-primary key join not implemented yet for phase 1: {}.{} -> {}.{}",
+            "{} Non-primary key join not yet implemented: {}.{} -> {}.{}",
             LOG_PREFIX.get().unwrap(),
             from_cat_data.name,
             from_join_column,
@@ -198,13 +272,13 @@ fn _xmatch_phase1_join_pk(
     let progress_tracker = if let Some(progress_file) = &xmatch_options.progress_file {
         Some(xmatch::tools::ProgressTracker::new(
             progress_file.clone(),
-            Some(n_pixels as i32),
+            n_pixels as i32,
         ))
     } else {
         None
     };
 
-    let progress_tracker = Arc::new(progress_tracker);
+    let progress_tracker = Arc::new(Mutex::new(progress_tracker));
 
     // Parallelise the processing of each pixel.
     let pool = crate::tools::create_pool(Some(n_workers))?;
@@ -230,6 +304,12 @@ fn _xmatch_phase1_join_pk(
             .unwrap();
     });
 
+    if let Some(tracker) = &mut *progress_tracker.lock().unwrap() {
+        tracker.terminate().unwrap();
+        // Sleep a bit to allow the Python process to remove the progress bar.
+        sleep(time::Duration::from_secs(3));
+    }
+
     Ok(())
 }
 
@@ -242,16 +322,16 @@ fn _xmatch_phase1_join_pk_pixel(
     from_cat_data: &CatalogueModel,
     from_join_column: &str,
     to_cat_data: &CatalogueModel,
-    progress_tracker: Arc<Option<xmatch::tools::ProgressTracker>>,
+    progress_tracker: Arc<Mutex<Option<xmatch::tools::ProgressTracker>>>,
 ) -> Result<()> {
     let increment_progress = || {
-        if let Some(tracker) = &*progress_tracker {
+        if let Some(tracker) = &mut *progress_tracker.lock().unwrap() {
             tracker.increment().unwrap();
         }
     };
 
     log::trace!(
-        "{} Phase 1: processing pixel {} of order {}.",
+        "{} Processing pixel {} of order {}.",
         LOG_PREFIX.get().unwrap(),
         from_pixel,
         from_order
@@ -265,7 +345,7 @@ fn _xmatch_phase1_join_pk_pixel(
         xmatch::tools::get_xmatch_pixels(xmatch_order, from_order, from_pixel, true)?;
 
     log::trace!(
-        "{} Phase 1 ({}, {}): matched {} pixels in xmatch dataset (order {}): {:?}.",
+        "{} ({}, {}): matched {} pixels in xmatch dataset (order {}): {:?}.",
         LOG_PREFIX.get().unwrap(),
         from_order,
         from_pixel,
@@ -305,10 +385,10 @@ fn _xmatch_phase1_join_pk_pixel(
     let from_lf_nrows = tools::lf_row_count(&from_lf)?;
     if from_lf_nrows == 0 {
         log::trace!(
-            "{} Phase 1 ({}, {}): no rows with non-null join column, skipping.",
+            "{} ({}, {}): no rows with non-null join column, skipping.",
             LOG_PREFIX.get().unwrap(),
+            from_order,
             from_pixel,
-            from_order
         );
         increment_progress();
         return Ok(());
@@ -366,17 +446,17 @@ fn _xmatch_phase1_join_pk_pixel(
     let lf_nrows = tools::lf_row_count(&lf)?;
     if lf_nrows == 0 {
         log::trace!(
-            "{} Phase 1 ({}, {}): no rows after join, skipping.",
+            "{} ({}, {}): no rows after join, skipping.",
             LOG_PREFIX.get().unwrap(),
+            from_order,
             from_pixel,
-            from_order
         );
         increment_progress();
         return Ok(());
     }
 
     log::trace!(
-        "{} Phase 1 ({}, {}): {} rows successful joined.",
+        "{} ({}, {}): {} rows successful joined.",
         LOG_PREFIX.get().unwrap(),
         from_order,
         from_pixel,

@@ -15,6 +15,7 @@ import os
 import pathlib
 import shutil
 import time
+from logging.handlers import MemoryHandler
 from tempfile import NamedTemporaryFile
 from uuid import uuid4
 
@@ -515,6 +516,8 @@ class ProgressTracker:
         progress_file: str | pathlib.Path | None = None,
         label: str = "Progress",
         show_progress: bool = True,
+        buffer_log_messages: bool = True,
+        log: SDSSLogger | None = None,
     ):
         if progress_file is None:
             progress_file = NamedTemporaryFile(
@@ -527,11 +530,30 @@ class ProgressTracker:
         self.label = label
         self.show_progress = show_progress
 
+        self.buffer_log_messages = buffer_log_messages
+        self.log = log
+        self.memory_handler: MemoryHandler | None = None
+
         self._monitor_process: multiprocessing.Process | None = None
 
     def __enter__(self):
         if not self.show_progress:
             return self
+
+        # Buffer log messages in a MemoryHandler to avoid log messages being printed
+        # to the console while the progress bar is active. They still go to the log
+        # file. We impose a limit of 10 messages and a flush level of ERROR, so that
+        # if an error occurs all the messages are flushed.
+        if self.buffer_log_messages and self.log:
+            self.memory_handler = MemoryHandler(
+                capacity=10,
+                flushLevel=logging.ERROR,
+                target=self.log.sh,
+            )
+
+            # Add the memory handler to the logger and remove the stream handler.
+            self.log.addHandler(self.memory_handler)
+            self.log.removeHandler(self.log.sh)
 
         self._monitor_process = multiprocessing.Process(
             target=self._monitor_progress,
@@ -544,6 +566,13 @@ class ProgressTracker:
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self._monitor_process is not None:
             self._monitor_process.join()
+
+        if self.memory_handler:
+            # Flush the memory handler and remove it from the logger.
+            self.memory_handler.flush()
+            if self.log:
+                self.log.addHandler(self.log.sh)
+                self.log.removeHandler(self.memory_handler)
 
         if self.progress_file.exists():
             self.progress_file.unlink()
@@ -572,7 +601,7 @@ class ProgressTracker:
                     except json.JSONDecodeError:
                         # In case we are reading the file as it's being written
                         # and it's not valid JSON yet, we just wait and try again.
-                        time.sleep(2)
+                        time.sleep(1)
                         continue
 
                     n_total: int = progress_data.get("n_total", 0)
@@ -585,7 +614,7 @@ class ProgressTracker:
                     )
                     pbar.start()
                 elif pbar_task is None:
-                    time.sleep(2)
+                    time.sleep(1)
                     continue
 
                 if n_completed >= n_total:
@@ -594,7 +623,7 @@ class ProgressTracker:
 
                 pbar.update(pbar_task, completed=n_completed, total=n_total)
 
-            time.sleep(2)  # Sleep for a bit before checking again
+            time.sleep(1)  # Sleep for a bit before checking again
 
         if pbar_task is not None:
             pbar.stop()
