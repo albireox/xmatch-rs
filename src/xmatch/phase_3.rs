@@ -10,6 +10,7 @@ use log;
 use num_format::{Locale, ToFormattedString};
 use polars::prelude::*;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use crate::tools::{
     IsEmpty, PartitionedParquetSinkOptions, lf_row_count, sink_lf_to_partitioned_parquet,
@@ -25,13 +26,21 @@ use crate::xmatch::tools::{
     propagate_coordinates,
 };
 
+static LOG_PREFIX: OnceLock<String> = OnceLock::new();
+
 pub fn run_phase_3(
     xmatch_path: PathBuf,
     xmatch_data: XMatchModel,
     cat_data: CatalogueModel,
     xmatch_options: XMatchOptions,
 ) -> Result<()> {
-    log::info!("Running phase 3 for catalogue {}.", cat_data.name);
+    LOG_PREFIX.get_or_init(|| format!("[{} - Phase 3]", cat_data.name.to_uppercase()));
+
+    log::info!(
+        "{} Running phase 3 for catalogue {}.",
+        LOG_PREFIX.get().unwrap(),
+        cat_data.name
+    );
 
     // Load the xmatch dataset.
     let catalog_dataset_path = get_xmatch_path_root(xmatch_path.clone())?.join("catalog/dataset");
@@ -39,7 +48,11 @@ pub fn run_phase_3(
 
     // Check that the HATS dataset exists.
     if !hats_dataset_path.exists() {
-        bail!("HATS dataset not found at {}.", hats_dataset_path.display());
+        bail!(
+            "{} HATS dataset not found at {}.",
+            LOG_PREFIX.get().unwrap(),
+            hats_dataset_path.display()
+        );
     }
 
     // Create directories if they don't exist.
@@ -55,7 +68,8 @@ pub fn run_phase_3(
 
     // Ensure that the max catalogid cache is update for this run_id.
     log::debug!(
-        "Updating max catalogid cache for run_id {}.",
+        "{} Updating max catalogid cache for run_id {}.",
+        LOG_PREFIX.get().unwrap(),
         cat_data.run_id
     );
 
@@ -76,12 +90,18 @@ pub fn run_phase_3(
     // If the dataset is empty, this means this is the first time we run phase 3 (first catalogue).
     // In this case it's more efficient to not parallelise and just let Polars do its thing.
     if xmatch_lf.is_empty() {
-        log::info!("XMatch dataset is empty. Processing entire catalogue dataset.");
+        log::info!(
+            "{} XMatch dataset is empty. Processing entire catalogue dataset.",
+            LOG_PREFIX.get().unwrap()
+        );
 
         let cat_lf = LazyFrame::scan_parquet(to_pl_path(hats_dataset_path)?, Default::default())?;
         _xmatch_phase3_process_lf(&cat_lf, None, &xmatch_data, &cat_data, &tmp_path)?;
     } else {
-        bail!("Parallel processing of catalogue dataset is not implemented yet.");
+        bail!(
+            "{} Parallel processing of catalogue dataset is not implemented yet.",
+            LOG_PREFIX.get().unwrap()
+        );
     }
 
     // Log number of rows.
@@ -92,7 +112,8 @@ pub fn run_phase_3(
     let n_rows_catalog = lf_row_count(&lf_catalog)?;
 
     log::info!(
-        "Phase 3 for catalogue {} completed. Added {} entries to catalog.",
+        "{} Phase 3 for catalogue {} completed. Added {} entries to catalog.",
+        LOG_PREFIX.get().unwrap(),
         cat_data.name,
         n_rows_catalog.to_formatted_string(&Locale::en)
     );
@@ -112,7 +133,8 @@ pub fn run_phase_3(
         let tmp_catalog_dataset_path = tmp_path.join("catalog/dataset");
 
         log::debug!(
-            "Moving catalog dataset to {}.",
+            "{} Moving catalog dataset to {}.",
+            LOG_PREFIX.get().unwrap(),
             catalog_dataset_path.display()
         );
         move_temp_files(
@@ -131,7 +153,8 @@ pub fn run_phase_3(
         let tmp_catalog_to_table_path = tmp_path.join(format!("{}/dataset", catalog_to_table_name));
 
         log::debug!(
-            "Moving catalog_to_table dataset to {}.",
+            "{} Moving catalog_to_table dataset to {}.",
+            LOG_PREFIX.get().unwrap(),
             catalog_to_table_path.display()
         );
         move_temp_files(
@@ -143,7 +166,8 @@ pub fn run_phase_3(
         delete_dir_if_empty(tmp_path.parent().unwrap())?;
     } else {
         log::info!(
-            "Move files is set to false. Leaving files in temporary path {}.",
+            "{} Move files is set to false. Leaving files in temporary path {}.",
+            LOG_PREFIX.get().unwrap(),
             tmp_path.display()
         );
     }
@@ -194,7 +218,11 @@ fn _xmatch_phase3_process_lf(
 
     // Check that the output path is empty.
     if !is_directory_empty(&output_path) {
-        bail!("Output path {} is not empty.", output_path.display());
+        bail!(
+            "{} Output path {} is not empty.",
+            LOG_PREFIX.get().unwrap(),
+            output_path.display()
+        );
     }
 
     // Sink the catalog lf to partitioned parquet.

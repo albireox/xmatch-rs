@@ -8,6 +8,7 @@
 use anyhow::{Result, bail};
 use polars::{chunked_array::cast::CastOptions, prelude::*};
 use regex::Regex;
+use std::sync::OnceLock;
 use std::{collections::HashMap, path::PathBuf, thread::available_parallelism};
 
 use crate::hats;
@@ -15,27 +16,39 @@ use crate::tools;
 use crate::xmatch;
 use xmatch::models::{CatalogueModel, XMatchModel, XMatchOptions};
 
+static LOG_PREFIX: OnceLock<String> = OnceLock::new();
+
 pub fn run_phase_1(
     xmatch_path: PathBuf,
     xmatch_data: XMatchModel,
     cat_data: CatalogueModel,
     xmatch_options: XMatchOptions,
 ) -> Result<()> {
+    LOG_PREFIX.get_or_init(|| format!("[{} - Phase 1]", cat_data.name.to_uppercase()));
+
     let phase = if let None = cat_data.get_phase(1) {
         panic!(
-            "Phase 1 is not defined for catalogue model {}",
+            "{} Phase 1 is not defined for catalogue model {}",
+            LOG_PREFIX.get().unwrap(),
             cat_data.name
         );
     } else {
         cat_data.get_phase(1).unwrap()
     };
 
-    log::info!("Running phase 1 for catalogue model {}", cat_data.name);
+    log::info!(
+        "{} Running phase 1 for catalogue model {}",
+        LOG_PREFIX.get().unwrap(),
+        cat_data.name
+    );
 
     // Check join paths.
     let join_paths = &phase.join_paths;
     if join_paths.is_empty() {
-        log::info!("No join paths defined for phase 1, skipping phase.");
+        log::info!(
+            "{} No join paths defined for phase 1, skipping phase.",
+            LOG_PREFIX.get().unwrap()
+        );
         return Ok(());
     }
 
@@ -51,7 +64,8 @@ pub fn run_phase_1(
 
         if let None = re_from_path.captures(&from_join_column) {
             bail!(
-                "Invalid from column format for phase 1: {}.'",
+                "{} Invalid from column format for phase 1: {}.'",
+                LOG_PREFIX.get().unwrap(),
                 from_join_column
             );
         }
@@ -62,7 +76,8 @@ pub fn run_phase_1(
             join_path_map.insert(from_join_column, (to_table, to_join_column));
         } else {
             bail!(
-                "Invalid join path format for phase 1: {}.'",
+                "{} Invalid join path format for phase 1: {}.'",
+                LOG_PREFIX.get().unwrap(),
                 to_table_column
             );
         }
@@ -105,7 +120,8 @@ fn _xmatch_phase1_process_join_path(
         cat
     } else {
         bail!(
-            "Catalogue {} has not been previously cross-matched.",
+            "{} Catalogue {} has not been previously cross-matched.",
+            LOG_PREFIX.get().unwrap(),
             to_table
         );
     };
@@ -115,7 +131,8 @@ fn _xmatch_phase1_process_join_path(
     // catalog_to_<to_catalogue> table.
     if to_cat_data.primary_key == to_join_column {
         log::debug!(
-            "Join column {} is the primary key of catalogue {}.",
+            "{} Join column {} is the primary key of catalogue {}.",
+            LOG_PREFIX.get().unwrap(),
             to_join_column,
             to_table
         );
@@ -129,7 +146,8 @@ fn _xmatch_phase1_process_join_path(
         )?;
     } else {
         bail!(
-            "Non-primary key join not implemented yet for phase 1: {}.{} -> {}.{}",
+            "{} Non-primary key join not implemented yet for phase 1: {}.{} -> {}.{}",
+            LOG_PREFIX.get().unwrap(),
             from_cat_data.name,
             from_join_column,
             to_table,
@@ -159,7 +177,8 @@ fn _xmatch_phase1_join_pk(
         .unwrap_or_else(|| available_parallelism().unwrap().get() / 2);
 
     log::info!(
-        "Joining {}.{} with {}.{} on primary key.",
+        "{} Joining {}.{} with {}.{} on primary key.",
+        LOG_PREFIX.get().unwrap(),
         from_cat_name,
         from_join_column,
         to_cat_name,
@@ -209,7 +228,8 @@ fn _xmatch_phase1_join_pk_pixel(
     to_cat_data: &CatalogueModel,
 ) -> Result<()> {
     log::trace!(
-        "Phase 1: processing pixel {} of order {}.",
+        "{} Phase 1: processing pixel {} of order {}.",
+        LOG_PREFIX.get().unwrap(),
         from_pixel,
         from_order
     );
@@ -222,7 +242,8 @@ fn _xmatch_phase1_join_pk_pixel(
         xmatch::tools::get_xmatch_pixels(xmatch_order, from_order, from_pixel, true)?;
 
     log::trace!(
-        "Phase 1 ({}, {}): matched {} pixels in xmatch dataset (order {}): {:?}.",
+        "{} Phase 1 ({}, {}): matched {} pixels in xmatch dataset (order {}): {:?}.",
+        LOG_PREFIX.get().unwrap(),
         from_order,
         from_pixel,
         xmatch_pixels.len(),
@@ -260,7 +281,8 @@ fn _xmatch_phase1_join_pk_pixel(
     let from_lf_nrows = tools::lf_row_count(&from_lf)?;
     if from_lf_nrows == 0 {
         log::trace!(
-            "Phase 1 ({}, {}): no rows with non-null join column, skipping.",
+            "{} Phase 1 ({}, {}): no rows with non-null join column, skipping.",
+            LOG_PREFIX.get().unwrap(),
             from_pixel,
             from_order
         );
@@ -319,7 +341,8 @@ fn _xmatch_phase1_join_pk_pixel(
     let lf_nrows = tools::lf_row_count(&lf)?;
     if lf_nrows == 0 {
         log::trace!(
-            "Phase 1 ({}, {}): no rows after join, skipping.",
+            "{} Phase 1 ({}, {}): no rows after join, skipping.",
+            LOG_PREFIX.get().unwrap(),
             from_pixel,
             from_order
         );
@@ -327,7 +350,8 @@ fn _xmatch_phase1_join_pk_pixel(
     }
 
     log::trace!(
-        "Phase 1 ({}, {}): {} rows successful joined.",
+        "{} Phase 1 ({}, {}): {} rows successful joined.",
+        LOG_PREFIX.get().unwrap(),
         from_order,
         from_pixel,
         lf_nrows

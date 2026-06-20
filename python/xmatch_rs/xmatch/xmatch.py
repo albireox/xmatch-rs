@@ -70,7 +70,7 @@ class XMatch:
 
         # It's important that the target of the logger is xmatch_rs to ensure
         # that the Rust code can also log to it.
-        self.log = get_xmatch_rs_logger("xmatch_rs", log_level=logging.WARNING)
+        self.log = get_xmatch_rs_logger("xmatch_rs", log_level=logging.INFO)
 
         if (self.path / "xmatch.yaml").exists() and not overwrite:
             self.model = XMatchModel.read(self.path / "xmatch.yaml")
@@ -139,48 +139,20 @@ class XMatch:
 
         return lf
 
-    def xmatch_catalogue(
+    def init_logger(
         self,
-        name: str,
-        hats_path: str | pathlib.Path,
-        plan: str | None = None,
-        run_id: int | None = None,
-        skip_phases: list[int] | None = None,
-        join_paths: list[tuple[str, str]] = [],
-        query_radius: float = 1.0,
-        overwrite: bool = False,
         log: SDSSLogger | None = None,
         logfile: str | pathlib.Path | None = None,
         quiet: bool = False,
         verbose: bool = False,
         trace: bool = False,
     ):
-        """Cross-matches a new catalogue.
+        """Initializes the logger for the XMatch product.
 
         Parameters
         ----------
-        name
-            The name of the catalogue.
-        hats_path
-            The path to the HATS collection.
-        plan
-            The plan used to cross-match this catalogue.
-        run_id
-            The run ID of the cross-match for this catalogue. Must be specified
-            if this is the first catalogue being cross-matched. Otherwise uses
-            the run ID of the last catalogue cross-matched.
-        skip_phases
-            A list of phases to skip. If `None`, all phases will be executed.
-        join_paths
-            A list of tuples with the paths to the catalogues to join and the names of
-            the columns to join on. Each tuple should be of the form
-            ``(this_catalogue_column, other_catalogue.other_column)``.
-        query_radius
-            The query radius used in phase 2, in arcseconds.
-        overwrite
-            Overwrites temporary files if they already exist. Use with caution.
         log
-            An optional SDSSLogger to use for logging. If provided, overrides the
+            An optional ``SDSSLogger`` to use for logging. If provided, overrides the
             internal logger.
         logfile
             An optional path to a log file. If provided, logs will be written to this
@@ -215,7 +187,7 @@ class XMatch:
             self.log.sh.setLevel(logging.CRITICAL)
 
         if logfile is None:
-            logfile = self._get_logfile(prefix=f"xmatch_{name}_{self.version}")
+            logfile = self._get_logfile(prefix=f"xmatch_{self.version}")
 
         # Drop any previous file loggers.
         fh_handlers: list[logging.FileHandler] = []
@@ -236,6 +208,45 @@ class XMatch:
 
         # Initialise the logger in Rust.
         xmatch_lib.init_logger(self.log.name, use_trace=trace)
+
+    def xmatch_catalogue(
+        self,
+        name: str,
+        hats_path: str | pathlib.Path,
+        plan: str | None = None,
+        run_id: int | None = None,
+        skip_phases: list[int] | None = None,
+        join_paths: list[tuple[str, str]] = [],
+        query_radius: float = 1.0,
+        overwrite: bool = False,
+    ):
+        """Cross-matches a new catalogue.
+
+        Parameters
+        ----------
+        name
+            The name of the catalogue.
+        hats_path
+            The path to the HATS collection.
+        plan
+            The plan used to cross-match this catalogue.
+        run_id
+            The run ID of the cross-match for this catalogue. Must be specified
+            if this is the first catalogue being cross-matched. Otherwise uses
+            the run ID of the last catalogue cross-matched.
+        skip_phases
+            A list of phases to skip. If `None`, all phases will be executed.
+        join_paths
+            A list of tuples with the paths to the catalogues to join and the names of
+            the columns to join on. Each tuple should be of the form
+            ``(this_catalogue_column, other_catalogue.other_column)``.
+        query_radius
+            The query radius used in phase 2, in arcseconds.
+        overwrite
+            Overwrites temporary files if they already exist. Use with caution.
+        """
+
+        LOG_PREFIX = f"[{name.upper()}]"
 
         # Check if the catalogue already exists in the model.
         if name in self.model.list_catalogue_names():
@@ -267,7 +278,9 @@ class XMatch:
         tmp_path = self._get_temporary_path(cat_model)
         if tmp_path.exists() and any(tmp_path.iterdir()):
             if overwrite:
-                self.log.warning(f"Overwriting temporary path {tmp_path!s}.")
+                self.log.warning(
+                    f"{LOG_PREFIX} Overwriting temporary path {tmp_path!s}."
+                )
                 shutil.rmtree(tmp_path)
             else:
                 raise FileExistsError(f"Temporary path {tmp_path!s} already exists.")
@@ -279,17 +292,17 @@ class XMatch:
         if self.is_empty():
             if not is_first:
                 self._raise_with_logfile(
-                    "XMatch directory is empty but there are catalogues in the "
-                    "xmatch.yaml file. This may indicate an inconsistency in the "
-                    "XMatch product."
+                    f"{LOG_PREFIX} XMatch directory is empty but there "
+                    "are catalogues in the xmatch.yaml file. This may indicate "
+                    "an inconsistency in the XMatch product."
                 )
             cat_model.delete_phase([1, 2])
         else:
             if is_first:
                 self._raise_with_logfile(
-                    "XMatch directory is not empty but no catalogues have been "
-                    "cross-matched. This may indicate an inconsistency in the "
-                    "XMatch product."
+                    f"{LOG_PREFIX} XMatch directory is not empty but no "
+                    "catalogues have been cross-matched. This may indicate an "
+                    "inconsistency in the XMatch product."
                 )
 
         try:
