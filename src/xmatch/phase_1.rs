@@ -24,7 +24,7 @@ pub fn run_phase_1(
     cat_data: CatalogueModel,
     xmatch_options: XMatchOptions,
 ) -> Result<()> {
-    LOG_PREFIX.get_or_init(|| format!("[{} - Phase 1]", cat_data.name.to_uppercase()));
+    LOG_PREFIX.get_or_init(|| format!("[{}] - Phase 1 -", cat_data.name.to_uppercase()));
 
     let phase = if let None = cat_data.get_phase(1) {
         panic!(
@@ -171,8 +171,10 @@ fn _xmatch_phase1_join_pk(
     let to_cat_name = &to_cat_data.name.clone();
     let to_primary_key = &to_cat_data.primary_key.clone();
 
+    let phase = from_cat_data.get_phase(1).unwrap();
+
     // Use half of the CPUs if n_workers is not specified.
-    let n_workers = xmatch_options
+    let n_workers = phase
         .n_workers
         .unwrap_or_else(|| available_parallelism().unwrap().get() / 2);
 
@@ -190,6 +192,19 @@ fn _xmatch_phase1_join_pk(
 
     // Get the list of pixels in the from catalogue.
     let partition_info = hats::tools::PartitionInfo::from_dataset(&from_hats_path, true).unwrap();
+    let n_pixels = partition_info.len() as u64;
+
+    // Prepare a progress tracker.
+    let progress_tracker = if let Some(progress_file) = &xmatch_options.progress_file {
+        Some(xmatch::tools::ProgressTracker::new(
+            progress_file.clone(),
+            Some(n_pixels as i32),
+        ))
+    } else {
+        None
+    };
+
+    let progress_tracker = Arc::new(progress_tracker);
 
     // Parallelise the processing of each pixel.
     let pool = crate::tools::create_pool(Some(n_workers))?;
@@ -209,6 +224,7 @@ fn _xmatch_phase1_join_pk(
                     from_cat_data,
                     from_join_column,
                     to_cat_data,
+                    progress_tracker.clone(),
                 )
             })
             .unwrap();
@@ -226,7 +242,14 @@ fn _xmatch_phase1_join_pk_pixel(
     from_cat_data: &CatalogueModel,
     from_join_column: &str,
     to_cat_data: &CatalogueModel,
+    progress_tracker: Arc<Option<xmatch::tools::ProgressTracker>>,
 ) -> Result<()> {
+    let increment_progress = || {
+        if let Some(tracker) = &*progress_tracker {
+            tracker.increment().unwrap();
+        }
+    };
+
     log::trace!(
         "{} Phase 1: processing pixel {} of order {}.",
         LOG_PREFIX.get().unwrap(),
@@ -264,6 +287,7 @@ fn _xmatch_phase1_join_pk_pixel(
     )? {
         lf
     } else {
+        increment_progress();
         return Ok(());
     };
 
@@ -286,6 +310,7 @@ fn _xmatch_phase1_join_pk_pixel(
             from_pixel,
             from_order
         );
+        increment_progress();
         return Ok(());
     }
 
@@ -346,6 +371,7 @@ fn _xmatch_phase1_join_pk_pixel(
             from_pixel,
             from_order
         );
+        increment_progress();
         return Ok(());
     }
 
@@ -369,5 +395,6 @@ fn _xmatch_phase1_join_pk_pixel(
         true,
     )?;
 
+    increment_progress();
     Ok(())
 }

@@ -267,6 +267,11 @@ class PhaseModel(BaseModel):
         Field(description="Whether this phase was skipped."),
     ] = False
 
+    n_workers: Annotated[
+        int | None,
+        Field(description="The number of workers used for this phase."),
+    ] = None
+
     n_matched: Annotated[
         int | None,
         Field(description="The number of sources matched in this phase."),

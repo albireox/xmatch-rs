@@ -8,16 +8,29 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import multiprocessing
 import os
 import pathlib
 import shutil
+import time
+from tempfile import NamedTemporaryFile
 from uuid import uuid4
 
 import polars
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeRemainingColumn,
+)
 
 from sdsstools.logger import SDSSLogger
 
+from xmatch_rs import console
 from xmatch_rs._xmatch_rs_lib import xmatch as xmatch_lib
 from xmatch_rs.hats.hats import HATS
 from xmatch_rs.tools import get_xmatch_rs_logger
@@ -218,6 +231,7 @@ class XMatch:
         skip_phases: list[int] | None = None,
         join_paths: list[tuple[str, str]] = [],
         query_radius: float = 1.0,
+        n_workers: int | None = None,
         overwrite: bool = False,
     ):
         """Cross-matches a new catalogue.
@@ -242,8 +256,12 @@ class XMatch:
             ``(this_catalogue_column, other_catalogue.other_column)``.
         query_radius
             The query radius used in phase 2, in arcseconds.
+        n_workers
+            The number of worker threads to use. If `None`, the default for each
+            phase will be used.
         overwrite
             Overwrites temporary files if they already exist. Use with caution.
+
         """
 
         LOG_PREFIX = f"[{name.upper()}]"
@@ -262,6 +280,7 @@ class XMatch:
                     phase=phase,
                     join_paths=join_paths if phase == 1 else [],
                     query_radius=query_radius if phase == 2 else None,
+                    n_workers=n_workers,
                 )
             )
 
@@ -388,13 +407,14 @@ class XMatch:
     def _run_phase_1(self, cat_model: CatalogueModel):
         """Runs phase 1 of the cross-matching process for a catalogue."""
 
-        xmatch_lib.run_phase_1(
-            xmatch_path=str(self.path),
-            xmatch_model_data=self.model.model_dump_json(),
-            cat_model_data=cat_model.model_dump_json(),
-            n_workers=None,
-            move_files=True,
-        )
+        with ProgressTracker() as progress:
+            xmatch_lib.run_phase_1(
+                xmatch_path=str(self.path),
+                xmatch_model_data=self.model.model_dump_json(),
+                cat_model_data=cat_model.model_dump_json(),
+                move_files=True,
+                progress_file=str(progress.progress_file),
+            )
 
     def _run_phase_2(self, cat_model: CatalogueModel):
         """Runs phase 2 of the cross-matching process for a catalogue."""
@@ -408,8 +428,8 @@ class XMatch:
             xmatch_path=str(self.path),
             xmatch_model_data=self.model.model_dump_json(),
             cat_model_data=cat_model.model_dump_json(),
-            n_workers=10,
             move_files=True,
+            progress_file=None,
         )
 
     def _get_temporary_path(self, cat_model: CatalogueModel) -> pathlib.Path:
@@ -485,3 +505,98 @@ class XMatch:
             == 0
         ):
             return True
+
+
+class ProgressTracker:
+    """A simple progress tracker for the cross-matching process."""
+
+    def __init__(
+        self,
+        progress_file: str | pathlib.Path | None = None,
+        label: str = "Progress",
+        show_progress: bool = True,
+    ):
+        if progress_file is None:
+            progress_file = NamedTemporaryFile(
+                delete=False,
+                prefix="xmatch_progress_",
+                suffix=".json",
+            ).name
+
+        self.progress_file = pathlib.Path(progress_file)
+        self.label = label
+        self.show_progress = show_progress
+
+        self._monitor_process: multiprocessing.Process | None = None
+
+    def __enter__(self):
+        if not self.show_progress:
+            return self
+
+        self._monitor_process = multiprocessing.Process(
+            target=self._monitor_progress,
+            daemon=True,
+        )
+        self._monitor_process.start()
+
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._monitor_process is not None:
+            self._monitor_process.join()
+
+        if self.progress_file.exists():
+            self.progress_file.unlink()
+
+        return False
+
+    def _monitor_progress(self) -> None:
+        """Monitors the progress and updates the progress bar."""
+
+        pbar = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeRemainingColumn(),
+            console=console,
+            transient=True,
+        )
+        pbar_task: int | None = None
+
+        while True:
+            if self.progress_file.exists():
+                with open(self.progress_file, "r") as f:
+                    try:
+                        progress_data = json.load(f)
+                    except json.JSONDecodeError:
+                        # In case we are reading the file as it's being written
+                        # and it's not valid JSON yet, we just wait and try again.
+                        time.sleep(2)
+                        continue
+
+                    n_total: int = progress_data.get("n_total", 0)
+                    n_completed: int = progress_data.get("n_completed", 0)
+
+                if pbar_task is None and n_total > 0:
+                    pbar_task = pbar.add_task(
+                        self.label,
+                        total=n_total,
+                    )
+                    pbar.start()
+                elif pbar_task is None:
+                    time.sleep(2)
+                    continue
+
+                if n_completed >= n_total:
+                    pbar.update(pbar_task, completed=n_completed, total=n_total)
+                    break
+
+                pbar.update(pbar_task, completed=n_completed, total=n_total)
+
+            time.sleep(2)  # Sleep for a bit before checking again
+
+        if pbar_task is not None:
+            pbar.stop()
+
+        return

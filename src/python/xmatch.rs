@@ -106,14 +106,14 @@ pub(crate) mod py_xmatch {
         xmatch_path: PathBuf,
         xmatch_model_data: String,
         cat_model_data: String,
-        n_workers: Option<usize>,
         move_files: bool,
+        progress_file: Option<PathBuf>,
     ) -> Result<()> {
         let xmatch_data: XMatchModel = serde_json::from_str(&xmatch_model_data)?;
         let cat_data: CatalogueModel = serde_json::from_str(&cat_model_data)?;
         let xmatch_options = XMatchOptions {
-            n_workers,
             move_files,
+            progress_file,
         };
 
         let phase_1_cl = || {
@@ -137,14 +137,14 @@ pub(crate) mod py_xmatch {
         xmatch_path: PathBuf,
         xmatch_model_data: String,
         cat_model_data: String,
-        n_workers: Option<usize>,
         move_files: bool,
+        progress_file: Option<PathBuf>,
     ) -> Result<()> {
         let xmatch_data: XMatchModel = serde_json::from_str(&xmatch_model_data)?;
         let cat_data: CatalogueModel = serde_json::from_str(&cat_model_data)?;
         let xmatch_options = XMatchOptions {
             move_files,
-            n_workers,
+            progress_file,
         };
 
         let _ = xmatch::phase_3::run_phase_3(xmatch_path, xmatch_data, cat_data, xmatch_options)?;

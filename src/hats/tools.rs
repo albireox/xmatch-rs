@@ -207,6 +207,11 @@ impl PartitionInfo {
         self._df.clone()
     }
 
+    /// Number of pixels in the partition info.
+    pub fn len(&self) -> usize {
+        self._df.height()
+    }
+
     /// Returns the minimum order found in the partition info.
     pub fn min_order(&self) -> Result<u8> {
         let min_order = self.get().lazy().select([col("Norder").min()]).collect()?;

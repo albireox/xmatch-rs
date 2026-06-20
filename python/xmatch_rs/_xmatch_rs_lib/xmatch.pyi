@@ -97,8 +97,8 @@ def run_phase_1(
     xmatch_path: str | pathlib.Path,
     xmatch_model_data: str,
     cat_model_data: str,
-    n_workers: int | None,
     move_files: bool,
+    progress_file: str | pathlib.Path | None,
 ):
     """Runs phase 1 of the cross-match process.
 
@@ -110,10 +110,10 @@ def run_phase_1(
         A JSON string representing the cross-match model.
     cat_model_data
         A JSON string representing the catalogue model.
-    n_workers
-        The number of worker threads to use.
     move_files
         Whether to move the data to the final output path.
+    progress_file
+        The path to a file where the progress will be written.
 
     """
     ...
@@ -122,8 +122,8 @@ def run_phase_3(
     xmatch_path: str | pathlib.Path,
     xmatch_model_data: str,
     cat_model_data: str,
-    n_workers: int,
     move_files: bool,
+    progress_file: str | pathlib.Path | None,
 ):
     """Runs phase 3 of the cross-match process.
 
@@ -135,10 +135,10 @@ def run_phase_3(
         A JSON string representing the cross-match model.
     cat_model_data
         A JSON string representing the catalogue model.
-    n_workers
-        The number of worker threads to use.
     move_files
         Whether to move the data to the final output path.
+    progress_file
+        The path to a file where the progress will be written.
 
     """
     ...

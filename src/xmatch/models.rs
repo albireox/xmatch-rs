@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct XMatchOptions {
-    pub n_workers: Option<usize>,
     pub move_files: bool,
+    pub progress_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -148,6 +148,7 @@ pub struct PhaseModel {
     #[serde(default)]
     pub join_paths: Vec<(String, String)>,
     pub query_radius: Option<f64>,
+    pub n_workers: Option<usize>,
 }
 
 impl PhaseModel {

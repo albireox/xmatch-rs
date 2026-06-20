@@ -11,8 +11,11 @@ use chrono::Utc;
 use glob::glob;
 use polars::prelude::*;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
+    fs::{File, OpenOptions},
+    io::{Seek, SeekFrom},
     path::{Path, PathBuf},
     sync::{LazyLock, Mutex},
 };
@@ -588,4 +591,67 @@ pub fn write_catalog_to_table(
     )?;
 
     Ok(())
+}
+
+/// Model for tracking the progress of a long-running operation.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CompletionModel {
+    pub n_total: i32,
+    pub n_completed: i32,
+}
+
+pub struct ProgressTracker {
+    progress_file: Mutex<File>,
+}
+
+impl ProgressTracker {
+    pub fn new(progress_file: PathBuf, n_total: Option<i32>) -> Self {
+        let obj = Self {
+            progress_file: Mutex::new(
+                OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(progress_file)
+                    .unwrap(),
+            ),
+        };
+
+        if let Some(n_total) = n_total {
+            obj.update_progress(0, Some(n_total)).unwrap();
+        }
+
+        obj
+    }
+
+    pub fn update_progress(&self, n_completed: i32, n_total: Option<i32>) -> Result<()> {
+        let completion_model = CompletionModel {
+            n_total: n_total.unwrap_or(-1),
+            n_completed,
+        };
+        let file = self.progress_file.lock().unwrap();
+        serde_json::to_writer(&*file, &completion_model)?;
+        Ok(())
+    }
+
+    pub fn increment(&self) -> Result<()> {
+        let mut file = self.progress_file.lock().unwrap();
+
+        file.seek(SeekFrom::Start(0))?;
+
+        let mut completion_model: CompletionModel =
+            serde_json::from_reader(&*file).unwrap_or(CompletionModel {
+                n_total: -1,
+                n_completed: 0,
+            });
+        completion_model.n_completed += 1;
+
+        file.set_len(0)?;
+        file.seek(std::io::SeekFrom::Start(0))?;
+
+        serde_json::to_writer(&*file, &completion_model)?;
+
+        Ok(())
+    }
 }

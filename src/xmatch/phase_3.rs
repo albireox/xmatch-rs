@@ -34,7 +34,7 @@ pub fn run_phase_3(
     cat_data: CatalogueModel,
     xmatch_options: XMatchOptions,
 ) -> Result<()> {
-    LOG_PREFIX.get_or_init(|| format!("[{} - Phase 3]", cat_data.name.to_uppercase()));
+    LOG_PREFIX.get_or_init(|| format!("[{}] - Phase 3 -", cat_data.name.to_uppercase()));
 
     log::info!(
         "{} Running phase 3 for catalogue {}.",
