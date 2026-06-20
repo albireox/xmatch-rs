@@ -103,7 +103,7 @@ pub fn create_margin_cache(
     let partition_info = hats_tools::PartitionInfo::from_dataset(&object_dataset, true)?;
 
     // Create an iterator over the rows of the partition (i.e., the pixels to process).
-    let pixels = partition_info.get().collect()?;
+    let pixels = partition_info.get();
     let pixels_iter = df_rows_iter!(&pixels, "Norder" => u8, "Npix" => u64)?;
 
     // If there is a progress file configured, write the initial progress information

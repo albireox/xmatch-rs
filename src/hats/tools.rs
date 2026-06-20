@@ -85,17 +85,21 @@ pub(crate) fn is_collection(path: &PathBuf, props: &IsCollectionProps) -> bool {
     true
 }
 
+// Lock to prevent multiple threads from accessing the same partition file at the same time.
+// Not totally sure why this happens but it causes SIGSEGV errors.
+static ACCESS_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[derive(Clone)]
 pub struct PartitionInfo {
-    _lf: LazyFrame,
+    _df: DataFrame,
     _file_path: Option<PathBuf>,
 }
 
 impl PartitionInfo {
-    /// Creates a `PartitionInfo` from a `LazyFrame`.
-    pub fn from(_lf: LazyFrame) -> Self {
+    /// Creates a `PartitionInfo` from a `DataFrame`.
+    pub fn from(_df: DataFrame) -> Self {
         Self {
-            _lf,
+            _df,
             _file_path: None,
         }
     }
@@ -116,8 +120,10 @@ impl PartitionInfo {
             .finish()?
             .sort(vec!["Norder", "Npix"], Default::default());
 
+        let _lock = ACCESS_MUTEX.lock().unwrap();
+
         Ok(Self {
-            _lf: lf,
+            _df: lf.collect()?,
             _file_path: Some(path.clone()),
         })
     }
@@ -171,8 +177,10 @@ impl PartitionInfo {
         ])
         .sort(vec!["Norder", "Npix"], Default::default());
 
+        let _lock = ACCESS_MUTEX.lock().unwrap();
+
         Ok(Self {
-            _lf: lf,
+            _df: lf.collect()?,
             _file_path: None,
         })
     }
@@ -180,8 +188,8 @@ impl PartitionInfo {
     /// Writes the partition info to a CSV file.
     pub fn to_csv(&self, path: &PathBuf) -> Result<()> {
         let mut df = self
-            ._lf
-            .clone()
+            .get()
+            .lazy()
             .sort(vec!["Norder", "Npix"], Default::default())
             .collect()?;
 
@@ -195,18 +203,13 @@ impl PartitionInfo {
     }
 
     /// Gets the data as a `DataFrame`.
-    pub fn to_dataframe(&self) -> Result<DataFrame> {
-        let df = self._lf.clone().collect()?;
-        Ok(df)
-    }
-
-    pub fn get(&self) -> LazyFrame {
-        self._lf.clone()
+    pub fn get(&self) -> DataFrame {
+        self._df.clone()
     }
 
     /// Returns the minimum order found in the partition info.
     pub fn min_order(&self) -> Result<u8> {
-        let min_order = self._lf.clone().select([col("Norder").min()]).collect()?;
+        let min_order = self.get().lazy().select([col("Norder").min()]).collect()?;
 
         min_order
             .column("Norder")?
@@ -217,7 +220,7 @@ impl PartitionInfo {
 
     /// Returns the maximum order found in the partition info.
     pub fn max_order(&self) -> Result<u8> {
-        let max_order = self._lf.clone().select([col("Norder").max()]).collect()?;
+        let max_order = self.get().lazy().select([col("Norder").max()]).collect()?;
 
         max_order
             .column("Norder")?
@@ -229,8 +232,8 @@ impl PartitionInfo {
     /// Checks if the partition info contains a given order and pixel.
     pub fn contains(&self, order: u8, npix: u64) -> Result<bool> {
         let filtered = self
-            ._lf
-            .clone()
+            .get()
+            .lazy()
             .filter(col("Norder").eq(lit(order)).and(col("Npix").eq(lit(npix))));
 
         let df = filtered.collect()?;
@@ -260,7 +263,7 @@ impl IntoIterator for PartitionInfo {
     type IntoIter = PartitionInfoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        let pixels = self.get().collect().unwrap();
+        let pixels = self.get().lazy().collect().unwrap();
         let data: Vec<(u8, u64)> = df_rows_iter!(&pixels, "Norder" => u8, "Npix" => u64)
             .unwrap()
             .map(|row| row.unwrap())
@@ -314,6 +317,7 @@ pub fn get_hats_neighbours(
             // Get the pixels in the partition info for the current order.
             let partition_order = partition_info
                 .get()
+                .lazy()
                 .filter(col("Norder").eq(lit(order)))
                 .select([col("Npix")])
                 .sort(["Npix"], Default::default())
