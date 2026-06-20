@@ -17,7 +17,7 @@ pub(crate) mod py_xmatch {
     use std::{path::PathBuf, sync::Mutex};
 
     use crate::xmatch;
-    use crate::xmatch::models::{CatalogueModel, XMatchOptions};
+    use crate::xmatch::models::{CatalogueModel, XMatchModel, XMatchOptions};
 
     // Prevent setting the pyo3_log logger more than once as that fails.
     static LOGGER_SET: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
@@ -81,7 +81,7 @@ pub(crate) mod py_xmatch {
         strict: bool,
     ) -> Option<PyLazyFrame> {
         if let Some(lf) =
-            xmatch::tools::scan_pixel_from_hats_dataset(hats_path, order, pixel, strict)
+            xmatch::tools::scan_pixel_from_hats_dataset(hats_path, order, pixel, strict).unwrap()
         {
             Some(PyLazyFrame(lf))
         } else {
@@ -96,6 +96,38 @@ pub(crate) mod py_xmatch {
         version: &str,
     ) -> Result<()> {
         xmatch::tools::delete_catalogue_from_dataset(xmatch_path, catalogue_name, version)?;
+
+        Ok(())
+    }
+
+    #[pyfunction(name = "run_phase_1")]
+    pub fn py_run_xmatch_phase_1(
+        py: Python<'_>,
+        xmatch_path: PathBuf,
+        xmatch_model_data: String,
+        cat_model_data: String,
+        n_workers: Option<usize>,
+        move_files: bool,
+    ) -> Result<()> {
+        let xmatch_data: XMatchModel = serde_json::from_str(&xmatch_model_data)?;
+        let cat_data: CatalogueModel = serde_json::from_str(&cat_model_data)?;
+        let xmatch_options = XMatchOptions {
+            n_workers,
+            move_files,
+        };
+
+        let phase_1_cl = || {
+            xmatch::phase_1::run_phase_1(xmatch_path, xmatch_data, cat_data, xmatch_options)
+                .unwrap();
+        };
+
+        // We need to detach the Python GIL to allow logging inside the Rayon threads.
+        if *LOGGER_USE_TRACE.get().unwrap() {
+            log::trace!("Detaching GIL for phase 1 with trace logging.");
+            py.detach(phase_1_cl);
+        } else {
+            phase_1_cl();
+        }
 
         Ok(())
     }

@@ -19,10 +19,10 @@ anyhow = "1"
 cdshealpix = "0.9.1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 glob = "0.3.3"
-polars = { version = "0.54.4", features = ["lazy", "default", "dtype-u8", "object", "parquet", "strings", "trigonometry", "semi_anti_join"] }
-pyo3 = { version = "0.28.3", features = ["abi3-py311", "anyhow"] }
+polars = { version = "0.54.4", features = ["lazy", "default", "dtype-u8", "object", "parquet", "strings", "trigonometry", "semi_anti_join", "is_in"] }
+pyo3 = { version = "0.28", default-features = false,  features = ["extension-module", "anyhow"] }
 pyo3-polars = { version = "0.27", features = ["derive", "lazy"] }
-rayon = "1"
+rayon = "1.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"

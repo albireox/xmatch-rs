@@ -6,6 +6,7 @@
  */
 
 use anyhow::{Result, bail};
+use cdshealpix::nested::get;
 use chrono::Utc;
 use glob::glob;
 use polars::prelude::*;
@@ -18,8 +19,11 @@ use std::{
 
 use crate::{
     hats::tools::PartitionInfo,
-    tools::{lf_row_count, to_pl_path},
-    xmatch::models::{CatalogueModel, CoordUnit, EpochFormat},
+    tools::{lf_row_count, sink_lf_to_partitioned_parquet, to_pl_path},
+    xmatch::models::{
+        CATALOG_TO_TABLE_SCHEMA, CatalogueModel, CoordUnit, EpochFormat, cast_and_reorder,
+        get_column_dtype,
+    },
 };
 
 /// Returns the path of a temporary directory for the xmatch dataset.
@@ -54,7 +58,7 @@ pub fn scan_pixel_from_hats_dataset(
     order: u8,
     pixel: u64,
     strict: bool,
-) -> Option<LazyFrame> {
+) -> Result<Option<LazyFrame>> {
     let hats_path = get_hats_path_root(hats_path).unwrap();
     let dataset_path = hats_path.join("object/dataset");
 
@@ -80,7 +84,7 @@ pub fn scan_pixel_from_hats_dataset(
 
     // If there are no pixels to scan, return None.
     if pixels_to_scan.is_empty() {
-        return None;
+        return Ok(None);
     }
 
     // Create a filter expression in which we OR together the conditions for each (order, pixel)
@@ -102,13 +106,13 @@ pub fn scan_pixel_from_hats_dataset(
     let lf = lf.filter(or_expr);
 
     if !strict {
-        return Some(lf);
+        return Ok(Some(lf));
     }
 
     // If strict is True, we need to filter the LazyFrame to only targets that exactly match
     // the (order, pixel) of the input. We use the _healpix_29 column for this.
     let lf = lf.filter((col("_healpix_29") / lit(4u64.pow((29 - order) as u32))).eq(pixel));
-    Some(lf)
+    Ok(Some(lf))
 }
 
 /// Helper function to find the root of a path by looking for a specific file in the directory or its parents.
@@ -477,6 +481,111 @@ pub fn delete_catalogue_from_dataset(
             }
         }
     }
+
+    Ok(())
+}
+
+/// Returns a list of pixels in the xmatch dataset that contain the input pixel.
+///
+/// If `include_neighbours=true`, it will include one ring of neighbour pixels around
+/// the pixels that contain the input pixel. This is useful when cross-matching catalogues
+/// with different epochs, in which the matching target may be in one of the neighbouring pixels.
+/// The vector of returned pixels correspond to the xmatch order, `xmatch_order`.
+///
+pub fn get_xmatch_pixels(
+    xmatch_order: u8,
+    in_order: u8,
+    in_pixel: u64,
+    include_neighbours: bool,
+) -> Result<Vec<u64>> {
+    let mut out_pixels: Vec<u64> = Vec::new();
+
+    // Create the list of pixels at the xmatch order that contain the input pixel.
+    if in_order == xmatch_order {
+        out_pixels.push(in_pixel);
+    } else if in_order < xmatch_order {
+        let factor = 4_u64.pow((xmatch_order - in_order) as u32);
+        let start_pixel = in_pixel * factor;
+        for i in 0..factor {
+            out_pixels.push(start_pixel + i);
+        }
+    } else {
+        let factor = 4_u64.pow((in_order - xmatch_order) as u32);
+        let pixel = in_pixel / factor;
+        out_pixels.push(pixel);
+    }
+
+    // If we don't need to include neighbours, return early.
+    if !include_neighbours {
+        return Ok(out_pixels);
+    }
+
+    // Create a list of neighbour pixels by getting the neighbours of each pixel
+    // in out_pixels at the xmatch order.
+    let layer = get(xmatch_order);
+    let neighbour_pixels: Vec<u64> = out_pixels
+        .iter()
+        .flat_map(|pixel| layer.neighbours(*pixel, false).values_vec())
+        .collect();
+
+    // Add the neighbour pixels to the output list, ensuring there are no duplicates.
+    for pixel in neighbour_pixels {
+        if !out_pixels.contains(&pixel) {
+            out_pixels.push(pixel);
+        }
+    }
+
+    Ok(out_pixels)
+}
+
+/// Sinks the catalog_to_table lazy frame.
+pub fn write_catalog_to_table(
+    catalogue_name: String,
+    xmatch_path: impl AsRef<Path>,
+    lf: LazyFrame,
+    primary_key: String,
+    xmatch_order: u8,
+    version: String,
+    run_id: i64,
+    use_temporary_path: bool,
+) -> Result<()> {
+    let pk_dtype = get_column_dtype(&lf, &primary_key)?;
+    let mut catalog_to_table_schema = CATALOG_TO_TABLE_SCHEMA.clone();
+    catalog_to_table_schema.insert_at_index(1, primary_key.clone().into(), pk_dtype)?;
+
+    let lf = cast_and_reorder(lf, &catalog_to_table_schema)?;
+
+    let xmatch_path = get_xmatch_path_root(xmatch_path.as_ref().to_path_buf())?;
+
+    let catalog_to_table_path = if use_temporary_path {
+        let temporary_path = get_temp_dir_path(
+            xmatch_path.clone(),
+            &catalogue_name,
+            &version,
+            run_id as usize,
+            true,
+        )?;
+        temporary_path
+    } else {
+        xmatch_path
+    };
+
+    let catalog_to_table_path = catalog_to_table_path
+        .join(format!("catalog_to_{}", catalogue_name))
+        .join("dataset")
+        .join(format!("Norder={}", xmatch_order));
+
+    let lf = lf.clone().with_column(
+        (col("healpix_29") / lit(4_u64.pow((29 - xmatch_order) as u32)).cast(DataType::UInt64))
+            .alias("healpix_xmatch"),
+    );
+
+    sink_lf_to_partitioned_parquet(
+        lf,
+        catalog_to_table_path,
+        vec!["healpix_xmatch".into()],
+        Default::default(),
+    )?;
 
     Ok(())
 }

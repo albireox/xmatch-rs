@@ -17,10 +17,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct XMatchOptions {
-    pub version: String,
-    pub epoch: f32,
-    pub pixelation_order: u8,
     pub n_workers: Option<usize>,
+    pub move_files: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -60,6 +58,10 @@ impl XMatchModel {
         content.push_str(&serde_yaml::to_string(self)?);
         fs::write(path.as_ref(), content)?;
         Ok(())
+    }
+
+    pub fn get_catalogue(&self, name: &str) -> Option<&CatalogueModel> {
+        self.catalogues.iter().find(|cat| cat.name == name)
     }
 }
 

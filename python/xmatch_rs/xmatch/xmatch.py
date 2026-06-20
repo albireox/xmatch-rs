@@ -363,31 +363,27 @@ class XMatch:
 
         for phase in cat_model.phases:
             if phase.phase == 1:
-                self._run_phase_1(cat_model, phase, overwrite=overwrite)
+                self._run_phase_1(cat_model)
             elif phase.phase == 2:
-                self._run_phase_2(cat_model, phase, overwrite=overwrite)
+                self._run_phase_2(cat_model)
             elif phase.phase == 3:
                 self._run_phase_3(cat_model)
 
         self.model.catalogues.append(cat_model)
         self.model.write()
 
-    def _run_phase_1(
-        self,
-        cat_model: CatalogueModel,
-        phase: PhaseModel,
-        overwrite: bool = False,
-    ):
+    def _run_phase_1(self, cat_model: CatalogueModel):
         """Runs phase 1 of the cross-matching process for a catalogue."""
 
-        self.log.info(f"Running phase 1 for catalogue {cat_model.name!r}.")
+        xmatch_lib.run_phase_1(
+            xmatch_path=str(self.path),
+            xmatch_model_data=self.model.model_dump_json(),
+            cat_model_data=cat_model.model_dump_json(),
+            n_workers=None,
+            move_files=True,
+        )
 
-    def _run_phase_2(
-        self,
-        cat_model: CatalogueModel,
-        phase: PhaseModel,
-        overwrite: bool = False,
-    ):
+    def _run_phase_2(self, cat_model: CatalogueModel):
         """Runs phase 2 of the cross-matching process for a catalogue."""
 
         self.log.info(f"Running phase 2 for catalogue {cat_model.name!r}.")

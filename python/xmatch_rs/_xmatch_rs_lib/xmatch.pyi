@@ -93,6 +93,31 @@ def delete_catalogue_from_dataset(
     """
     ...
 
+def run_phase_1(
+    xmatch_path: str | pathlib.Path,
+    xmatch_model_data: str,
+    cat_model_data: str,
+    n_workers: int | None,
+    move_files: bool,
+):
+    """Runs phase 1 of the cross-match process.
+
+    Parameters
+    ----------
+    xmatch_path
+        The path to the cross-match dataset.
+    xmatch_model_data
+        A JSON string representing the cross-match model.
+    cat_model_data
+        A JSON string representing the catalogue model.
+    n_workers
+        The number of worker threads to use.
+    move_files
+        Whether to move the data to the final output path.
+
+    """
+    ...
+
 def run_phase_3(
     xmatch_path: str | pathlib.Path,
     xmatch_model_data: str,

@@ -54,7 +54,6 @@ test = [
 python-source = "python"
 module-name = "xmatch_rs._xmatch_rs_lib"
 strip = true
-features = []
 
 [tool.uv]
 package = false

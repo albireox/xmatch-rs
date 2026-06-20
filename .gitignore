@@ -112,6 +112,7 @@ docs/_build/
 # PyBuilder
 .pybuilder/
 target/
+target-maturin/
 
 # Jupyter Notebook
 .ipynb_checkpoints
