@@ -20,12 +20,19 @@ from sdsstools.logger import SDSSLogger
 
 from xmatch_rs._xmatch_rs_lib import xmatch as xmatch_lib
 from xmatch_rs.hats.hats import HATS
-from xmatch_rs.tools import get_xmatch_rs_logger, lazy_frame_row_count
+from xmatch_rs.tools import get_xmatch_rs_logger
 from xmatch_rs.xmatch.models import CatalogueModel, PhaseModel, XMatchModel
 from xmatch_rs.xmatch.schemas import CATALOG_SCHEMA
 
 
 __all__ = ["XMatch"]
+
+
+# Add trace logging level.
+logging.addLevelName(5, "TRACE")
+logging.Logger.TRACE = lambda self, message, *args, **kws: self._log(  # type: ignore
+    5, message, *args, **kws
+)
 
 
 class XMatch:
@@ -146,6 +153,7 @@ class XMatch:
         logfile: str | pathlib.Path | None = None,
         quiet: bool = False,
         verbose: bool = False,
+        trace: bool = False,
     ):
         """Cross-matches a new catalogue.
 
@@ -179,9 +187,12 @@ class XMatch:
             file in addition to the logger. Otherwise logs will only be written to
             a temporary file and made available if the cross-matching process fails.
         quiet
-            If `True`, suppresses all logging output.
+            If `True`, suppresses all logging output to the console.
         verbose
-            If `True`, sets the logging level to ``DEBUG``.
+            If `True`, sets the console logging level to ``DEBUG``.
+        trace
+            If `True`, sets the file logging level to ``TRACE``. This is useful for
+            debugging, but can cause significant performance overhead.
 
         """
 
@@ -195,11 +206,12 @@ class XMatch:
 
             self.log = log
 
+        # Set the global level to 0 so that trace messages go to the file logger,
+        # but keep the stream logger at the level set by verbose/quiet.
+        self.log.setLevel(5)
         if verbose:
-            self.log.set_level(logging.DEBUG)
             self.log.sh.setLevel(logging.DEBUG)
         elif quiet:
-            self.log.set_level(logging.CRITICAL)
             self.log.sh.setLevel(logging.CRITICAL)
 
         if logfile is None:
@@ -215,11 +227,15 @@ class XMatch:
             self.log.removeHandler(handler)
 
         # Start a new file logger.
-        self.log.start_file_logger(str(logfile), rotating=False)
+        self.log.start_file_logger(
+            str(logfile),
+            rotating=False,
+            log_level=5,
+        )
         self.log.debug(f"Logging to file {logfile!s}.")
 
         # Initialise the logger in Rust.
-        xmatch_lib.init_logger(self.log.name)
+        xmatch_lib.init_logger(self.log.name, use_trace=trace)
 
         # Check if the catalogue already exists in the model.
         if name in self.model.list_catalogue_names():

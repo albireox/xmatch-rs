@@ -12,7 +12,7 @@ import pathlib
 
 import polars
 
-def init_logger(logger_name: str) -> None:
+def init_logger(logger_name: str, use_trace: bool) -> None:
     """
     Initialises the logger bridge between Rust and Python.
 
@@ -20,6 +20,10 @@ def init_logger(logger_name: str) -> None:
     ----------
     logger_name
         The name of the logger to initialise.
+    use_trace
+        Whether to allow using the trace level for logging. Due to limitations
+        in the ``pyo3-log` create, this can cause overheads, but usually small
+        compared with the overall run time.
 
     """
     ...

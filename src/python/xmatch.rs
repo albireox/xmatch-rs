@@ -13,7 +13,7 @@ pub(crate) mod py_xmatch {
     use pyo3::prelude::*;
     use pyo3_log::{Caching, Logger};
     use pyo3_polars::PyLazyFrame;
-    use std::sync::LazyLock;
+    use std::sync::{LazyLock, OnceLock};
     use std::{path::PathBuf, sync::Mutex};
 
     use crate::xmatch;
@@ -22,8 +22,11 @@ pub(crate) mod py_xmatch {
     // Prevent setting the pyo3_log logger more than once as that fails.
     static LOGGER_SET: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
 
+    // Global variable to determine if the logger is propagating trace messages.
+    static LOGGER_USE_TRACE: OnceLock<bool> = OnceLock::new();
+
     #[pyfunction(name = "init_logger")]
-    pub fn py_init_logger(py: Python, name: String) -> Result<()> {
+    pub fn py_init_logger(py: Python, name: String, use_trace: bool) -> Result<()> {
         // The log crate uses :: instead of .
         let target = name.replace(".", "::");
 
@@ -34,11 +37,32 @@ pub(crate) mod py_xmatch {
         let mut is_logger_set = LOGGER_SET.lock().unwrap();
         if !*is_logger_set {
             Logger::new(py, Caching::LoggersAndLevels)?
-                .filter_target(target.clone(), LevelFilter::Trace)
+                .filter_target(
+                    target.clone(),
+                    if use_trace {
+                        LevelFilter::Trace
+                    } else {
+                        LevelFilter::Debug
+                    },
+                )
                 .install()
                 .expect("Someone installed a logger before us.");
             *is_logger_set = true;
         }
+
+        log::set_max_level(if use_trace {
+            LevelFilter::Trace
+        } else {
+            LevelFilter::Debug
+        });
+
+        LOGGER_USE_TRACE.set(use_trace).unwrap();
+
+        log::info!(
+            "Logger initialized for target '{}', use_trace={}.",
+            target,
+            use_trace
+        );
 
         Ok(())
     }
