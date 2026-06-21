@@ -132,8 +132,9 @@ pub(crate) mod py_xmatch {
         Ok(())
     }
 
-    #[pyfunction(name = "run_phase_3")]
-    pub fn py_run_xmatch_phase_3(
+    #[pyfunction(name = "run_phase_2")]
+    pub fn py_run_xmatch_phase_2(
+        py: Python<'_>,
         xmatch_path: PathBuf,
         xmatch_model_data: String,
         cat_model_data: String,
@@ -147,7 +148,50 @@ pub(crate) mod py_xmatch {
             progress_file,
         };
 
-        let _ = xmatch::phase_3::run_phase_3(xmatch_path, xmatch_data, cat_data, xmatch_options)?;
+        let phase_2_cl = || {
+            xmatch::phase_2::run_phase_2(xmatch_path, xmatch_data, cat_data, xmatch_options)
+                .unwrap();
+        };
+
+        // We need to detach the Python GIL to allow logging inside the Rayon threads.
+        if *LOGGER_USE_TRACE.get().unwrap() {
+            log::trace!("Detaching GIL for phase 2 with trace logging.");
+            py.detach(phase_2_cl);
+        } else {
+            phase_2_cl();
+        }
+
+        Ok(())
+    }
+
+    #[pyfunction(name = "run_phase_3")]
+    pub fn py_run_xmatch_phase_3(
+        py: Python<'_>,
+        xmatch_path: PathBuf,
+        xmatch_model_data: String,
+        cat_model_data: String,
+        move_files: bool,
+        progress_file: Option<PathBuf>,
+    ) -> Result<()> {
+        let xmatch_data: XMatchModel = serde_json::from_str(&xmatch_model_data)?;
+        let cat_data: CatalogueModel = serde_json::from_str(&cat_model_data)?;
+        let xmatch_options = XMatchOptions {
+            move_files,
+            progress_file,
+        };
+
+        let phase_3_cl = || {
+            xmatch::phase_3::run_phase_3(xmatch_path, xmatch_data, cat_data, xmatch_options)
+                .unwrap();
+        };
+
+        // We need to detach the Python GIL to allow logging inside the Rayon threads.
+        if *LOGGER_USE_TRACE.get().unwrap() {
+            log::trace!("Detaching GIL for phase 3 with trace logging.");
+            py.detach(phase_3_cl);
+        } else {
+            phase_3_cl();
+        }
 
         Ok(())
     }

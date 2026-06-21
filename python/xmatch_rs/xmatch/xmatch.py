@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import multiprocessing
@@ -18,6 +19,8 @@ import time
 from logging.handlers import MemoryHandler
 from tempfile import NamedTemporaryFile
 from uuid import uuid4
+
+from typing import TYPE_CHECKING
 
 import polars
 from rich.progress import (
@@ -34,9 +37,13 @@ from sdsstools.logger import SDSSLogger
 from xmatch_rs import console
 from xmatch_rs._xmatch_rs_lib import xmatch as xmatch_lib
 from xmatch_rs.hats.hats import HATS
-from xmatch_rs.tools import get_xmatch_rs_logger
+from xmatch_rs.tools import get_xmatch_rs_logger, lazy_frame_row_count
 from xmatch_rs.xmatch.models import CatalogueModel, PhaseModel, XMatchModel
-from xmatch_rs.xmatch.schemas import CATALOG_SCHEMA
+from xmatch_rs.xmatch.schemas import CATALOG_SCHEMA, CATALOG_TO_TABLE_SCHEMA
+
+
+if TYPE_CHECKING:
+    from sdsstools.logger import SDSSLogger
 
 
 __all__ = ["XMatch"]
@@ -47,6 +54,41 @@ logging.addLevelName(5, "TRACE")
 logging.Logger.TRACE = lambda self, message, *args, **kws: self._log(  # type: ignore
     5, message, *args, **kws
 )
+
+
+class PrefixAdapter(logging.LoggerAdapter):
+    """A logging adapter that adds a prefix to log messages."""
+
+    def __init__(self, logger: SDSSLogger, prefix: str | None = None):
+        # We don't use super() here because it's easy to just set the attributes
+        # and we want the logger to have the right SDSSLogger type.
+        self.logger = logger
+        self.extra = None
+        self.merge_extra = False
+
+        self.prefix = prefix
+
+    def set_catalogue_prefix(self, catalogue_name: str):
+        """Sets the prefix to the catalogue name."""
+
+        self.prefix = f"[{catalogue_name.upper()}]"
+
+    def process(self, msg, kwargs):
+        if self.prefix is None or self.prefix == "":
+            return msg, kwargs
+
+        return f"{self.prefix.strip()} {msg}", kwargs
+
+    @contextlib.contextmanager
+    def without_prefix(self):
+        """A context manager to temporarily disable the prefix."""
+
+        old_prefix = self.prefix
+        self.prefix = None
+        try:
+            yield
+        finally:
+            self.prefix = old_prefix
 
 
 class XMatch:
@@ -84,7 +126,10 @@ class XMatch:
 
         # It's important that the target of the logger is xmatch_rs to ensure
         # that the Rust code can also log to it.
-        self.log = get_xmatch_rs_logger("xmatch_rs", log_level=logging.INFO)
+        self.log = PrefixAdapter(
+            get_xmatch_rs_logger("xmatch_rs", log_level=logging.INFO),
+            prefix=None,
+        )
 
         if (self.path / "xmatch.yaml").exists() and not overwrite:
             self.model = XMatchModel.read(self.path / "xmatch.yaml")
@@ -127,31 +172,10 @@ class XMatch:
         self.pixelation_order = self.model.pixelation_order
         self.epoch = self.model.epoch
 
+        self.model._file_path = self.path / "xmatch.yaml"
+
         # Cache to track the maximum catalogid for a run_id.
         self._max_catalogid: dict[int, int] = {}
-
-    def get_lazyframe(self, table_name: str | None = None) -> polars.LazyFrame:
-        """Returns a lazy frame with the cross-matched catalogue.
-
-        Parameters
-        ----------
-        table_name
-            The name of the table to return. If `None`, returns the the ``catalog``
-            dataset. Otherwise returns the ``catalog_to_{table_name}`` dataset.
-
-        """
-
-        if table_name is None:
-            catalog_dataset = self.path / "catalog" / "dataset"
-            if not catalog_dataset.exists():
-                return polars.LazyFrame()
-
-        if not catalog_dataset.exists():
-            return polars.LazyFrame()
-
-        lf = polars.scan_parquet(catalog_dataset)
-
-        return lf
 
     def init_logger(
         self,
@@ -190,30 +214,30 @@ class XMatch:
             if not log.name == "xmatch_rs":
                 raise ValueError("Logger name must be 'xmatch_rs'.")
 
-            self.log = log
+            self.log = PrefixAdapter(log)
 
         # Set the global level to 0 so that trace messages go to the file logger,
         # but keep the stream logger at the level set by verbose/quiet.
         self.log.setLevel(5)
         if verbose:
-            self.log.sh.setLevel(logging.DEBUG)
+            self.log.logger.sh.setLevel(logging.DEBUG)
         elif quiet:
-            self.log.sh.setLevel(logging.CRITICAL)
+            self.log.logger.sh.setLevel(logging.CRITICAL)
 
         if logfile is None:
             logfile = self._get_logfile(prefix=f"xmatch_{self.version}")
 
         # Drop any previous file loggers.
         fh_handlers: list[logging.FileHandler] = []
-        for handler in self.log.handlers:
+        for handler in self.log.logger.handlers:
             if isinstance(handler, logging.FileHandler):
                 fh_handlers.append(handler)
 
         for handler in fh_handlers:
-            self.log.removeHandler(handler)
+            self.log.logger.removeHandler(handler)
 
         # Start a new file logger.
-        self.log.start_file_logger(
+        self.log.logger.start_file_logger(
             str(logfile),
             rotating=False,
             log_level=5,
@@ -223,7 +247,7 @@ class XMatch:
         # Initialise the logger in Rust.
         xmatch_lib.init_logger(self.log.name, use_trace=trace)
 
-    def xmatch_catalogue(
+    def add_catalogue(
         self,
         name: str,
         hats_path: str | pathlib.Path,
@@ -233,9 +257,8 @@ class XMatch:
         join_paths: list[tuple[str, str]] = [],
         query_radius: float = 1.0,
         n_workers: int | None = None,
-        overwrite: bool = False,
     ):
-        """Cross-matches a new catalogue.
+        """Adds a new catalogue to the cross-matching process.
 
         Parameters
         ----------
@@ -260,16 +283,12 @@ class XMatch:
         n_workers
             The number of worker threads to use. If `None`, the default for each
             phase will be used.
-        overwrite
-            Overwrites temporary files if they already exist. Use with caution.
 
         """
 
-        LOG_PREFIX = f"[{name.upper()}]"
-
         # Check if the catalogue already exists in the model.
         if name in self.model.list_catalogue_names():
-            raise ValueError(f"Catalogue {name!r} has already been cross-matched.")
+            raise ValueError(f"Catalogue {name!r} is already in the cross-match file.")
 
         phases: list[PhaseModel] = []
         for phase in [1, 2, 3]:
@@ -293,42 +312,8 @@ class XMatch:
             phases=phases,
         )
 
-        # Check the temporary path. If it exists and has files in it, raise an error
-        # unless overwrite is True.
-        tmp_path = self._get_temporary_path(cat_model)
-        if tmp_path.exists() and any(tmp_path.iterdir()):
-            if overwrite:
-                self.log.warning(
-                    f"{LOG_PREFIX} Overwriting temporary path {tmp_path!s}."
-                )
-                shutil.rmtree(tmp_path)
-            else:
-                raise FileExistsError(f"Temporary path {tmp_path!s} already exists.")
-
-        # Create the temporary path.
-        tmp_path.mkdir(parents=True, exist_ok=True)
-
-        is_first = len(self.model.catalogues) == 0
-        if self.is_empty():
-            if not is_first:
-                self._raise_with_logfile(
-                    f"{LOG_PREFIX} XMatch directory is empty but there "
-                    "are catalogues in the xmatch.yaml file. This may indicate "
-                    "an inconsistency in the XMatch product."
-                )
-            cat_model.delete_phase([1, 2])
-        else:
-            if is_first:
-                self._raise_with_logfile(
-                    f"{LOG_PREFIX} XMatch directory is not empty but no "
-                    "catalogues have been cross-matched. This may indicate an "
-                    "inconsistency in the XMatch product."
-                )
-
-        try:
-            self._process_catalogue(cat_model, overwrite=overwrite)
-        except Exception as err:
-            self._raise_with_logfile(err)
+        self.model.catalogues.append(cat_model)
+        self.model.write()
 
     def catalogue_model_from_hats(
         self,
@@ -391,19 +376,122 @@ class XMatch:
 
         return cat_model
 
-    def _process_catalogue(self, cat_model: CatalogueModel, overwrite: bool = False):
-        """Processes a catalogue and updates the XMatch model."""
+    def run(self, delete_temporary: bool = False):
+        """Runs the cross-matching process for all catalogues in the model."""
 
-        for phase in cat_model.phases:
-            if phase.phase == 1:
-                self._run_phase_1(cat_model)
-            elif phase.phase == 2:
-                self._run_phase_2(cat_model)
-            elif phase.phase == 3:
-                self._run_phase_3(cat_model)
+        for cat_model in self.model.catalogues:
+            if cat_model.complete:
+                self.log.debug(f"Skipping complete catalogue {cat_model.name!r}.")
+                continue
 
-        self.model.catalogues.append(cat_model)
-        self.model.write()
+            self.log.info(f"Processing catalogue {cat_model.name!r}.")
+            self._process_catalogue(cat_model, delete_temporary=delete_temporary)
+
+    def _process_catalogue(
+        self,
+        cat_model: CatalogueModel,
+        delete_temporary: bool = False,
+    ):
+        """Processes a catalogue and updates the XMatch model.
+
+        Parameters
+        ----------
+        cat_model
+            The catalogue model to process.
+        delete_temporary
+            If `True`, deletes any existing temporary files before starting the
+            catalogue processing.
+
+        """
+
+        # Set the prefix for the logger to the catalogue name.
+        self.log.set_catalogue_prefix(cat_model.name)
+
+        # Check if all phases are complete. If so, we can skip the
+        # processing of this catalogue.
+        if all(phase.complete for phase in cat_model.phases):
+            self.log.debug(
+                f"All phases for catalogue {cat_model.name!r} are complete. "
+                "Marking catalogue as cross-matched."
+            )
+            cat_model.complete = True
+            self.model.write()
+            return
+
+        # Check if the xmatch product catalog or catalog_to_table datasets already
+        # have entries for this catalogue.
+        catalog_lf = self.get_lazyframe(table_name=None)
+        catalog_lf = catalog_lf.filter(
+            polars.col.added_by == cat_model.name,
+            polars.col.version == self.version,
+        )
+        if lazy_frame_row_count(catalog_lf) > 0:
+            raise RuntimeError(
+                f"Catalogue {cat_model.name!r} already has entries in the catalog "
+                "dataset. Please, remove them before processing this catalogue."
+            )
+
+        catalog_to_table_lf = self.get_lazyframe(table_name=cat_model.name)
+        catalog_to_table_lf = catalog_to_table_lf.filter(
+            polars.col.version == self.version,
+        )
+        if lazy_frame_row_count(catalog_to_table_lf) > 0:
+            if not any([phase.complete for phase in cat_model.phases]):
+                raise RuntimeError(
+                    f"Catalogue {cat_model.name!r} already has entries in the "
+                    f"catalog_to_{cat_model.name} dataset, but no phases are marked "
+                    "as complete. Please, remove the entries in the catalog_to_table "
+                    "dataset before processing this catalogue."
+                )
+            else:
+                self.log.warning(
+                    f"Catalogue {cat_model.name!r} already has entries in the "
+                    f"catalog_to_{cat_model.name} dataset. If this is not expected, "
+                    "please remove them before processing this catalogue."
+                )
+
+        # Check the temporary path. If it exists and has files in it, raise an error
+        # unless delete_temporary is True.
+        tmp_path = self._get_temporary_path(cat_model)
+        if tmp_path.exists() and any(tmp_path.iterdir()):
+            if delete_temporary:
+                self.log.warning(f"Temporary path {tmp_path!s} not empty. Deleting it.")
+                shutil.rmtree(tmp_path)
+            else:
+                raise FileExistsError(
+                    f"Temporary path {tmp_path!s} exists and is not empty. Use "
+                    "delete_temporary=True to delete it before processing the "
+                    "catalogue."
+                )
+
+        # Create the temporary path.
+        tmp_path.mkdir(parents=True, exist_ok=True)
+
+        # Run each one of the phases for this catalogue.
+        try:
+            for phase in cat_model.phases:
+                if phase.complete:
+                    self.log.info(f"Skipping complete phase {phase.phase}.")
+                    continue
+
+                if phase.phase == 1:
+                    self._run_phase_1(cat_model)
+                elif phase.phase == 2:
+                    self._run_phase_2(cat_model)
+                    break
+                elif phase.phase == 3:
+                    self._run_phase_3(cat_model)
+
+                phase.complete = True
+                self.model.write()
+
+        except Exception as err:
+            self._raise_with_logfile(err)
+
+        if all(phase.complete for phase in cat_model.phases):
+            self.log.info("All phases are complete. Marking catalogue complete.")
+            cat_model.complete = True
+            self.model.write()
 
     def _run_phase_1(self, cat_model: CatalogueModel):
         """Runs phase 1 of the cross-matching process for a catalogue."""
@@ -420,7 +508,14 @@ class XMatch:
     def _run_phase_2(self, cat_model: CatalogueModel):
         """Runs phase 2 of the cross-matching process for a catalogue."""
 
-        self.log.info(f"Running phase 2 for catalogue {cat_model.name!r}.")
+        with ProgressTracker() as progress:
+            xmatch_lib.run_phase_2(
+                xmatch_path=str(self.path),
+                xmatch_model_data=self.model.model_dump_json(),
+                cat_model_data=cat_model.model_dump_json(),
+                move_files=True,
+                progress_file=str(progress.progress_file),
+            )
 
     def _run_phase_3(self, cat_model: CatalogueModel):
         """Runs phase 3 of the cross-matching process for a catalogue."""
@@ -478,34 +573,45 @@ class XMatch:
             exception_class = message.__class__
             message = str(message)
 
-        logfile = self.log.log_filename
+        logfile = self.log.logger.log_filename
         if logfile is not None:
             message = message.strip()
             if not message.endswith("."):
                 message += "."
             message += f" See log file {logfile!s} for more details."
 
+        # with self.log.without_prefix():
         raise exception_class(message)
 
-    def is_empty(self):
-        """Returns `True` if the xmatch directory does not exist or is empty."""
+    def get_lazyframe(self, table_name: str | None = None) -> polars.LazyFrame:
+        """Returns a lazy frame with the cross-matched catalogue.
 
-        if not self.path.exists():
-            return True
+        Parameters
+        ----------
+        table_name
+            The name of the table to return. If `None`, returns the the ``catalog``
+            dataset. Otherwise returns the ``catalog_to_{table_name}`` dataset.
 
-        catalog_dataset = self.path / "catalog" / "dataset"
-        if not catalog_dataset.exists():
-            return True
+        """
 
-        lf = polars.scan_parquet(
-            catalog_dataset,
-            schema=CATALOG_SCHEMA,
+        if table_name is None:
+            catalog_dataset = self.path / "catalog" / "dataset"
+            if not catalog_dataset.exists():
+                return polars.LazyFrame(None, schema=CATALOG_SCHEMA)
+            return polars.scan_parquet(
+                catalog_dataset,
+                schema=CATALOG_SCHEMA,
+            )
+
+        catalog_to_table_dataset = self.path / f"catalog_to_{table_name}" / "dataset"
+        if not catalog_to_table_dataset.exists():
+            return polars.LazyFrame(None, schema=CATALOG_TO_TABLE_SCHEMA)
+
+        return polars.scan_parquet(
+            catalog_to_table_dataset,
+            schema=CATALOG_TO_TABLE_SCHEMA,
+            extra_columns="ignore",
         )
-        if (
-            lf.select(polars.col.catalogid).limit(1).collect(engine="streaming").height
-            == 0
-        ):
-            return True
 
 
 class ProgressTracker:
@@ -517,7 +623,7 @@ class ProgressTracker:
         label: str = "Progress",
         show_progress: bool = True,
         buffer_log_messages: bool = True,
-        log: SDSSLogger | None = None,
+        log: PrefixAdapter | None = None,
     ):
         if progress_file is None:
             progress_file = NamedTemporaryFile(
@@ -548,12 +654,12 @@ class ProgressTracker:
             self.memory_handler = MemoryHandler(
                 capacity=10,
                 flushLevel=logging.ERROR,
-                target=self.log.sh,
+                target=self.log.logger.sh,
             )
 
             # Add the memory handler to the logger and remove the stream handler.
-            self.log.addHandler(self.memory_handler)
-            self.log.removeHandler(self.log.sh)
+            self.log.logger.addHandler(self.memory_handler)
+            self.log.logger.removeHandler(self.log.logger.sh)
 
         self._monitor_process = multiprocessing.Process(
             target=self._monitor_progress,
@@ -565,14 +671,14 @@ class ProgressTracker:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self._monitor_process is not None:
-            self._monitor_process.join()
+            self._monitor_process.terminate()
 
         if self.memory_handler:
             # Flush the memory handler and remove it from the logger.
             self.memory_handler.flush()
             if self.log:
-                self.log.addHandler(self.log.sh)
-                self.log.removeHandler(self.memory_handler)
+                self.log.logger.addHandler(self.log.logger.sh)
+                self.log.logger.removeHandler(self.memory_handler)
 
         if self.progress_file.exists():
             self.progress_file.unlink()

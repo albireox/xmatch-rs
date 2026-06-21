@@ -18,7 +18,6 @@ use std::{collections::HashMap, path::PathBuf, thread::available_parallelism};
 use crate::hats;
 use crate::tools;
 use crate::xmatch;
-use crate::xmatch::tools::ProgressTracker;
 use xmatch::models::{CatalogueModel, XMatchModel, XMatchOptions};
 
 static LOG_PREFIX: OnceLock<String> = OnceLock::new();
@@ -32,7 +31,7 @@ pub fn run_phase_1(
     LOG_PREFIX.get_or_init(|| format!("[{}] - Phase 1 -", cat_data.name.to_uppercase()));
 
     let phase = if let None = cat_data.get_phase(1) {
-        panic!(
+        bail!(
             "{} Phase 1 is not defined for catalogue model {}",
             LOG_PREFIX.get().unwrap(),
             cat_data.name
@@ -162,11 +161,15 @@ pub fn run_phase_1(
             catalog_to_table_path.display()
         );
 
+        // Actually move the files.
         xmatch::tools::move_temp_files(
             tmp_catalog_to_table_path.clone(),
             catalog_to_table_path.clone(),
             Some(suffix.clone()),
         )?;
+
+        // Remove the temporary directory if it's empty.
+        xmatch::tools::delete_dir_if_empty(tmp_path.parent().unwrap())?;
     }
     Ok(())
 }

@@ -71,6 +71,7 @@ pub struct CatalogueModel {
     #[serde(default)]
     pub plan: Option<String>,
     pub run_id: i64,
+    pub complete: bool,
     pub hats_path: PathBuf,
     #[serde(default = "default_xmatch_rs_version")]
     pub xmatch_rs_version: String,
@@ -143,7 +144,7 @@ impl CatalogueModel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PhaseModel {
     pub phase: i64,
-    pub skipped: bool,
+    pub complete: bool,
     pub n_matched: Option<i64>,
     #[serde(default)]
     pub join_paths: Vec<(String, String)>,

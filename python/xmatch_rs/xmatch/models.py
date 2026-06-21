@@ -149,6 +149,11 @@ class CatalogueModel(BaseModel):
         PlainSerializer(lambda dt: dt.strftime("%Y-%m-%d %H:%M:%S"), return_type=str),
     ] = datetime.datetime.now(tz=datetime.timezone.utc)
 
+    complete: Annotated[
+        bool,
+        Field(description="Whether the cross-match for this catalogue is complete."),
+    ] = False
+
     primary_key: Annotated[
         str,
         Field(description="The primary key column for the catalogue."),
@@ -262,9 +267,9 @@ class PhaseModel(BaseModel):
         Field(description="The phase number."),
     ]
 
-    skipped: Annotated[
+    complete: Annotated[
         bool,
-        Field(description="Whether this phase was skipped."),
+        Field(description="Whether this phase is complete."),
     ] = False
 
     n_workers: Annotated[

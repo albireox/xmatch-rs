@@ -118,6 +118,31 @@ def run_phase_1(
     """
     ...
 
+def run_phase_2(
+    xmatch_path: str | pathlib.Path,
+    xmatch_model_data: str,
+    cat_model_data: str,
+    move_files: bool,
+    progress_file: str | pathlib.Path | None,
+):
+    """Runs phase 2 of the cross-match process.
+
+    Parameters
+    ----------
+    xmatch_path
+        The path to the cross-match dataset.
+    xmatch_model_data
+        A JSON string representing the cross-match model.
+    cat_model_data
+        A JSON string representing the catalogue model.
+    move_files
+        Whether to move the data to the final output path.
+    progress_file
+        The path to a file where the progress will be written.
+
+    """
+    ...
+
 def run_phase_3(
     xmatch_path: str | pathlib.Path,
     xmatch_model_data: str,
