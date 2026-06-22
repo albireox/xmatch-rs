@@ -376,23 +376,8 @@ class XMatch:
 
         return cat_model
 
-    def run(self, delete_temporary: bool = False):
-        """Runs the cross-matching process for all catalogues in the model."""
-
-        for cat_model in self.model.catalogues:
-            if cat_model.complete:
-                self.log.debug(f"Skipping complete catalogue {cat_model.name!r}.")
-                continue
-
-            self.log.info(f"Processing catalogue {cat_model.name!r}.")
-            self._process_catalogue(cat_model, delete_temporary=delete_temporary)
-
-    def _process_catalogue(
-        self,
-        cat_model: CatalogueModel,
-        delete_temporary: bool = False,
-    ):
-        """Processes a catalogue and updates the XMatch model.
+    def run(self, delete_temporary: bool = False, skip_checks: bool = False):
+        """Runs the cross-matching process for all catalogues in the model.
 
         Parameters
         ----------
@@ -401,8 +386,31 @@ class XMatch:
         delete_temporary
             If `True`, deletes any existing temporary files before starting the
             catalogue processing.
+        skip_checks
+            If `True`, skips the checks for existing entries in the catalog and
+            catalog_to_table datasets, and the check for existing temporary files.
 
         """
+
+        for cat_model in self.model.catalogues:
+            if cat_model.complete:
+                self.log.debug(f"Skipping complete catalogue {cat_model.name!r}.")
+                continue
+
+            self.log.info(f"Processing catalogue {cat_model.name!r}.")
+            self._process_catalogue(
+                cat_model,
+                delete_temporary=delete_temporary,
+                skip_checks=skip_checks,
+            )
+
+    def _process_catalogue(
+        self,
+        cat_model: CatalogueModel,
+        delete_temporary: bool = False,
+        skip_checks: bool = False,
+    ):
+        """Processes a catalogue and updates the XMatch model."""
 
         # Set the prefix for the logger to the catalogue name.
         self.log.set_catalogue_prefix(cat_model.name)
@@ -418,54 +426,57 @@ class XMatch:
             self.model.write()
             return
 
-        # Check if the xmatch product catalog or catalog_to_table datasets already
-        # have entries for this catalogue.
-        catalog_lf = self.get_lazyframe(table_name=None)
-        catalog_lf = catalog_lf.filter(
-            polars.col.added_by == cat_model.name,
-            polars.col.version == self.version,
-        )
-        if lazy_frame_row_count(catalog_lf) > 0:
-            raise RuntimeError(
-                f"Catalogue {cat_model.name!r} already has entries in the catalog "
-                "dataset. Please, remove them before processing this catalogue."
+        if not skip_checks:
+            # Check if the xmatch product catalog or catalog_to_table datasets already
+            # have entries for this catalogue.
+            catalog_lf = self.get_lazyframe(table_name=None)
+            catalog_lf = catalog_lf.filter(
+                polars.col.added_by == cat_model.name,
+                polars.col.version == self.version,
             )
-
-        catalog_to_table_lf = self.get_lazyframe(table_name=cat_model.name)
-        catalog_to_table_lf = catalog_to_table_lf.filter(
-            polars.col.version == self.version,
-        )
-        if lazy_frame_row_count(catalog_to_table_lf) > 0:
-            if not any([phase.complete for phase in cat_model.phases]):
+            if lazy_frame_row_count(catalog_lf) > 0:
                 raise RuntimeError(
-                    f"Catalogue {cat_model.name!r} already has entries in the "
-                    f"catalog_to_{cat_model.name} dataset, but no phases are marked "
-                    "as complete. Please, remove the entries in the catalog_to_table "
-                    "dataset before processing this catalogue."
-                )
-            else:
-                self.log.warning(
-                    f"Catalogue {cat_model.name!r} already has entries in the "
-                    f"catalog_to_{cat_model.name} dataset. If this is not expected, "
-                    "please remove them before processing this catalogue."
+                    f"Catalogue {cat_model.name!r} already has entries in the catalog "
+                    "dataset. Please, remove them before processing this catalogue."
                 )
 
-        # Check the temporary path. If it exists and has files in it, raise an error
-        # unless delete_temporary is True.
-        tmp_path = self._get_temporary_path(cat_model)
-        if tmp_path.exists() and any(tmp_path.iterdir()):
-            if delete_temporary:
-                self.log.warning(f"Temporary path {tmp_path!s} not empty. Deleting it.")
-                shutil.rmtree(tmp_path)
-            else:
-                raise FileExistsError(
-                    f"Temporary path {tmp_path!s} exists and is not empty. Use "
-                    "delete_temporary=True to delete it before processing the "
-                    "catalogue."
-                )
+            catalog_to_table_lf = self.get_lazyframe(table_name=cat_model.name)
+            catalog_to_table_lf = catalog_to_table_lf.filter(
+                polars.col.version == self.version,
+            )
+            if lazy_frame_row_count(catalog_to_table_lf) > 0:
+                if not any([phase.complete for phase in cat_model.phases]):
+                    raise RuntimeError(
+                        f"Catalogue {cat_model.name!r} already has entries in the "
+                        f"catalog_to_{cat_model.name} dataset, but no phases are "
+                        "marked as complete. Please, remove the entries in the "
+                        f"catalog_to_table dataset before processing this catalogue."
+                    )
+                else:
+                    self.log.warning(
+                        f"Catalogue {cat_model.name!r} already has entries in "
+                        f"the catalog_to_{cat_model.name} dataset. If this is not "
+                        "expected, please remove them before processing this catalogue."
+                    )
+
+            # Check the temporary path. If it exists and has files in it, raise an error
+            # unless delete_temporary is True.
+            tmp_path = self._get_temporary_path(cat_model)
+            if tmp_path.exists() and any(tmp_path.iterdir()):
+                if delete_temporary:
+                    self.log.warning(
+                        f"Temporary path {tmp_path!s} not empty. Deleting it."
+                    )
+                    shutil.rmtree(tmp_path)
+                else:
+                    raise FileExistsError(
+                        f"Temporary path {tmp_path!s} exists and is not empty. Use "
+                        "delete_temporary=True to delete it before processing the "
+                        "catalogue."
+                    )
 
         # Create the temporary path.
-        tmp_path.mkdir(parents=True, exist_ok=True)
+        self._get_temporary_path(cat_model).mkdir(parents=True, exist_ok=True)
 
         # Run each one of the phases for this catalogue.
         try:
@@ -707,6 +718,14 @@ class ProgressTracker:
                     except json.JSONDecodeError:
                         # In case we are reading the file as it's being written
                         # and it's not valid JSON yet, we just wait and try again.
+                        time.sleep(1)
+                        continue
+
+                    show_progress = progress_data.get("show_progress", True)
+                    if not show_progress:
+                        if pbar_task is not None:
+                            pbar.stop()
+                            pbar_task = None
                         time.sleep(1)
                         continue
 

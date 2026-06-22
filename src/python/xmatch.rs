@@ -116,20 +116,16 @@ pub(crate) mod py_xmatch {
             progress_file,
         };
 
-        let phase_1_cl = || {
-            xmatch::phase_1::run_phase_1(xmatch_path, xmatch_data, cat_data, xmatch_options)
-                .unwrap();
-        };
+        let phase_1_cl =
+            || xmatch::phase_1::run_phase_1(xmatch_path, xmatch_data, cat_data, xmatch_options);
 
         // We need to detach the Python GIL to allow logging inside the Rayon threads.
         if *LOGGER_USE_TRACE.get().unwrap() {
             log::trace!("Detaching GIL for phase 1 with trace logging.");
-            py.detach(phase_1_cl);
+            return py.detach(phase_1_cl);
         } else {
-            phase_1_cl();
+            return phase_1_cl();
         }
-
-        Ok(())
     }
 
     #[pyfunction(name = "run_phase_2")]
@@ -148,20 +144,16 @@ pub(crate) mod py_xmatch {
             progress_file,
         };
 
-        let phase_2_cl = || {
-            xmatch::phase_2::run_phase_2(xmatch_path, xmatch_data, cat_data, xmatch_options)
-                .unwrap();
-        };
+        let phase_2_cl =
+            || xmatch::phase_2::run_phase_2(xmatch_path, xmatch_data, cat_data, xmatch_options);
 
         // We need to detach the Python GIL to allow logging inside the Rayon threads.
         if *LOGGER_USE_TRACE.get().unwrap() {
             log::trace!("Detaching GIL for phase 2 with trace logging.");
-            py.detach(phase_2_cl);
+            return py.detach(phase_2_cl);
         } else {
-            phase_2_cl();
+            return phase_2_cl();
         }
-
-        Ok(())
     }
 
     #[pyfunction(name = "run_phase_3")]
@@ -180,20 +172,16 @@ pub(crate) mod py_xmatch {
             progress_file,
         };
 
-        let phase_3_cl = || {
-            xmatch::phase_3::run_phase_3(xmatch_path, xmatch_data, cat_data, xmatch_options)
-                .unwrap();
-        };
+        let phase_3_cl =
+            || xmatch::phase_3::run_phase_3(xmatch_path, xmatch_data, cat_data, xmatch_options);
 
         // We need to detach the Python GIL to allow logging inside the Rayon threads.
         if *LOGGER_USE_TRACE.get().unwrap() {
             log::trace!("Detaching GIL for phase 3 with trace logging.");
-            py.detach(phase_3_cl);
+            return py.detach(phase_3_cl);
         } else {
-            phase_3_cl();
+            return phase_3_cl();
         }
-
-        Ok(())
     }
 
     #[pymodule_init]

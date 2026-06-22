@@ -85,6 +85,7 @@ pub fn sink_lf_to_partitioned_parquet(
     Ok(())
 }
 
+/// Returns the number of rows in a `LazyFrame`.
 pub fn lf_row_count(lf: &LazyFrame) -> Result<u32> {
     let n_rows = lf
         .clone()
@@ -97,4 +98,25 @@ pub fn lf_row_count(lf: &LazyFrame) -> Result<u32> {
         .unwrap();
 
     Ok(n_rows as u32)
+}
+
+/// Collects the schema of a Parquet hive dataset by reading one single file.
+pub fn get_parquet_hive_schema(dataset_path: impl AsRef<Path>) -> Result<Arc<Schema>> {
+    let dataset_path = dataset_path.as_ref();
+
+    // Find the first Parquet file in the dataset.
+    let mut matches = glob::glob(&format!("{}/**/*.parquet", dataset_path.display()))?;
+    let parquet_file = matches.nth(0);
+
+    if let None = parquet_file {
+        anyhow::bail!(
+            "No Parquet files found in dataset at {}",
+            dataset_path.display()
+        );
+    } else {
+        let parquet_file = parquet_file.unwrap().unwrap();
+        let schema = LazyFrame::scan_parquet(to_pl_path(parquet_file)?, Default::default())?
+            .collect_schema()?;
+        Ok(schema)
+    }
 }

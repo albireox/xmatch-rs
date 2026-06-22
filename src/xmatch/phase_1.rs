@@ -276,6 +276,7 @@ fn _xmatch_phase1_join_pk(
         Some(xmatch::tools::ProgressTracker::new(
             progress_file.clone(),
             n_pixels as i32,
+            true,
         ))
     } else {
         None

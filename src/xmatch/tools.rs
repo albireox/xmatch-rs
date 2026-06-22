@@ -9,7 +9,7 @@ use anyhow::{Result, bail};
 use cdshealpix::nested::get;
 use chrono::Utc;
 use glob::glob;
-use polars::prelude::*;
+use polars::{chunked_array::cast::CastOptions, prelude::*};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -22,10 +22,10 @@ use std::{
 
 use crate::{
     hats::tools::PartitionInfo,
-    tools::{lf_row_count, sink_lf_to_partitioned_parquet, to_pl_path},
+    tools::{get_parquet_hive_schema, lf_row_count, sink_lf_to_partitioned_parquet, to_pl_path},
     xmatch::models::{
-        CATALOG_TO_TABLE_SCHEMA, CatalogueModel, CoordUnit, EpochFormat, cast_and_reorder,
-        get_column_dtype,
+        CATALOG_SCHEMA, CATALOG_TO_TABLE_SCHEMA, CatalogueModel, CoordUnit, EpochFormat,
+        cast_and_reorder, get_column_dtype,
     },
 };
 
@@ -116,6 +116,71 @@ pub fn scan_pixel_from_hats_dataset(
     // the (order, pixel) of the input. We use the _healpix_29 column for this.
     let lf = lf.filter((col("_healpix_29") / lit(4u64.pow((29 - order) as u32))).eq(pixel));
     Ok(Some(lf))
+}
+
+/// Gets the xmatch lazyframe that contains the input pixel at the xmatch order.
+pub fn scan_pixels_from_xmatch_dataset(
+    xmatch_path: PathBuf,
+    table: Option<String>,
+    xmatch_order: u8,
+    pixels: &Vec<u64>,
+) -> Result<LazyFrame> {
+    let xmatch_path = get_xmatch_path_root(xmatch_path).unwrap();
+
+    let dataset_path = if let Some(table) = table.clone() {
+        xmatch_path.join(format!("catalog_to_{}/dataset", table))
+    } else {
+        xmatch_path.join("catalog/dataset")
+    };
+
+    let schema = if let Some(_) = table {
+        // Since ctalog_to_table has the primary key column and we don't know its name or type,
+        // it's easier to just read the schema from one file in the dataset.
+        get_parquet_hive_schema(&dataset_path)?
+    } else {
+        Arc::new(CATALOG_SCHEMA.clone())
+    };
+
+    if !dataset_path.exists() {
+        bail!(
+            "Dataset path not found in xmatch product: {:?}",
+            dataset_path
+        );
+    }
+
+    if pixels.len() == 0 {
+        bail!("No pixels provided to scan from xmatch dataset.");
+    }
+
+    if pixels.len() == 1 {
+        let pixel = pixels[0];
+        let lf = LazyFrame::scan_parquet(
+            to_pl_path(dataset_path)?,
+            ScanArgsParquet {
+                schema: Some(schema),
+                ..Default::default()
+            },
+        )?
+        .filter(col("Norder").eq(lit(xmatch_order)))
+        .filter(col("Npix").eq(lit(pixel)));
+
+        return Ok(lf);
+    }
+
+    // Convert the xmatch_pixels to a Series of Int64. It seems that is_in casts everything to
+    // Int128 internally and it cannot directly cast UInt64. So here we do the casting
+    // with NonStrict, which should be ok since the pixels we use are well within the range of i64.
+    let pixels_series: Series = pixels
+        .into_iter()
+        .collect::<Series>()
+        .cast_with_options(&DataType::Int64, CastOptions::NonStrict)?;
+
+    // Scan the dataset and filter it.
+    let lf = LazyFrame::scan_parquet(to_pl_path(dataset_path)?, Default::default())?
+        .filter(col("Norder").eq(lit(xmatch_order as u32)))
+        .filter(col("Npix").is_in(lit(pixels_series).implode(false), false));
+
+    Ok(lf)
 }
 
 /// Helper function to find the root of a path by looking for a specific file in the directory or its parents.
@@ -600,11 +665,13 @@ pub fn write_catalog_to_table(
 pub struct CompletionModel {
     pub n_total: i32,
     pub n_completed: i32,
+    pub show_progress: bool,
 }
 
 /// Struct for tracking the progress of a long-running operation and writing it to a file.
 pub struct ProgressTracker {
     progress_file: Mutex<File>,
+    show_progress: bool,
     n_total: i32,
     n_completed: i32,
 }
@@ -612,7 +679,7 @@ pub struct ProgressTracker {
 /// Implementation of the `ProgressTracker` struct.
 impl ProgressTracker {
     /// Creates a new `ProgressTracker` instance with the given progress file path and total count.
-    pub fn new(progress_file: PathBuf, n_total: i32) -> Self {
+    pub fn new(progress_file: PathBuf, n_total: i32, show_progress: bool) -> Self {
         let mut obj = Self {
             progress_file: Mutex::new(
                 OpenOptions::new()
@@ -625,6 +692,7 @@ impl ProgressTracker {
             ),
             n_completed: 0,
             n_total,
+            show_progress,
         };
 
         obj.update_progress(0, n_total).unwrap();
@@ -637,6 +705,7 @@ impl ProgressTracker {
         let completion_model = CompletionModel {
             n_total,
             n_completed,
+            show_progress: self.show_progress,
         };
         let file = self.progress_file.lock().unwrap();
         serde_json::to_writer(&*file, &completion_model)?;
@@ -645,6 +714,11 @@ impl ProgressTracker {
         self.n_total = n_total;
 
         Ok(())
+    }
+
+    /// Sets the `show_progress` flag to `true` or `false`.
+    pub fn set_show_progress(&mut self, show: bool) {
+        self.show_progress = show;
     }
 
     /// Increments the number of completed tasks by one and updates the progress file.
@@ -657,6 +731,7 @@ impl ProgressTracker {
             serde_json::from_reader(&*file).unwrap_or(CompletionModel {
                 n_total: -1,
                 n_completed: 0,
+                show_progress: self.show_progress,
             });
         completion_model.n_completed += 1;
 
