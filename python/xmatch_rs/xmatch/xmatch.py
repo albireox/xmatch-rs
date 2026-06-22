@@ -32,6 +32,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
+from sdsstools import Timer
 from sdsstools.logger import SDSSLogger
 
 from xmatch_rs import console
@@ -485,13 +486,18 @@ class XMatch:
                     self.log.info(f"Skipping complete phase {phase.phase}.")
                     continue
 
-                if phase.phase == 1:
-                    self._run_phase_1(cat_model)
-                elif phase.phase == 2:
-                    self._run_phase_2(cat_model)
-                    break
-                elif phase.phase == 3:
-                    self._run_phase_3(cat_model)
+                with Timer() as timer:
+                    if phase.phase == 1:
+                        self._run_phase_1(cat_model)
+                    elif phase.phase == 2:
+                        self._run_phase_2(cat_model)
+                        break
+                    elif phase.phase == 3:
+                        self._run_phase_3(cat_model)
+
+                self.log.info(
+                    f"Phase {phase.phase} completed in {timer.elapsed:,.2f} seconds."
+                )
 
                 phase.complete = True
                 self.model.write()
