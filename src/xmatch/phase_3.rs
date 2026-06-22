@@ -335,13 +335,24 @@ fn _get_catalog_lf(
     let catalog_lf = propagate_coordinates(catalog_lf, &cat_data, xmatch_data.epoch)?;
 
     // Add the pk column to the catalog schema. This is not totally trivial because we
-    // need to get the dtype first from the live schema.
+    // need to get the dtype first from the live schema. We want it here because that way
+    // we have all the information needed for the catalog_to_table frame as well.
     let mut catalog_schema_pk = CATALOG_SCHEMA.clone();
     let pk_dtype = get_column_dtype(&catalog_lf, "pk")?;
     catalog_schema_pk.insert("pk".into(), pk_dtype);
 
     // Cast the catalog_lf to the correct dtypes and reorder columns.
     let catalog_lf = cast_and_reorder(catalog_lf, &catalog_schema_pk)?;
+
+    // Just in case, remove rows without valid RA/Dec.
+    let null_selector = Some(Selector::ByName {
+        names: Arc::new(["catalogid".into(), "ra".into(), "dec".into()]),
+        strict: true,
+    });
+
+    let catalog_lf = catalog_lf
+        .drop_nans(null_selector.clone())
+        .drop_nulls(null_selector.clone());
 
     // Add the healpix_xmatch column which will be used for partitioning.
     // This is the HEALPix pixel at the xmatch pixelation order.

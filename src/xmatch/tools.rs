@@ -396,13 +396,18 @@ pub fn propagate_coordinates(
     };
 
     // Epoch difference.
-    let epoch_diff = lit(to_epoch) - col("ref_epoch");
+    let epoch_diff = (lit(to_epoch) - col("ref_epoch"))
+        .fill_nan(0.0)
+        .fill_null(0.0);
 
     // ra difference. Note that we need to convert back to on-dec angle and convert to deg/yr.
-    let ra_diff = col("pmra") / cos_dec.clone() * epoch_diff.clone() / lit(3600.0) / lit(1000.0);
+    let ra_diff = col("pmra").fill_null(0.0).fill_null(0.0) / cos_dec.clone() * epoch_diff.clone()
+        / lit(3600.0)
+        / lit(1000.0);
 
     // dec difference in deg/yr.
-    let dec_diff = col("pmdec") * epoch_diff.clone() / lit(3600.0) / lit(1000.0);
+    let dec_diff =
+        col("pmdec").fill_null(0.0).fill_null(0.0) * epoch_diff.clone() / lit(3600.0) / lit(1000.0);
 
     // Update RA and Dec.
     let cat_lf = cat_lf.with_columns([
