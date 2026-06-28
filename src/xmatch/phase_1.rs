@@ -6,13 +6,11 @@
  */
 
 use anyhow::{Result, bail};
-use core::time;
 use num_format::Locale::en;
 use num_format::ToFormattedString;
 use polars::{chunked_array::cast::CastOptions, prelude::*};
 use regex::Regex;
 use std::sync::{Mutex, OnceLock};
-use std::thread::sleep;
 use std::{collections::HashMap, path::PathBuf, thread::available_parallelism};
 
 use crate::hats;
@@ -282,7 +280,7 @@ fn _xmatch_phase1_join_pk(
         None
     };
 
-    let progress_tracker = Arc::new(Mutex::new(progress_tracker));
+    let progress_tracker = Mutex::new(progress_tracker);
 
     // Parallelise the processing of each pixel.
     let pool = crate::tools::create_pool(Some(n_workers))?;
@@ -302,16 +300,21 @@ fn _xmatch_phase1_join_pk(
                     from_cat_data,
                     from_join_column,
                     to_cat_data,
-                    progress_tracker.clone(),
                 )
+                .unwrap();
+
+                // Update the progress tracker.
+                if let Some(tracker) = &mut *progress_tracker.lock().unwrap() {
+                    tracker.increment().unwrap();
+                }
+
+                Ok::<(), anyhow::Error>(())
             })
             .unwrap();
     });
 
     if let Some(tracker) = &mut *progress_tracker.lock().unwrap() {
         tracker.terminate().unwrap();
-        // Sleep a bit to allow the Python process to remove the progress bar.
-        sleep(time::Duration::from_secs(3));
     }
 
     Ok(())
@@ -326,14 +329,7 @@ fn _xmatch_phase1_join_pk_pixel(
     from_cat_data: &CatalogueModel,
     from_join_column: &str,
     to_cat_data: &CatalogueModel,
-    progress_tracker: Arc<Mutex<Option<xmatch::tools::ProgressTracker>>>,
 ) -> Result<()> {
-    let increment_progress = || {
-        if let Some(tracker) = &mut *progress_tracker.lock().unwrap() {
-            tracker.increment().unwrap();
-        }
-    };
-
     log::trace!(
         "{} Processing pixel {} of order {}.",
         LOG_PREFIX.get().unwrap(),
@@ -371,7 +367,6 @@ fn _xmatch_phase1_join_pk_pixel(
     )? {
         lf
     } else {
-        increment_progress();
         return Ok(());
     };
 
@@ -382,7 +377,7 @@ fn _xmatch_phase1_join_pk_pixel(
 
     // Filter the from_lf dataset. Remove any rows with null values in the join column.
     let from_lf = from_lf
-        .select([col(&from_primary_key), col(&from_join_column)])
+        .select([col(&from_primary_key).alias("pk"), col(&from_join_column)])
         .filter(col(&from_join_column).is_not_null());
 
     // Exit early if there are no rows with non-null values in the join column.
@@ -394,7 +389,6 @@ fn _xmatch_phase1_join_pk_pixel(
             from_order,
             from_pixel,
         );
-        increment_progress();
         return Ok(());
     }
 
@@ -433,7 +427,7 @@ fn _xmatch_phase1_join_pk_pixel(
     let added_on = chrono::Utc::now().timestamp_millis();
     let lf = join_lf.with_columns([
         col("catalogid"),
-        col(&from_primary_key),
+        col("pk"),
         col("healpix_29"),
         lit(xmatch_data.version.clone())
             .cast(DataType::String)
@@ -441,9 +435,7 @@ fn _xmatch_phase1_join_pk_pixel(
         lit(Null {}).cast(DataType::Float64).alias("distance"),
         lit(true).alias("best"),
         lit(1_u8).alias("added_by_phase"),
-        lit(added_on)
-            .cast(DataType::Datetime(TimeUnit::Milliseconds, None))
-            .alias("added_on"),
+        lit(added_on).alias("added_on"),
     ]);
 
     // If the resulting lazy frame has no rows, exit early.
@@ -455,7 +447,6 @@ fn _xmatch_phase1_join_pk_pixel(
             from_order,
             from_pixel,
         );
-        increment_progress();
         return Ok(());
     }
 
@@ -479,6 +470,5 @@ fn _xmatch_phase1_join_pk_pixel(
         true,
     )?;
 
-    increment_progress();
     Ok(())
 }

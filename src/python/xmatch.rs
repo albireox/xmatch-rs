@@ -18,6 +18,7 @@ pub(crate) mod py_xmatch {
 
     use crate::xmatch;
     use crate::xmatch::models::{CatalogueModel, XMatchModel, XMatchOptions};
+    use crate::xmatch::tools::{move_temp_files, test_progress_tracker};
 
     // Prevent setting the pyo3_log logger more than once as that fails.
     static LOGGER_SET: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
@@ -94,8 +95,9 @@ pub(crate) mod py_xmatch {
         xmatch_path: PathBuf,
         catalogue_name: &str,
         version: &str,
+        phase: Option<usize>,
     ) -> Result<()> {
-        xmatch::tools::delete_catalogue_from_dataset(xmatch_path, catalogue_name, version)?;
+        xmatch::tools::delete_catalogue_from_dataset(xmatch_path, catalogue_name, version, phase)?;
 
         Ok(())
     }
@@ -120,12 +122,8 @@ pub(crate) mod py_xmatch {
             || xmatch::phase_1::run_phase_1(xmatch_path, xmatch_data, cat_data, xmatch_options);
 
         // We need to detach the Python GIL to allow logging inside the Rayon threads.
-        if *LOGGER_USE_TRACE.get().unwrap() {
-            log::trace!("Detaching GIL for phase 1 with trace logging.");
-            return py.detach(phase_1_cl);
-        } else {
-            return phase_1_cl();
-        }
+        log::trace!("Detaching GIL for phase 1 with trace logging.");
+        py.detach(phase_1_cl)
     }
 
     #[pyfunction(name = "run_phase_2")]
@@ -148,12 +146,8 @@ pub(crate) mod py_xmatch {
             || xmatch::phase_2::run_phase_2(xmatch_path, xmatch_data, cat_data, xmatch_options);
 
         // We need to detach the Python GIL to allow logging inside the Rayon threads.
-        if *LOGGER_USE_TRACE.get().unwrap() {
-            log::trace!("Detaching GIL for phase 2 with trace logging.");
-            return py.detach(phase_2_cl);
-        } else {
-            return phase_2_cl();
-        }
+        log::trace!("Detaching GIL for phase 2 with trace logging.");
+        py.detach(phase_2_cl)
     }
 
     #[pyfunction(name = "run_phase_3")]
@@ -176,12 +170,27 @@ pub(crate) mod py_xmatch {
             || xmatch::phase_3::run_phase_3(xmatch_path, xmatch_data, cat_data, xmatch_options);
 
         // We need to detach the Python GIL to allow logging inside the Rayon threads.
-        if *LOGGER_USE_TRACE.get().unwrap() {
-            log::trace!("Detaching GIL for phase 3 with trace logging.");
-            return py.detach(phase_3_cl);
-        } else {
-            return phase_3_cl();
-        }
+        log::trace!("Detaching GIL for phase 3 with trace logging.");
+        py.detach(phase_3_cl)
+    }
+
+    #[pyfunction(name = "move_temporary_files")]
+    pub fn py_move_temporary_files(
+        temp_path: PathBuf,
+        final_path: PathBuf,
+        suffix: Option<String>,
+    ) -> Result<()> {
+        move_temp_files(temp_path, final_path, suffix)?;
+        Ok(())
+    }
+
+    #[pyfunction(name = "test_progress_tracker")]
+    pub fn py_test_progress_tracker(
+        py: Python<'_>,
+        progress_file: PathBuf,
+        log_messages: bool,
+    ) -> Result<()> {
+        py.detach(|| test_progress_tracker(progress_file, log_messages))
     }
 
     #[pymodule_init]

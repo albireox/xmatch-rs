@@ -228,7 +228,26 @@ pub static CATALOG_TO_TABLE_SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
 });
 
 /// Casts the input `LazyFrame` to match the target schema and reorders the columns accordingly.
-pub fn cast_and_reorder(lf: LazyFrame, target_schema: &Schema) -> Result<LazyFrame> {
+pub fn cast_and_reorder(
+    lf: LazyFrame,
+    target_schema: &Schema,
+    rename_pk: Option<String>,
+) -> Result<LazyFrame> {
+    let mut target_schema = target_schema.clone();
+
+    // If we passed a lf with the "pk" columnm we want to rename it but we also need to
+    // add it to the schema with the new name.
+    if let Some(rename_pk) = rename_pk.clone() {
+        let pk_dtype = get_column_dtype(&lf, "pk")?;
+        target_schema.insert_at_index(1, rename_pk.into(), pk_dtype)?;
+    }
+
+    let lf = if let Some(rename_pk) = rename_pk {
+        lf.rename(["pk"], [rename_pk.as_str()], true)
+    } else {
+        lf
+    };
+
     // Create a hashmap with the target schema fields and datatypes.
     let cast_from_schema = PlHashMap::from_iter(
         target_schema

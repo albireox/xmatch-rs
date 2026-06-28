@@ -26,3 +26,4 @@ __version__ = get_package_version(package_name=NAME)
 
 from .hats import HATS
 from .schema import Schema
+from .xmatch import XMatch

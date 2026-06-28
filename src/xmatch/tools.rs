@@ -22,10 +22,11 @@ use std::{
 
 use crate::{
     hats::tools::PartitionInfo,
+    tools::IsEmpty,
     tools::{get_parquet_hive_schema, lf_row_count, sink_lf_to_partitioned_parquet, to_pl_path},
     xmatch::models::{
         CATALOG_SCHEMA, CATALOG_TO_TABLE_SCHEMA, CatalogueModel, CoordUnit, EpochFormat,
-        cast_and_reorder, get_column_dtype,
+        cast_and_reorder,
     },
 };
 
@@ -155,7 +156,7 @@ pub fn scan_pixels_from_xmatch_dataset(
     if pixels.len() == 1 {
         let pixel = pixels[0];
         let lf = LazyFrame::scan_parquet(
-            to_pl_path(dataset_path)?,
+            to_pl_path(dataset_path.clone())?,
             ScanArgsParquet {
                 schema: Some(schema),
                 ..Default::default()
@@ -253,22 +254,25 @@ pub fn get_max_catalogid(
     let xmatch_path = get_xmatch_path_root(xmatch_path.unwrap())?;
 
     // Read the dataset. Use a schema so that even if it's empty we get the catalogid column.
-    let schema = Schema::from_iter(vec![Field::new(
-        PlSmallStr::from("catalogid"),
-        DataType::UInt64,
-    )]);
-
     let lf = LazyFrame::scan_parquet(
         to_pl_path(xmatch_path.join("catalog/dataset"))?,
         ScanArgsParquet {
-            schema: Some(Arc::new(schema)),
-            allow_missing_columns: true,
+            schema: Some(Arc::new(CATALOG_SCHEMA.clone())),
             ..Default::default()
         },
     )?
     .select([col("catalogid")]);
 
     if let Some(run_id) = run_id {
+        // Get the maximum catalogid. If that catalogid matches the run_id we are done and we don't
+        // need to do the expensive bit-shifting operation bellow.
+        let max_catalogid = get_max_catalogid(Some(xmatch_path), None, false)?;
+
+        if (max_catalogid >> RUN_ID_BIT_SHIFT) == run_id as u64 {
+            update_run_id_cache(run_id, max_catalogid);
+            return Ok(max_catalogid);
+        }
+
         // Calculate the maximum catalogid for the given run_id.
         let max_cid_df = lf
             .with_columns([col("catalogid")
@@ -499,31 +503,44 @@ pub fn delete_catalogue_from_dataset(
     xmatch_path: PathBuf,
     catalogue_name: &str,
     version: &str,
+    phase: Option<usize>,
 ) -> Result<()> {
     let xmatch_path = get_xmatch_path_root(xmatch_path)?;
 
     // For the catalog dataset, iterate over each Parquet file and filter out the
     // entries for the catalogue. This should be faster than repartitioning.
-    if let Ok(paths) = glob::glob(&format!(
-        "{}/Norder=*/Dir=*/Npix=*/*.parquet",
-        xmatch_path.join("catalog/dataset").to_string_lossy()
-    )) {
-        for path in paths {
-            if let Ok(path) = path {
-                let lf = LazyFrame::scan_parquet(to_pl_path(&path)?, Default::default())?;
-                let filtered_lf = lf
-                    .filter(col("added_by").eq(lit(catalogue_name)).not())
-                    .filter(col("version").eq(lit(version)).not());
+    // If phase is provided, we only do this if phase=3 because it's the only phase that
+    // writes to the catalog dataset.
+    if phase.is_none() || (phase.is_some() && phase.unwrap() == 3) {
+        if let Ok(paths) = glob::glob(&format!(
+            "{}/Norder=*/Dir=*/Npix=*/*.parquet",
+            xmatch_path.join("catalog/dataset").to_string_lossy()
+        )) {
+            for path in paths {
+                if let Ok(path) = path {
+                    let lf = LazyFrame::scan_parquet(to_pl_path(&path)?, Default::default())?;
 
-                filtered_lf
-                    .sink(
-                        SinkDestination::File {
-                            target: SinkTarget::Path(to_pl_path(path)?),
-                        },
-                        FileWriteFormat::Parquet(Arc::new(ParquetWriteOptions::default())),
-                        UnifiedSinkArgs::default(),
-                    )?
-                    .collect_with_engine(Engine::Streaming)?;
+                    let expr = col("added_by")
+                        .eq(lit(catalogue_name))
+                        .and(col("version").eq(lit(version)));
+
+                    let filtered_lf = lf.filter(expr.not());
+
+                    if filtered_lf.is_empty() {
+                        std::fs::remove_file(&path)?;
+                        continue;
+                    }
+
+                    filtered_lf
+                        .sink(
+                            SinkDestination::File {
+                                target: SinkTarget::Path(to_pl_path(path)?),
+                            },
+                            FileWriteFormat::Parquet(Arc::new(ParquetWriteOptions::default())),
+                            UnifiedSinkArgs::default(),
+                        )?
+                        .collect_with_engine(Engine::Streaming)?;
+                }
             }
         }
     }
@@ -542,7 +559,21 @@ pub fn delete_catalogue_from_dataset(
         for path in paths {
             if let Ok(path) = path {
                 let lf = LazyFrame::scan_parquet(to_pl_path(&path)?, Default::default())?;
-                let filtered_lf = lf.filter(col("version").eq(lit(version)).not());
+
+                let expr = col("version").eq(lit(version));
+
+                let expr = if let Some(phase) = phase {
+                    expr.and(col("added_by_phase").eq(lit(phase as u32)))
+                } else {
+                    expr
+                };
+
+                let filtered_lf = lf.filter(expr.not());
+
+                if filtered_lf.is_empty() {
+                    std::fs::remove_file(&path)?;
+                    continue;
+                }
 
                 filtered_lf
                     .sink(
@@ -624,11 +655,7 @@ pub fn write_catalog_to_table(
     run_id: i64,
     use_temporary_path: bool,
 ) -> Result<()> {
-    let pk_dtype = get_column_dtype(&lf, &primary_key)?;
-    let mut catalog_to_table_schema = CATALOG_TO_TABLE_SCHEMA.clone();
-    catalog_to_table_schema.insert_at_index(1, primary_key.clone().into(), pk_dtype)?;
-
-    let lf = cast_and_reorder(lf, &catalog_to_table_schema)?;
+    let lf = cast_and_reorder(lf, &CATALOG_TO_TABLE_SCHEMA, Some(primary_key.clone()))?;
 
     let xmatch_path = get_xmatch_path_root(xmatch_path.as_ref().to_path_buf())?;
 
@@ -676,6 +703,7 @@ pub struct CompletionModel {
 /// Struct for tracking the progress of a long-running operation and writing it to a file.
 pub struct ProgressTracker {
     progress_file: Mutex<File>,
+    progress_file_path: PathBuf,
     show_progress: bool,
     n_total: i32,
     n_completed: i32,
@@ -692,9 +720,10 @@ impl ProgressTracker {
                     .write(true)
                     .create(true)
                     .truncate(true)
-                    .open(progress_file)
+                    .open(&progress_file)
                     .unwrap(),
             ),
+            progress_file_path: progress_file,
             n_completed: 0,
             n_total,
             show_progress,
@@ -752,7 +781,77 @@ impl ProgressTracker {
 
     /// Sets `n_completed` to `n_total` and updates the progress file.
     pub fn terminate(&mut self) -> Result<()> {
+        self.set_show_progress(false);
         self.update_progress(self.n_total, self.n_total)?;
+        std::fs::remove_file(&self.progress_file_path)?;
+
+        std::thread::sleep(std::time::Duration::from_secs(3));
+
         Ok(())
     }
+}
+
+/// Sinks a lazy frame to a Parquet file, creating the pixel directory structure.
+pub fn sink_lazyframe_pixel(
+    lf: LazyFrame,
+    base_path: PathBuf,
+    order: u8,
+    pixel: u64,
+    use_uuid: bool,
+) -> Result<()> {
+    let pixel_path = base_path
+        .join(format!("Norder={}", order))
+        .join(format!("Dir={}", (pixel / 10000) * 10000))
+        .join(format!("Npix={}", pixel));
+
+    let filename = if use_uuid {
+        let mut uuid_part = uuid::Uuid::new_v4().to_string();
+        uuid_part = uuid_part.replace("-", "");
+
+        format!("{}-00.parquet", uuid_part)
+    } else {
+        "part-00.parquet".to_string()
+    };
+
+    let file_path = pixel_path.join(filename);
+    std::fs::create_dir_all(&pixel_path)?;
+
+    lf.sink(
+        SinkDestination::File {
+            target: SinkTarget::Path(to_pl_path(file_path)?),
+        },
+        FileWriteFormat::Parquet(Arc::new(ParquetWriteOptions::default())),
+        UnifiedSinkArgs::default(),
+    )?
+    .collect_with_engine(Engine::Streaming)?;
+
+    Ok(())
+}
+
+/// Adds the healpix_xmatch column to a lazy frame.
+pub fn add_healpix_xmatch_column(lf: LazyFrame, xmatch_order: u8) -> Result<LazyFrame> {
+    let lf = lf.with_column(
+        (col("healpix_29") / lit(4_u64.pow((29 - xmatch_order) as u32)).cast(DataType::UInt64))
+            .alias("healpix_xmatch"),
+    );
+
+    Ok(lf)
+}
+
+/// Tests the progress tracker.
+pub fn test_progress_tracker(progress_file: PathBuf, log_messages: bool) -> Result<()> {
+    let mut tracker = ProgressTracker::new(progress_file.clone(), 10, true);
+
+    for i in 0..10 {
+        if log_messages {
+            log::info!("Progress: {}/10", i + 1);
+        }
+
+        tracker.increment()?;
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+    }
+
+    tracker.terminate()?;
+
+    Ok(())
 }

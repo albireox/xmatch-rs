@@ -11,10 +11,11 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
-import multiprocessing
 import os
 import pathlib
 import shutil
+import tempfile
+import threading
 import time
 from logging.handlers import MemoryHandler
 from tempfile import NamedTemporaryFile
@@ -28,6 +29,7 @@ from rich.progress import (
     MofNCompleteColumn,
     Progress,
     SpinnerColumn,
+    TaskID,
     TextColumn,
     TimeRemainingColumn,
 )
@@ -135,20 +137,23 @@ class XMatch:
         if (self.path / "xmatch.yaml").exists() and not overwrite:
             self.model = XMatchModel.read(self.path / "xmatch.yaml")
 
-            if self.model.version != version:
+            if version is not None and self.model.version != version:
                 self.log.warning(
                     f"Version mismatch: provided version {version!r} does not "
                     f"match version in xmatch.yaml {self.model.version!r}."
                 )
 
-            if self.model.pixelation_order != pixelation_order:
+            if (
+                pixelation_order is not None
+                and self.model.pixelation_order != pixelation_order
+            ):
                 self.log.warning(
                     f"Pixelation order mismatch: provided pixelation order "
                     f"{pixelation_order} does not match pixelation order in "
                     f"xmatch.yaml {self.model.pixelation_order}."
                 )
 
-            if self.model.epoch != epoch:
+            if epoch is not None and self.model.epoch != epoch:
                 self.log.warning(
                     f"Epoch mismatch: provided epoch {epoch} does not match epoch "
                     f"in xmatch.yaml {self.model.epoch}."
@@ -167,6 +172,7 @@ class XMatch:
                 pixelation_order=pixelation_order,
                 catalogues=[],
             )
+            self.path.mkdir(parents=True, exist_ok=True)
             self.model.write(self.path / "xmatch.yaml")
 
         self.version = self.model.version
@@ -435,7 +441,7 @@ class XMatch:
                 polars.col.added_by == cat_model.name,
                 polars.col.version == self.version,
             )
-            if lazy_frame_row_count(catalog_lf) > 0:
+            if lazy_frame_row_count(catalog_lf.limit(1)) > 0:
                 raise RuntimeError(
                     f"Catalogue {cat_model.name!r} already has entries in the catalog "
                     "dataset. Please, remove them before processing this catalogue."
@@ -445,7 +451,7 @@ class XMatch:
             catalog_to_table_lf = catalog_to_table_lf.filter(
                 polars.col.version == self.version,
             )
-            if lazy_frame_row_count(catalog_to_table_lf) > 0:
+            if lazy_frame_row_count(catalog_to_table_lf.limit(1)) > 0:
                 if not any([phase.complete for phase in cat_model.phases]):
                     raise RuntimeError(
                         f"Catalogue {cat_model.name!r} already has entries in the "
@@ -481,26 +487,32 @@ class XMatch:
 
         # Run each one of the phases for this catalogue.
         try:
-            for phase in cat_model.phases:
-                if phase.complete:
-                    self.log.info(f"Skipping complete phase {phase.phase}.")
-                    continue
+            with Timer() as catalogue_timer:
+                for phase in cat_model.phases:
+                    if phase.complete:
+                        self.log.info(f"Skipping complete phase {phase.phase}.")
+                        continue
 
-                with Timer() as timer:
-                    if phase.phase == 1:
-                        self._run_phase_1(cat_model)
-                    elif phase.phase == 2:
-                        self._run_phase_2(cat_model)
-                        break
-                    elif phase.phase == 3:
-                        self._run_phase_3(cat_model)
+                    with Timer() as phase_timer:
+                        if phase.phase == 1:
+                            self._run_phase_1(cat_model)
+                        elif phase.phase == 2:
+                            self._run_phase_2(cat_model)
+                        elif phase.phase == 3:
+                            self._run_phase_3(cat_model)
+
+                    self.log.info(
+                        f"Phase {phase.phase} completed in "
+                        f"{phase_timer.elapsed:,.2f} seconds."
+                    )
+
+                    phase.complete = True
+                    self.model.write()
 
                 self.log.info(
-                    f"Phase {phase.phase} completed in {timer.elapsed:,.2f} seconds."
+                    f"Catalogue {cat_model.name!r} processed in "
+                    f"{catalogue_timer.elapsed:,.2f} seconds."
                 )
-
-                phase.complete = True
-                self.model.write()
 
         except Exception as err:
             self._raise_with_logfile(err)
@@ -513,7 +525,7 @@ class XMatch:
     def _run_phase_1(self, cat_model: CatalogueModel):
         """Runs phase 1 of the cross-matching process for a catalogue."""
 
-        with ProgressTracker() as progress:
+        with ProgressTracker(log=self.log) as progress:
             xmatch_lib.run_phase_1(
                 xmatch_path=str(self.path),
                 xmatch_model_data=self.model.model_dump_json(),
@@ -525,7 +537,7 @@ class XMatch:
     def _run_phase_2(self, cat_model: CatalogueModel):
         """Runs phase 2 of the cross-matching process for a catalogue."""
 
-        with ProgressTracker() as progress:
+        with ProgressTracker(log=self.log) as progress:
             xmatch_lib.run_phase_2(
                 xmatch_path=str(self.path),
                 xmatch_model_data=self.model.model_dump_json(),
@@ -537,13 +549,14 @@ class XMatch:
     def _run_phase_3(self, cat_model: CatalogueModel):
         """Runs phase 3 of the cross-matching process for a catalogue."""
 
-        xmatch_lib.run_phase_3(
-            xmatch_path=str(self.path),
-            xmatch_model_data=self.model.model_dump_json(),
-            cat_model_data=cat_model.model_dump_json(),
-            move_files=True,
-            progress_file=None,
-        )
+        with ProgressTracker(log=self.log) as progress:
+            xmatch_lib.run_phase_3(
+                xmatch_path=str(self.path),
+                xmatch_model_data=self.model.model_dump_json(),
+                cat_model_data=cat_model.model_dump_json(),
+                move_files=True,
+                progress_file=str(progress.progress_file),
+            )
 
     def _get_temporary_path(self, cat_model: CatalogueModel) -> pathlib.Path:
         """Returns a temporary path for a catalogue."""
@@ -630,6 +643,46 @@ class XMatch:
             extra_columns="ignore",
         )
 
+    def delete_catalogue(
+        self,
+        catalogue_name: str,
+        phase: int | None = None,
+    ):
+        """Deletes a catalogue from the cross-match dataset.
+
+        Parameters
+        ----------
+        catalogue_name
+            The name of the catalogue to delete.
+        phase
+            The phase of the cross-match process. If `None`, deletes the catalogue
+            from all phases.
+
+        """
+        xmatch_lib.delete_catalogue_from_dataset(
+            str(self.path),
+            catalogue_name,
+            self.version,
+            phase,
+        )
+
+    def _test_progress_tracker(self, log_messages: bool = True):
+        """Tests the progress tracker."""
+
+        progress_file = tempfile.NamedTemporaryFile(delete=False).name
+        print("Using test progress file:", progress_file)
+
+        with ProgressTracker(
+            progress_file=progress_file,
+            show_progress=True,
+            log=self.log,
+            buffer_log_messages=False,
+        ):
+            xmatch_lib.test_progress_tracker(
+                progress_file=progress_file,
+                log_messages=log_messages,
+            )
+
 
 class ProgressTracker:
     """A simple progress tracker for the cross-matching process."""
@@ -639,7 +692,7 @@ class ProgressTracker:
         progress_file: str | pathlib.Path | None = None,
         label: str = "Progress",
         show_progress: bool = True,
-        buffer_log_messages: bool = True,
+        buffer_log_messages: bool = False,
         log: PrefixAdapter | None = None,
     ):
         if progress_file is None:
@@ -657,7 +710,11 @@ class ProgressTracker:
         self.log = log
         self.memory_handler: MemoryHandler | None = None
 
-        self._monitor_process: multiprocessing.Process | None = None
+        self._monitor_process_task: threading.Thread | None = None
+        self._file_process_task: threading.Thread | None = None
+
+        self.pbar: Progress | None = None
+        self.pbar_task: TaskID | None = None
 
     def __enter__(self):
         if not self.show_progress:
@@ -669,7 +726,7 @@ class ProgressTracker:
         # if an error occurs all the messages are flushed.
         if self.buffer_log_messages and self.log:
             self.memory_handler = MemoryHandler(
-                capacity=10,
+                capacity=50,
                 flushLevel=logging.ERROR,
                 target=self.log.logger.sh,
             )
@@ -678,17 +735,17 @@ class ProgressTracker:
             self.log.logger.addHandler(self.memory_handler)
             self.log.logger.removeHandler(self.log.logger.sh)
 
-        self._monitor_process = multiprocessing.Process(
+        self._monitor_process_task = threading.Thread(
             target=self._monitor_progress,
             daemon=True,
         )
-        self._monitor_process.start()
+        self._monitor_process_task.start()
 
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._monitor_process is not None:
-            self._monitor_process.terminate()
+        if self._monitor_process_task is not None:
+            self._monitor_process_task.join(timeout=5)
 
         if self.memory_handler:
             # Flush the memory handler and remove it from the logger.
@@ -700,12 +757,37 @@ class ProgressTracker:
         if self.progress_file.exists():
             self.progress_file.unlink()
 
+        if self.pbar is not None and self.pbar_task is not None:
+            self.pbar.update(self.pbar_task, visible=False)
+            self.pbar.stop()
+
+        self.pbar = None
+        self.pbar_task = None
+
         return False
+
+    def _monitor_file(self) -> None:
+        """Checks if the progress bar does not exist and hides the progress bar."""
+
+        if self.pbar and self.progress_file and not self.progress_file.exists():
+            self.pbar.stop()
+            self.pbar = None
+            self.pbar_task = None
+
+            if self._monitor_process_task is not None:
+                self._monitor_process_task.join(timeout=5)
+                self._monitor_process_task = None
+
+            self.__exit__(None, None, None)
+
+            return
+
+        time.sleep(0.05)
 
     def _monitor_progress(self) -> None:
         """Monitors the progress and updates the progress bar."""
 
-        pbar = Progress(
+        self.pbar = Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
@@ -714,10 +796,19 @@ class ProgressTracker:
             console=console,
             transient=True,
         )
-        pbar_task: int | None = None
+        self.pbar_task: int | None = None
+
+        file_existed = False
 
         while True:
             if self.progress_file.exists():
+                file_existed = True
+
+                self._monitor_file_task = threading.Thread(
+                    target=self._monitor_file,
+                    daemon=True,
+                )
+
                 with open(self.progress_file, "r") as f:
                     try:
                         progress_data = json.load(f)
@@ -729,34 +820,35 @@ class ProgressTracker:
 
                     show_progress = progress_data.get("show_progress", True)
                     if not show_progress:
-                        if pbar_task is not None:
-                            pbar.stop()
-                            pbar_task = None
-                        time.sleep(1)
-                        continue
+                        break
 
                     n_total: int = progress_data.get("n_total", 0)
                     n_completed: int = progress_data.get("n_completed", 0)
 
-                if pbar_task is None and n_total > 0:
-                    pbar_task = pbar.add_task(
+                if self.pbar_task is None and n_total > 0:
+                    self.pbar_task = self.pbar.add_task(
                         self.label,
                         total=n_total,
                     )
-                    pbar.start()
-                elif pbar_task is None:
+                    self.pbar.start()
+                elif self.pbar_task is None:
                     time.sleep(1)
                     continue
 
+                self.pbar.update(self.pbar_task, completed=n_completed, total=n_total)
+                self.pbar.refresh()
+
                 if n_completed >= n_total:
-                    pbar.update(pbar_task, completed=n_completed, total=n_total)
                     break
 
-                pbar.update(pbar_task, completed=n_completed, total=n_total)
+            if file_existed and not self.progress_file.exists():
+                break
 
             time.sleep(1)  # Sleep for a bit before checking again
 
-        if pbar_task is not None:
-            pbar.stop()
+        if self.pbar_task is not None:
+            self.pbar.update(self.pbar_task, visible=False)
+            self.pbar.stop()
+            self.pbar.refresh()
 
         return

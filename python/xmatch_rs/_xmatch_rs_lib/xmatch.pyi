@@ -78,6 +78,7 @@ def delete_catalogue_from_dataset(
     xmatch_path: str | pathlib.Path,
     catalogue_name: str,
     version: str,
+    phase: int | None = None,
 ):
     """Deletes a catalogue from the cross-match dataset.
 
@@ -89,6 +90,9 @@ def delete_catalogue_from_dataset(
         The name of the catalogue to delete.
     version
         The version of the cross-match process.
+    phase
+        The phase of the cross-match process. If `None`, deletes the catalogue
+        from all phases.
 
     """
     ...
@@ -164,6 +168,19 @@ def run_phase_3(
         Whether to move the data to the final output path.
     progress_file
         The path to a file where the progress will be written.
+
+    """
+    ...
+
+def test_progress_tracker(progress_file: str | pathlib.Path, log_messages: bool):
+    """Tests the progress tracker.
+
+    Parameters
+    ----------
+    progress_file
+        The path to a file where the progress will be written.
+    log_messages
+        Whether to log messages to the console during testing.
 
     """
     ...

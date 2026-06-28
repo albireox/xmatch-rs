@@ -10,20 +10,23 @@ use log;
 use num_format::{Locale, ToFormattedString};
 use polars::prelude::*;
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
+use std::thread::available_parallelism;
 
+use crate::hats::tools::PartitionInfo;
 use crate::tools::{
     IsEmpty, PartitionedParquetSinkOptions, lf_row_count, sink_lf_to_partitioned_parquet,
     to_pl_path,
 };
 use crate::xmatch::models::{
     CATALOG_SCHEMA, CATALOG_TO_TABLE_SCHEMA, CatalogueModel, XMatchModel, XMatchOptions,
-    cast_and_reorder, get_column_dtype,
+    cast_and_reorder,
 };
 use crate::xmatch::tools::{
-    add_catalogid, delete_dir_if_empty, get_hats_path_root, get_temp_dir_path,
-    get_unix_timestamp_ms, get_xmatch_path_root, is_directory_empty, move_temp_files,
-    propagate_coordinates,
+    ProgressTracker, add_catalogid, add_healpix_xmatch_column, delete_dir_if_empty,
+    get_hats_path_root, get_temp_dir_path, get_unix_timestamp_ms, get_xmatch_path_root,
+    get_xmatch_pixels, move_temp_files, propagate_coordinates, scan_pixel_from_hats_dataset,
+    scan_pixels_from_xmatch_dataset,
 };
 
 static LOG_PREFIX: OnceLock<String> = OnceLock::new();
@@ -42,7 +45,7 @@ pub fn run_phase_3(
         cat_data.name
     );
 
-    // Load the xmatch dataset.
+    // Get dataset paths.
     let catalog_dataset_path = get_xmatch_path_root(xmatch_path.clone())?.join("catalog/dataset");
     let hats_dataset_path = get_hats_path_root(cat_data.hats_path.clone())?.join("object/dataset");
 
@@ -91,17 +94,123 @@ pub fn run_phase_3(
     // In this case it's more efficient to not parallelise and just let Polars do its thing.
     if xmatch_lf.is_empty() {
         log::info!(
-            "{} XMatch dataset is empty. Processing entire catalogue dataset.",
+            "{} XMatch dataset is empty. Processing entire catalogue dataset. No progress bar will be shown.",
             LOG_PREFIX.get().unwrap()
         );
 
         let cat_lf = LazyFrame::scan_parquet(to_pl_path(hats_dataset_path)?, Default::default())?;
         _xmatch_phase3_process_lf(&cat_lf, None, &xmatch_data, &cat_data, &tmp_path)?;
     } else {
-        bail!(
-            "{} Parallel processing of catalogue dataset is not implemented yet.",
-            LOG_PREFIX.get().unwrap()
+        // Use a quarter of the CPUs if n_workers is not specified.
+        let phase = cat_data.get_phase(3).unwrap();
+        let n_workers = phase
+            .n_workers
+            .unwrap_or_else(|| available_parallelism().unwrap().get() / 4);
+
+        log::info!(
+            "{} Processing catalogue dataset in parallel with {} workers.",
+            LOG_PREFIX.get().unwrap(),
+            n_workers
         );
+
+        // Parallelise the processing of each pixel. For each pixel in the catalogue dataset, we
+        // find the associated pixels in the catalog_to_table dataset and reject entries that are
+        // already there (added by phases 1 or 2).
+        let partition_info = PartitionInfo::from_dataset(&hats_dataset_path, true)?;
+
+        // Get a progress tracker.
+        let progress_tracker = if let Some(progress_file) = &xmatch_options.progress_file {
+            Some(ProgressTracker::new(
+                progress_file.clone(),
+                partition_info.len() as i32,
+                true,
+            ))
+        } else {
+            None
+        };
+
+        let progress_tracker = Mutex::new(progress_tracker);
+
+        let pool = crate::tools::create_pool(Some(n_workers))?;
+        pool.install(|| {
+            use rayon::iter::ParallelIterator;
+            use rayon::prelude::*;
+
+            partition_info
+                .into_iter()
+                .par_bridge()
+                .try_for_each(|(order, pixel)| {
+                    // Get the catalogue pixel from the HATS dataset.
+                    let cat_pixel_lf = scan_pixel_from_hats_dataset(
+                        hats_dataset_path.clone(),
+                        order,
+                        pixel,
+                        true,
+                    )?;
+
+                    let cat_pixel = if let Some(cat_pixel_lf) = cat_pixel_lf {
+                        cat_pixel_lf
+                    } else {
+                        return Ok(());
+                    };
+
+                    // Find the associated pixels in the xmatch dataset. We include neighbours because
+                    // the match may be outside the nominal pixel due to proper motion propagation.
+                    let xmatch_pixels =
+                        get_xmatch_pixels(xmatch_data.pixelation_order, order, pixel, true)?;
+
+                    // Scan the relevant pixels.
+                    let xmatch_dataset_path = get_xmatch_path_root(xmatch_path.clone())?;
+
+                    let catalog_to_table_path =
+                        xmatch_dataset_path.join(format!("catalog_to_{}/dataset", cat_data.name));
+
+                    let catalog_to_table_pixel = if catalog_to_table_path.exists() {
+                        scan_pixels_from_xmatch_dataset(
+                            xmatch_dataset_path.clone(),
+                            Some(cat_data.name.clone()),
+                            xmatch_data.pixelation_order,
+                            &xmatch_pixels,
+                        )?
+                    } else {
+                        let pk_dtype = cat_pixel
+                            .clone()
+                            .collect_schema()
+                            .unwrap()
+                            .get(&cat_data.primary_key.clone())
+                            .unwrap()
+                            .clone();
+
+                        let catalog_to_table_df =
+                            DataFrame::empty_with_arc_schema(Arc::new(Schema::from_iter(vec![
+                                Field::new("catalogid".into(), DataType::UInt64),
+                                Field::new(cat_data.primary_key.clone().into(), pk_dtype),
+                            ])));
+
+                        catalog_to_table_df.lazy()
+                    };
+
+                    _xmatch_phase3_process_lf(
+                        &cat_pixel,
+                        Some(&catalog_to_table_pixel),
+                        &xmatch_data,
+                        &cat_data,
+                        &tmp_path,
+                    )?;
+
+                    // Update the progress tracker.
+                    if let Some(tracker) = &mut *progress_tracker.lock().unwrap() {
+                        tracker.increment().unwrap();
+                    }
+
+                    Ok::<(), anyhow::Error>(())
+                })
+                .unwrap();
+        });
+
+        if let Some(tracker) = &mut *progress_tracker.lock().unwrap() {
+            tracker.terminate().unwrap();
+        }
     }
 
     // Log number of rows.
@@ -182,6 +291,8 @@ fn _xmatch_phase3_process_lf(
     cat_data: &CatalogueModel,
     output_path: &PathBuf,
 ) -> Result<()> {
+    let primary_key = cat_data.primary_key.clone();
+
     let cat_lf = cat_lf.clone();
 
     // If a catalog_to_table frame is passed, use it to discard sources that are already
@@ -200,7 +311,7 @@ fn _xmatch_phase3_process_lf(
             },
         )
     } else {
-        cat_lf.clone()
+        cat_lf
     };
 
     // Add the catalogid column.
@@ -216,14 +327,10 @@ fn _xmatch_phase3_process_lf(
         strict: true,
     });
 
-    // Check that the output path is empty.
-    if !is_directory_empty(&output_path) {
-        bail!(
-            "{} Output path {} is not empty.",
-            LOG_PREFIX.get().unwrap(),
-            output_path.display()
-        );
-    }
+    // Cast the catalog_lf to the correct dtypes and reorder columns.
+    let catalog_lf_no_pk = cast_and_reorder(catalog_lf_no_pk, &CATALOG_SCHEMA, None)?;
+    let catalog_lf_no_pk =
+        add_healpix_xmatch_column(catalog_lf_no_pk, xmatch_data.pixelation_order)?;
 
     // Sink the catalog lf to partitioned parquet.
     let catalog_path = output_path.join("catalog/dataset");
@@ -236,15 +343,9 @@ fn _xmatch_phase3_process_lf(
     )?;
 
     // Prepare the catalog_to_table frame.
-    let primary_key = cat_data.primary_key.clone();
-
-    let pk_dtype = get_column_dtype(&catalog_lf, "pk")?;
-    let mut catalog_to_table_schema = CATALOG_TO_TABLE_SCHEMA.clone();
-    catalog_to_table_schema.insert_at_index(1, primary_key.clone().into(), pk_dtype)?;
-
     let catalog_to_table_lf = catalog_lf.select([
         col("catalogid"),
-        col("pk").alias(primary_key),
+        col("pk"),
         col("healpix_29"),
         col("version"),
         lit(Null {}).cast(DataType::Float64).alias("distance"),
@@ -253,15 +354,15 @@ fn _xmatch_phase3_process_lf(
         col("added_on"),
     ]);
 
-    let catalog_to_table_lf = cast_and_reorder(catalog_to_table_lf, &catalog_to_table_schema)?;
+    let catalog_to_table_lf = cast_and_reorder(
+        catalog_to_table_lf,
+        &CATALOG_TO_TABLE_SCHEMA,
+        Some(primary_key.clone()),
+    )?;
 
     // Add the healpix_xmatch column which will be used for partitioning.
-    // This is the HEALPix pixel at the xmatch pixelation order.
-    let catalog_to_table_lf = catalog_to_table_lf.with_column(
-        (col("healpix_29")
-            / lit(4_u64.pow((29 - xmatch_data.pixelation_order) as u32)).cast(DataType::UInt64))
-        .alias("healpix_xmatch"),
-    );
+    let catalog_to_table_lf =
+        add_healpix_xmatch_column(catalog_to_table_lf, xmatch_data.pixelation_order)?;
 
     // Sink the catalog_to_table lf to partitioned parquet.
     let catalog_to_table_name = format!("catalog_to_{}", cat_data.name);
@@ -317,15 +418,7 @@ fn _get_catalog_lf(
                 .alias("ref_epoch"),
         )
     } else {
-        if let Some(ref_epoch) = &cat_data.epoch {
-            columns.push(
-                lit((*ref_epoch).clone())
-                    .cast(DataType::Float32)
-                    .alias("ref_epoch"),
-            )
-        } else {
-            columns.push(lit(Null {}).cast(DataType::Float32).alias("ref_epoch"))
-        }
+        columns.push(lit(Null {}).cast(DataType::Float32).alias("ref_epoch"))
     }
 
     // Select the columns.
@@ -333,16 +426,6 @@ fn _get_catalog_lf(
 
     // Propagate coordinates.
     let catalog_lf = propagate_coordinates(catalog_lf, &cat_data, xmatch_data.epoch)?;
-
-    // Add the pk column to the catalog schema. This is not totally trivial because we
-    // need to get the dtype first from the live schema. We want it here because that way
-    // we have all the information needed for the catalog_to_table frame as well.
-    let mut catalog_schema_pk = CATALOG_SCHEMA.clone();
-    let pk_dtype = get_column_dtype(&catalog_lf, "pk")?;
-    catalog_schema_pk.insert("pk".into(), pk_dtype);
-
-    // Cast the catalog_lf to the correct dtypes and reorder columns.
-    let catalog_lf = cast_and_reorder(catalog_lf, &catalog_schema_pk)?;
 
     // Just in case, remove rows without valid RA/Dec.
     let null_selector = Some(Selector::ByName {
@@ -353,14 +436,6 @@ fn _get_catalog_lf(
     let catalog_lf = catalog_lf
         .drop_nans(null_selector.clone())
         .drop_nulls(null_selector.clone());
-
-    // Add the healpix_xmatch column which will be used for partitioning.
-    // This is the HEALPix pixel at the xmatch pixelation order.
-    let catalog_lf = catalog_lf.with_column(
-        (col("healpix_29")
-            / lit(4_u64.pow((29 - xmatch_data.pixelation_order) as u32)).cast(DataType::UInt64))
-        .alias("healpix_xmatch"),
-    );
 
     Ok(catalog_lf)
 }
