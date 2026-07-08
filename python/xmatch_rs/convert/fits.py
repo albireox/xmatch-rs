@@ -27,7 +27,7 @@ from rich.progress import (
 
 from xmatch_rs import console
 from xmatch_rs.schema import Schema
-from xmatch_rs.tools import get_xmatch_rs_logger, parse_path
+from xmatch_rs.tools import get_xmatch_rs_logger, list_files
 
 
 if TYPE_CHECKING:
@@ -169,7 +169,7 @@ def convert_fits_to_parquet(
     if isinstance(fits_files, (str, pathlib.Path)):
         fits_files = [fits_files]
 
-    fits_paths = parse_path(
+    fits_paths = list_files(
         fits_files,
         extension=r"fits?(\.gz)?",
         recursive=True,
@@ -203,10 +203,10 @@ def convert_fits_to_parquet(
         raise ValueError("A file path provider must be provided in partition mode.")
 
     # Handle parallelisation options.
-    if n_workers == 1:
-        parallelise = False
-    elif parallelise and n_workers is None:
+    if parallelise and n_workers is None:
         n_workers = multiprocessing.cpu_count()
+    if n_workers is None:
+        n_workers = 1
 
     _process_fits_file_partial = functools.partial(
         _process_fits_file,

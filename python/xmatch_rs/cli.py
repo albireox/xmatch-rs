@@ -75,7 +75,7 @@ def hats_cli():
 
 @hats_cli.command("convert")
 @cloup.argument(
-    "data_path",
+    "data_paths",
     nargs=-1,
     required=True,
 )
@@ -228,7 +228,7 @@ def hats_cli():
     help="Allow overwriting existing output directory.",
 )
 def convert(
-    data_path: tuple[str, ...],
+    data_paths: tuple[str, ...],
     collection_path: pathlib.Path,
     schema: pathlib.Path,
     format: Literal["csv", "parquet"] | None,
@@ -273,7 +273,7 @@ def convert(
     )
 
     HATS.convert_to_hats(
-        data_path=list(data_path),
+        data_path=list(data_paths),
         collection_path=collection_path,
         schema=schema,
         format=format,

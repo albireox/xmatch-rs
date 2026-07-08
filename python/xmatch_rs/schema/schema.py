@@ -19,7 +19,7 @@ from pydantic import AnyUrl, BaseModel, ConfigDict, Field, field_validator
 
 from sdsstools import read_yaml_file
 
-from xmatch_rs.tools import get_polars_dtype_from_string
+from xmatch_rs.tools import get_polars_dtype
 
 
 __all__: list[str] = [
@@ -47,6 +47,12 @@ class SourceCatalogueFormat(str, enum.Enum):
     CSV = "csv"
     PARQUET = "parquet"
     FITS = "fits"
+
+    # Supported formats using astropy
+    IPAC = "ipac"
+
+
+ASTROPY_FORMATS = [SourceCatalogueFormat.IPAC]
 
 
 class CoordUnit(str, enum.Enum):
@@ -77,7 +83,7 @@ class Dtype(str, enum.Enum):
     def to_polars_dtype(self) -> Type[polars.DataType]:
         """Converts the Dtype to a Polars data type."""
 
-        return get_polars_dtype_from_string(self.value)
+        return get_polars_dtype(self.value)
 
 
 TableColumn = Annotated[
@@ -584,6 +590,6 @@ class Schema:
                 if column.rename_to is not None:
                     column_name = column.rename_to
 
-            schema[column_name] = get_polars_dtype_from_string(dtype_str)
+            schema[column_name] = get_polars_dtype(dtype_str)
 
         return polars.Schema(schema)

@@ -15,7 +15,7 @@ import re
 import shutil
 import time
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import polars
 from rich.progress import (
@@ -32,6 +32,7 @@ from sdsstools import Timer, read_yaml_file
 import xmatch_rs._xmatch_rs_lib.hats as _rs_hats
 from xmatch_rs import console
 from xmatch_rs.convert import (
+    convert_astropy_to_parquet,
     convert_csv_to_parquet,
     convert_fits_to_parquet,
     convert_to_parquet,
@@ -44,8 +45,8 @@ from xmatch_rs.hats.tools import (
     get_dataset_path,
     get_pixel_path,
 )
-from xmatch_rs.schema import Schema
-from xmatch_rs.tools import get_xmatch_rs_logger, lazy_frame_row_count, parse_path
+from xmatch_rs.schema.schema import ASTROPY_FORMATS, Schema
+from xmatch_rs.tools import get_xmatch_rs_logger, lazy_frame_row_count, list_files
 
 
 if TYPE_CHECKING:
@@ -61,7 +62,7 @@ def convert_to_hats_object_catalogue(
     data_path: DATA_PATH_T,
     collection_path: str | pathlib.Path,
     schema: Schema | None,
-    format: Literal["csv", "parquet", "fits"] | None = None,
+    format: str | None = None,
     initial_order: int = 2,
     reference_order: int = 29,
     max_order: int | None = None,
@@ -372,7 +373,7 @@ def _run_hats_healpix_phase(
     model: ConvertToHATSModel,
     phase_name: str,
     log: SDSSLogger,
-    format: Literal["csv", "parquet", "fits"] | None = None,
+    format: str | None = None,
     apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None = None,
     show_progress: bool = True,
     n_workers: int | None = None,
@@ -396,7 +397,7 @@ def _run_hats_healpix_phase(
         if order_0 is None:
             # Determine the file format if not provided.
             if format is None:
-                files = parse_path(data_path)
+                files = list_files(data_path)
                 sample_file = files[0]
                 if re.match(r".*\.csv\.?[gz|bz2]?$", sample_file.name):
                     log.info("Inferred file format as CSV based on file extension.")
@@ -468,7 +469,7 @@ def _run_hats_min_order_phase(
     phase_name: str,
     order_1: int,
     log: SDSSLogger,
-    format: Literal["csv", "parquet", "fits"] | None = None,
+    format: str,
     apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None = None,
     show_progress: bool = True,
     n_workers: int | None = None,
@@ -559,6 +560,32 @@ def _run_hats_min_order_phase(
                 fits_files=data_path,
                 schema=schema,
                 output_path=output_path,
+                mode="partition",
+                partition_key=f"_healpix_{order_1}",
+                file_path_provider=hats_file_provider,
+                partition_include_key=False,
+                parallelise=True if n_workers is not None and n_workers > 1 else False,
+                n_workers=n_workers,
+                ra_column=ra_column,
+                dec_column=dec_column,
+                ra_column_unit=ra_column_unit,
+                dec_column_unit=dec_column_unit,
+                healpix_orders=[model.reference_order, order_1],
+                healpix_column_name="_healpix_{order}",
+                apply_callback=apply_callback,
+                show_progress=show_progress,
+                log=log,
+            )
+
+        elif _is_astropy_format(format):
+            log.info(f"Converting {format.upper()} files to HATS.")
+            log.info(f"Performing initial convertion to order {order_1}.")
+
+            convert_astropy_to_parquet(
+                files=data_path,
+                schema=schema,
+                output_path=output_path,
+                format=format.lower(),
                 mode="partition",
                 partition_key=f"_healpix_{order_1}",
                 file_path_provider=hats_file_provider,
@@ -927,3 +954,23 @@ def add_sequential_primary_key(path: pathlib.Path, primary_key_column: str) -> N
         lf.sink_parquet(file, engine="streaming")
 
         pk += nrows
+
+
+def _is_astropy_format(format: str | None) -> bool:
+    """Checks if the provided format is an Astropy format.
+
+    Parameters
+    ----------
+    format : str | None
+        The format to check.
+
+    Returns
+    -------
+    bool
+        True if the format is an Astropy format, False otherwise.
+    """
+
+    if format is None:
+        return False
+
+    return format.lower() in ASTROPY_FORMATS

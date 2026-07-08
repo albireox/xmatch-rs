@@ -30,7 +30,7 @@ from xmatch_rs.convert.callbacks import callbacks, exprs
 from xmatch_rs.expressions import get_healpix
 from xmatch_rs.schema import Schema
 from xmatch_rs.tools import (
-    get_polars_dtype_from_string,
+    get_polars_dtype,
     get_xmatch_rs_logger,
     lazy_frame_row_count,
 )
@@ -420,7 +420,7 @@ def _process_lazy_frame(
 
         cast_to = col_model.cast_to
         if cast_to and col_model.dtype:
-            cast_to_dtype = get_polars_dtype_from_string(cast_to)
+            cast_to_dtype = get_polars_dtype(cast_to)
             lf = lf.with_columns(polars.col(lf_col).cast(cast_to_dtype))
 
         apply_functions = col_model.apply_functions or []

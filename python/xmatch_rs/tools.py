@@ -15,6 +15,7 @@ import re
 
 from typing import Type
 
+import numpy
 import polars
 
 import sdsstools.logger
@@ -24,10 +25,10 @@ from xmatch_rs import console
 
 __all__: list[str] = [
     "lazy_frame_row_count",
-    "get_polars_dtype_from_string",
+    "get_polars_dtype",
     "is_glob_pattern",
     "get_xmatch_rs_logger",
-    "parse_path",
+    "list_files",
     "get_current_time",
 ]
 
@@ -38,13 +39,14 @@ def lazy_frame_row_count(lf: polars.LazyFrame) -> int:
     return lf.select(polars.len()).collect(engine="streaming").item()
 
 
-def get_polars_dtype_from_string(dtype_str: str) -> Type[polars.DataType]:
-    """Retrieves a Polars DataType object from its string representation.
+def get_polars_dtype(dtype: str | numpy.dtype) -> Type[polars.DataType]:
+    """Retrieves a Polars DataType object.
 
     Parameters
     ----------
-        dtype_str
-        The name of the Polars data type as a string (e.g., "Int64", "Utf8", "Date").
+        dtype
+        The name of the Polars data type as a string (e.g., "Int64", "Utf8", "Date"),
+        a numpy dtype string (e.g., "int64", "float32", "u4"), or a numpy dtype object.
 
     Returns
     -------
@@ -53,10 +55,44 @@ def get_polars_dtype_from_string(dtype_str: str) -> Type[polars.DataType]:
 
     """
 
+    if isinstance(dtype, numpy.dtype):
+        dtype = dtype.name
+
+    dtype_str = str(dtype).lower()
+
     try:
         return getattr(polars, dtype_str)
     except AttributeError:
-        raise ValueError(f"'{dtype_str}' is not a valid Polars data type")
+        pass
+
+    if dtype_str in ["int8", "i1"]:
+        return polars.Int8
+    elif dtype_str in ["int16", "i2"]:
+        return polars.Int16
+    elif dtype_str in ["int32", "i4"]:
+        return polars.Int32
+    elif dtype_str in ["int64", "i8"]:
+        return polars.Int64
+    elif dtype_str in ["uint8", "u1"]:
+        return polars.UInt8
+    elif dtype_str in ["uint16", "u2"]:
+        return polars.UInt16
+    elif dtype_str in ["uint32", "u4"]:
+        return polars.UInt32
+    elif dtype_str in ["uint64", "u8"]:
+        return polars.UInt64
+    elif dtype_str in ["float32", "f4"]:
+        return polars.Float32
+    elif dtype_str in ["float64", "f8"]:
+        return polars.Float64
+    elif dtype_str == "bool":
+        return polars.Boolean
+    elif dtype_str.startswith("str") or dtype_str.startswith("u"):
+        return polars.String
+    elif dtype_str.startswith("bytes") or dtype_str.startswith("s"):
+        return polars.Binary
+
+    raise ValueError(f"'{dtype_str}' is not a valid Polars data type")
 
 
 def is_glob_pattern(path_string: str | pathlib.Path) -> bool:
@@ -100,7 +136,7 @@ def get_xmatch_rs_logger(
     return log
 
 
-def parse_path(
+def list_files(
     path: list[str]
     | list[pathlib.Path]
     | list[str | pathlib.Path]
@@ -108,20 +144,23 @@ def parse_path(
     | pathlib.Path,
     extension: str | None = None,
     recursive: bool = False,
+    include_directories: bool = False,
 ) -> list[pathlib.Path]:
-    """Parses a path, with glob pattern support, and returns a list of files.
+    """Lists files in a directory, with glob pattern support.
 
     Parameters
     ----------
     path
-        The path to parse. Can be a string or a pathlib.Path object. Can include glob
-        patterns.
+        The path to list files in. Can be a string or a pathlib.Path object.
+        Can include glob patterns.
     extension
         If provided, only files with this extension will be returned. Matched as
         a regular expression against the file name.
     recursive
         If True, directories will be searched recursively. Ignored if glob patterns
-        are used, as they can already include recursive patterns (e.g., ``**/*.*``).
+        are used, as they can already include recursive patterns (e.g., ``**/*``).
+    include_directories
+        If True, directories will be included in the returned list.
 
     Returns
     -------
@@ -133,24 +172,31 @@ def parse_path(
     if isinstance(path, (str, pathlib.Path)):
         path = [path]
 
+    # Start by getting all the files in the provided paths that match the path
+    # glob pattern, or all files in the directory if no glob pattern is provided.
     path_tmp: list[pathlib.Path | str] = []
     for file in path:
         if is_glob_pattern(file):
             for matched_file in glob.glob(str(file)):
-                path_tmp.append(matched_file)
+                if pathlib.Path(matched_file).is_file() or include_directories:
+                    path_tmp.append(matched_file)
         else:
             path = pathlib.Path(file)
             if path.is_dir():
-                files = path.glob("**/*.*") if recursive else path.glob("*.*")
+                files = path.glob("**/*") if recursive else path.glob("*")
                 for matched_file in files:
-                    path_tmp.append(matched_file)
-            else:
+                    if matched_file.is_file() or include_directories:
+                        path_tmp.append(matched_file)
+            elif path.is_file() or include_directories:
                 path_tmp.append(path)
 
     paths = [pathlib.Path(ff) for ff in path_tmp]
 
     if extension is not None:
-        paths = [ff for ff in paths if re.match(rf".*{extension}$", ff.name)]
+        if not extension.startswith("."):
+            extension = "." + extension
+
+        paths = [ff for ff in paths if re.search(rf"{extension}$", ff.name)]
 
     return paths
 

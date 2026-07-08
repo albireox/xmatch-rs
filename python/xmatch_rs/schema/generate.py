@@ -14,11 +14,13 @@ from typing import Any, Literal
 
 import polars
 import questionary
+from astropy.table import Table
 from questionary import ValidationError, Validator
 
 from xmatch_rs import console
+from xmatch_rs.tools import get_polars_dtype
 
-from .schema import SchemaModel
+from .schema import ASTROPY_FORMATS, SchemaModel
 
 
 __all__ = ["generate_schema"]
@@ -31,6 +33,42 @@ class NameValidator(Validator):
                 message="Please enter a value",
                 cursor_position=len(document.text),
             )
+
+
+class NameValidatorNoSpaces(Validator):
+    def validate(self, document):
+        if len(document.text) == 0:
+            raise ValidationError(
+                message="Please enter a value",
+                cursor_position=len(document.text),
+            )
+
+        if " " in document.text:
+            raise ValidationError(
+                message="Spaces are not allowed",
+                cursor_position=document.text.index(" "),
+            )
+
+        for char in ["/", "\\", ":", "*", "?", '"', "<", ">", "|", "-"]:
+            if char in document.text:
+                raise ValidationError(
+                    message=f"Character {char!r} is not allowed",
+                    cursor_position=document.text.index(char),
+                )
+
+
+def epoch_validator(pmra: str | None, pmdec: str | None, text: str) -> bool | str:
+    """Validates the epoch input."""
+
+    text = text.strip()
+
+    if len(text) > 0:
+        return True
+
+    if pmra is not None or pmdec is not None:
+        return "Epoch is required if proper motion is specified."
+
+    return True
 
 
 def infer_data_format(
@@ -46,6 +84,7 @@ def infer_data_format(
     ----------
     data_path
         Path to the sample dataset.
+        is not recognized.
     csv_has_header
         For CSV files, whether the first row contains column names.
     csv_delimiter
@@ -160,6 +199,7 @@ def generate_schema(
         "Catalogue short name\n",
         qmark="🏷️",
         default=catalogue_name.lower().replace(" ", "_"),
+        validate=NameValidatorNoSpaces,
     ).unsafe_ask()
 
     description: str | None = (
@@ -218,39 +258,55 @@ def generate_schema(
     if data_path:
         if format is None:
             format: str = questionary.select(
-                "format of the sample dataset\n",
+                "Format of the sample dataset\n",
                 choices=[
                     questionary.Choice("CSV", value="csv"),
                     questionary.Choice("Parquet", value="parquet"),
                     questionary.Choice("FITS", value="fits"),
+                    questionary.Choice("IPAC", value="ipac"),
                 ],
             ).unsafe_ask()
 
         try:
-            if format == "csv":
-                df = polars.read_csv(
-                    data_path,
-                    n_rows=1000,
-                    has_header=csv_has_header,
-                    separator=csv_delimiter,
-                    comment_prefix=csv_comment_prefix,
-                    null_values=csv_null_values,
-                )
-            elif format == "parquet":
-                df = polars.read_parquet(data_path, n_rows=1000)
-            elif format == "fits":
-                df = read_fits_to_dataframe(data_path).head(10)
-            else:
-                console.print(f"[red]Unsupported format {format!r}.[/]")
-                return None
+            is_astropy = format in [ff.value.lower() for ff in ASTROPY_FORMATS]
 
-            pl_schema = df.schema
-            for column, dtype in pl_schema.items():
-                source_columns[column] = {
-                    "dtype": str(dtype),
-                    "unit": None,
-                    "description": None,
-                }
+            if not is_astropy:
+                if format == "csv":
+                    df = polars.read_csv(
+                        data_path,
+                        n_rows=1000,
+                        has_header=csv_has_header,
+                        separator=csv_delimiter,
+                        comment_prefix=csv_comment_prefix,
+                        null_values=csv_null_values,
+                    )
+                elif format == "parquet":
+                    df = polars.read_parquet(data_path, n_rows=1000)
+                elif format == "fits":
+                    df = read_fits_to_dataframe(data_path).head(10)
+                else:
+                    console.print(f"[red]Unsupported format {format!r}.[/]")
+                    return None
+
+                pl_schema = df.schema
+                for column, dtype in pl_schema.items():
+                    source_columns[column] = {
+                        "dtype": str(dtype),
+                        "unit": None,
+                        "description": None,
+                    }
+
+            else:
+                qt = Table.read(data_path, format=f"ascii.{format}")
+
+                for cname in qt.columns:
+                    source_columns[cname] = {
+                        "dtype": get_polars_dtype(qt[cname].dtype).__name__,
+                        "unit": str(qt[cname].unit.to_string(format="fits"))
+                        if qt[cname].unit is not None
+                        else None,
+                        "description": qt[cname].description,
+                    }
 
         except Exception as err:
             console.print(f"[red]Error reading data: {err!s}[/]")
@@ -318,7 +374,7 @@ def generate_schema(
             default="degrees",
             choices=[
                 questionary.Choice("Degrees", value="degrees"),
-                questionary.Choice("Hours", value="hours"),
+                questionary.Choice("Radians", value="radians"),
             ],
         ).unsafe_ask()
 
@@ -331,51 +387,67 @@ def generate_schema(
             or None
         )
 
-        pmdec_column: str | None = (
-            questionary.text(
-                "Proper motion in declination column\n",
-                qmark="🧭",
-                default="pmdec" if "pmdec" in source_columns else "",
-            ).unsafe_ask()
-            or None
-        )
-
-        pmra_is_cosdec: bool = questionary.select(
-            "Is the proper motion in right ascension column as true angle?\n",
-            qmark="🧭",
-            choices=[
-                questionary.Choice("Yes", value=True),
-                questionary.Choice("No", value=False),
-            ],
-        ).unsafe_ask()
-
-        epoch: str | None = (
-            questionary.text(
-                "Epoch of the coordinates\n",
-                qmark="📅",
-            ).unsafe_ask()
-            or None
-        )
-
-        if not epoch:
-            epoch_column: str | None = (
+        if pmra_column is not None:
+            pmdec_column: str | None = (
                 questionary.text(
-                    "Epoch column\n",
-                    qmark="📅",
+                    "Proper motion in declination column\n",
+                    qmark="🧭",
+                    default="pmdec" if "pmdec" in source_columns else "",
                 ).unsafe_ask()
                 or None
             )
         else:
-            epoch_column = None
+            pmdec_column: str | None = None
 
-        epoch_format: str = questionary.select(
-            "Epoch format\n",
-            qmark="📅",
-            choices=[
-                questionary.Choice("Julian year", value="jyear"),
-                questionary.Choice("JD", value="JD"),
-            ],
-        ).unsafe_ask()
+        if pmra_column or pmdec_column:
+            pmra_is_cosdec: bool = questionary.select(
+                "Is the proper motion in right ascension column as true angle?\n",
+                qmark="🧭",
+                choices=[
+                    questionary.Choice("Yes", value=True),
+                    questionary.Choice("No", value=False),
+                ],
+            ).unsafe_ask()
+
+            epoch: str | None = (
+                questionary.text(
+                    "Epoch of the coordinates\n",
+                    qmark="📅",
+                ).unsafe_ask()
+                or None
+            )
+
+            if not epoch:
+                epoch_column: str | None = (
+                    questionary.text(
+                        "Epoch column\n",
+                        qmark="📅",
+                    ).unsafe_ask()
+                    or None
+                )
+            else:
+                epoch_column = None
+
+            if epoch is None and epoch_column is None:
+                console.print(
+                    "[red]Either an epoch or an epoch column must be specified.[/]"
+                )
+                return None
+
+            epoch_format: str = questionary.select(
+                "Epoch format\n",
+                qmark="📅",
+                choices=[
+                    questionary.Choice("Julian year", value="jyear"),
+                    questionary.Choice("JD", value="JD"),
+                ],
+            ).unsafe_ask()
+
+        else:
+            pmra_is_cosdec: bool = True
+            epoch: str | None = None
+            epoch_column: str | None = None
+            epoch_format: str | None = None
 
     else:
         ra_column: str | None = None
@@ -434,15 +506,15 @@ def generate_schema(
     table_name: str = questionary.text(
         "Database table name\n",
         qmark="🗄️",
-        default=catalogue_name.lower(),
-        validate=NameValidator,
+        default=short_name.lower().replace(" ", "_"),
+        validate=NameValidatorNoSpaces,
     ).unsafe_ask()
 
     db_schema: str = questionary.text(
         "Database schema\n",
         qmark="🗄️",
         default="catalogdb",
-        validate=NameValidator,
+        validate=NameValidatorNoSpaces,
     ).unsafe_ask()
 
     if not skip_optional:

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from .astropy import *
 from .callbacks import *
 from .convert import *
 from .csv import *

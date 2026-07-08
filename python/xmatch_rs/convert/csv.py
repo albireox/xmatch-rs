@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Literal, Sequence
 import polars
 
 from xmatch_rs.schema import Schema
-from xmatch_rs.tools import get_xmatch_rs_logger, parse_path
+from xmatch_rs.tools import get_xmatch_rs_logger, list_files
 
 
 if TYPE_CHECKING:
@@ -168,7 +168,7 @@ def convert_csv_to_parquet(
     if isinstance(csv_files, (str, pathlib.Path)):
         csv_files = [csv_files]
 
-    csv_paths = parse_path(
+    csv_paths = list_files(
         csv_files,
         extension=r"\.csv.*",
         recursive=False,
