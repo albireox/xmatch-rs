@@ -60,6 +60,8 @@ def add_healpix_29_column(
     schema_table = f'"{schema}"."{table_name}"' if schema else f'"{table_name}"'
 
     offset = 0
+    first = True
+    n_rows = 0
     while True:
         query = f"""
         SELECT {primary_key}, {ra_column}, {dec_column}
@@ -90,9 +92,18 @@ def add_healpix_29_column(
         data.write_database(
             table_name=tmp_table,
             connection=database_uri,
-            if_table_exists="append",
             engine="adbc",
+            if_table_exists="fail"
+            if first
+            else "append",  # See https://github.com/pola-rs/polars/issues/26906
         )
 
         if chunk_size is not None:
             offset += chunk_size
+
+        n_rows += len(data)
+        print(f"Processed {n_rows:,} rows.", end="\r")
+
+        first = False
+
+    print()
