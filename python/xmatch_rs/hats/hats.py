@@ -22,6 +22,7 @@ from xmatch_rs.hats.margin import create_margin_cache
 from xmatch_rs.hats.metadata import create_partition_info, create_properties
 from xmatch_rs.hats.models import HATSPropertiesModel
 from xmatch_rs.hats.object import convert_to_hats_object_catalogue
+from xmatch_rs.hats.tools import calculate_max_proper_motion
 from xmatch_rs.schema import Schema
 from xmatch_rs.tools import get_xmatch_rs_logger
 
@@ -124,7 +125,7 @@ class HATS:
 
         return products
 
-    def get_lazyframe(self, product: str = "object") -> polars.LazyFrame:
+    def get_as_lazyframe(self, product: str = "object") -> polars.LazyFrame:
         """Returns a lazy frame for a given product."""
 
         if product not in self.list_products():
@@ -520,11 +521,13 @@ class HATS:
     def create_margin_cache(
         self,
         margin_name: str,
-        buffer: float,
+        buffer: float | None = None,
         overwrite: bool = False,
         n_workers: int | None = None,
         show_progress: bool = True,
         default_margin: bool = False,
+        epoch: float | None = None,
+        pm_percentile: float = 100.0,
         log: sdsstools.logger.SDSSLogger | None = None,
         quiet: bool = False,
     ):
@@ -553,7 +556,10 @@ class HATS:
         buffer
             The buffer value to use for the margin cache, in arcseconds. This is the
             maximum distance around each HATS partition pixel for which additional
-            sources will be included in the margin cache.
+            sources will be included in the margin cache. If not provided, calculates
+            the buffer based on the maximum proper motion for the given ``epoch``.
+            It is possible to provide a specific ``pm_percentile`` to reject the
+            highest proper motion objects.
         overwrite
             If ``True``, deletes the existing margin cache if it already exists.
             If ``False``, raises an error.
@@ -567,6 +573,13 @@ class HATS:
             collection. If this is the first margin cache being created for the
             collection, it will be set as the default margin regardless of the value
             of this parameter.
+        epoch
+            The epoch, in Julian years, for which to calculate the ``buffer``. Ignored
+            if ``buffer`` is provided.
+        pm_percentile
+            The percentile of the proper motion distribution to use for calculating the
+            ``buffer``. Defaults to 100.0, which means the maximum proper motion is
+            used.
         log
             An optional logger to use for logging the margin cache creation process.
         quiet
@@ -579,6 +592,20 @@ class HATS:
 
         collection_path = self.path
         margin_path = collection_path / margin_name
+
+        if buffer is None:
+            buffer = calculate_max_proper_motion(
+                self,
+                epoch=epoch,
+                percentile=pm_percentile,
+            )
+
+            if buffer is None:
+                raise RuntimeError(
+                    "Cannot calculate the buffer for the margin cache. "
+                    "This usually means that the catalogue does not provide proper "
+                    "motions or that the catalogue schema is incomplete."
+                )
 
         create_margin_cache(
             collection_path=collection_path,

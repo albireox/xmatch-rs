@@ -436,7 +436,7 @@ class XMatch:
         if not skip_checks:
             # Check if the xmatch product catalog or catalog_to_table datasets already
             # have entries for this catalogue.
-            catalog_lf = self.get_lazyframe(table_name=None)
+            catalog_lf = self.get_as_lazyframe(table_name=None)
             catalog_lf = catalog_lf.filter(
                 polars.col.added_by == cat_model.name,
                 polars.col.version == self.version,
@@ -447,7 +447,7 @@ class XMatch:
                     "dataset. Please, remove them before processing this catalogue."
                 )
 
-            catalog_to_table_lf = self.get_lazyframe(table_name=cat_model.name)
+            catalog_to_table_lf = self.get_as_lazyframe(table_name=cat_model.name)
             catalog_to_table_lf = catalog_to_table_lf.filter(
                 polars.col.version == self.version,
             )
@@ -613,7 +613,7 @@ class XMatch:
         # with self.log.without_prefix():
         raise exception_class(message)
 
-    def get_lazyframe(self, table_name: str | None = None) -> polars.LazyFrame:
+    def get_as_lazyframe(self, table_name: str | None = None) -> polars.LazyFrame:
         """Returns a lazy frame with the cross-matched catalogue.
 
         Parameters

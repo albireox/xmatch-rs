@@ -12,9 +12,15 @@ import os
 import pathlib
 import re
 
-from typing import overload
+from typing import TYPE_CHECKING, overload
 
 import polars
+
+from xmatch_rs.schema import EpochFormat
+
+
+if TYPE_CHECKING:
+    from xmatch_rs.hats.hats import HATS
 
 
 __all__ = [
@@ -23,6 +29,7 @@ __all__ = [
     "get_pixel_path",
     "get_dataset_nrows",
     "get_directory_size",
+    "calculate_max_proper_motion",
 ]
 
 
@@ -181,3 +188,122 @@ def dataset_has_duplicates(
     )
 
     return n_duplicates > 0
+
+
+def calculate_max_proper_motion(
+    hats: HATS,
+    epoch: float | None = None,
+    precise: bool = False,
+    percentile: float = 100,
+) -> float | None:
+    """Returns the maximum proper motion in arcsec.
+
+    Given a HATS dataset, returns the maximum expect proper motion for a certain
+    ``epoch``. ``epoch`` must be provided in Julian years. If ``epoch=None`, the
+    maximum proper motion per year is returned. If the catalogue does not provide
+    proper motion information, returns `None`.
+
+    If ``precise`` is True, performs the proper spherical trigonometry calculation
+    of the total proper motion. Otherwise uses the approximation for small angles
+    (i.e., the flat space Pythagorean theorem).
+
+    ``percentile`` allows to define the percentile of the proper motion distribution to
+    return. The default, ``percentile=100``, returns the maximum value.
+
+    """
+
+    if percentile < 0:
+        raise ValueError("Percentile must be a non-negative value.")
+
+    schema = hats.schema
+
+    if (
+        schema.model.pmra_column is None
+        or schema.model.pmdec_column is None
+        or schema.model.dec_column is None
+    ):
+        return None
+
+    ref_epoch: float | None = None
+    ref_epoch_column: str | None = None
+    ref_epoch_format = schema.model.epoch_format
+
+    if epoch:
+        if schema.model.epoch is not None:
+            ref_epoch = schema.model.epoch
+            if ref_epoch_format == EpochFormat.JD:
+                ref_epoch = (ref_epoch - 2451545) / 365.25 + 2000
+        elif schema.model.epoch_column is not None:
+            ref_epoch_column = schema.model.epoch_column
+        else:
+            return None
+
+    # Get maximum proper motion per year.
+    pmra_is_cosdec = schema.model.pmra_is_cosdec
+
+    lf = hats.get_as_lazyframe()
+    lf_pm = (
+        lf.select(
+            dec_rad=polars.col(schema.model.dec_column).radians(),
+            pmra_rad=polars.col(schema.model.pmra_column).radians() / 1000 / 3600,
+            pmdec_rad=polars.col(schema.model.pmdec_column).radians() / 1000 / 3600,
+        )
+        .drop_nulls()
+        .drop_nans()
+    )
+
+    if pmra_is_cosdec is False:
+        lf_pm = lf_pm.with_columns(
+            pmra_rad=polars.col.pmra_rad * polars.col.dec_rad.cos()
+        )
+
+    if precise:
+        lf_pm = lf_pm.with_columns(
+            pm_total_deg=(
+                polars.col.pmra_rad.abs().cos() * polars.col.pmdec_rad.abs().cos()
+            )
+            .arccos()
+            .degrees()
+            * 3600
+        )
+    else:
+        lf_pm = lf_pm.with_columns(
+            pm_total_deg=(polars.col.pmra_rad**2 + polars.col.pmdec_rad**2)
+            .sqrt()
+            .degrees()
+            * 3600
+        )
+
+    if percentile >= 100.0:
+        percentile = 100.0
+
+    if epoch is None or ref_epoch_column is None:
+        if epoch is not None:
+            if ref_epoch is None:
+                raise ValueError("Reference epoch is not available.")
+            if epoch < ref_epoch:
+                raise ValueError(
+                    f"Epoch {epoch} is before catalogue reference epoch {ref_epoch}."
+                )
+
+        max_pm = lf_pm.select(
+            polars.col.pm_total_deg.quantile(percentile / 100.0)
+        ).collect(engine="streaming")
+        max_pm = float(max_pm.item())
+
+        if epoch is None:
+            return max_pm
+        else:
+            assert ref_epoch is not None
+            epoch_diff = epoch - ref_epoch
+            return max_pm * epoch_diff
+
+    assert ref_epoch_column is not None
+
+    max_pm = (
+        lf_pm.select(pm_epoch=polars.col(ref_epoch_column) * polars.col.pm_total_deg)
+        .select(max_pm_epoch=polars.col.pm_epoch.quantile(percentile / 100.0))
+        .collect(engine="streaming")
+    )
+
+    return float(max_pm.item())
