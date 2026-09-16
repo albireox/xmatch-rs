@@ -528,7 +528,10 @@ def _run_hats_min_order_phase(
             if isinstance(data_path, (str, pathlib.Path)):
                 data_path = [data_path]
 
-            lf = polars.scan_parquet([pathlib.Path(p) for p in data_path])
+            lf = polars.scan_parquet(
+                [pathlib.Path(p) for p in data_path],
+                cast_options=polars.ScanCastOptions(integer_cast="allow-float"),
+            )
 
             convert_to_parquet(
                 lf,
