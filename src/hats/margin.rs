@@ -8,7 +8,6 @@
 use std::fs::{OpenOptions, create_dir_all};
 use std::io::{BufReader, Seek};
 use std::sync::Mutex;
-use std::thread::available_parallelism;
 use std::{f64::consts::PI, path::PathBuf};
 
 use anyhow::{Result, bail};
@@ -132,11 +131,7 @@ pub fn create_margin_cache(
         None
     };
     // Determine the number of workers to use.
-    let n_workers = if let Some(n_workers) = options.n_workers {
-        n_workers
-    } else {
-        available_parallelism().unwrap().get()
-    };
+    let n_workers = options.n_workers.unwrap_or(1);
 
     // Run the margin cache creation in parallel for each pixel.
     let pool = crate::tools::create_pool(Some(n_workers))?;

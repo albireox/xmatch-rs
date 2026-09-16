@@ -10,7 +10,6 @@ use std::{
     io::{BufReader, Seek},
     path::PathBuf,
     sync::Mutex,
-    thread::available_parallelism,
 };
 
 use anyhow::{Result, bail};
@@ -169,11 +168,7 @@ pub fn hats_repartition(
         return Ok(pixels);
     }
 
-    let n_workers = if let Some(n_workers) = options.n_workers {
-        n_workers
-    } else {
-        available_parallelism().unwrap().get() / 2
-    };
+    let n_workers = options.n_workers.unwrap_or(1);
 
     if n_workers > 1 {
         // Use a rayon thread pool for parallel processing.
