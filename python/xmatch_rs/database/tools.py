@@ -9,8 +9,33 @@
 from __future__ import annotations
 
 import polars
+import psycopg
+from psycopg.sql import Identifier
 
 from xmatch_rs.expressions import get_healpix
+
+
+def table_exists(database_uri: str, table_name: str, schema: str | None = None):
+    """Check if a table exists in the database."""
+
+    db_conn = psycopg.connect(database_uri)
+    with db_conn.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_name = %s
+                AND table_schema = %s
+            );
+            """,
+            (table_name, schema or "public"),
+        )
+
+        if (result := cursor.fetchone()) is None:
+            return False
+
+        return result[0]
 
 
 def add_healpix_29_column(
@@ -20,7 +45,7 @@ def add_healpix_29_column(
     ra_column: str = "ra",
     dec_column: str = "dec",
     column_name: str = "healpix_29",
-    temporary_schema: str = "sandbox",
+    temp_schema: str = "sandbox",
     chunk_size: int | None = 10_000_000,
 ):
     """Adds a ``healpix_29`` column to a table in the database.
@@ -42,7 +67,7 @@ def add_healpix_29_column(
         The name of the column containing declination values.
     column_name
         The name of the new column to create.
-    temporary_schema
+    temp_schema
         The name of the temporary schema to use for intermediate operations.
     chunk_size
         The size of chunks to process at a time. If None, all rows are processed
@@ -53,11 +78,17 @@ def add_healpix_29_column(
     if "." in table_name:
         schema, table_name = table_name.split(".", 1)
     else:
-        schema = None
+        schema = "public"
 
-    tmp_table = f'"{temporary_schema}"."{table_name}_healpix_29"'
+    schema_table = f"{schema}.{table_name}" if schema else f"{table_name}"
 
-    schema_table = f'"{schema}"."{table_name}"' if schema else f'"{table_name}"'
+    if not table_exists(database_uri, table_name, schema):
+        raise ValueError(f"Table {schema_table} does not exist")
+
+    tmp_table = f"{temp_schema}.{table_name}_healpix_29"
+
+    if table_exists(database_uri, table_name, schema):
+        raise ValueError(f"Temporary table {tmp_table} already exists")
 
     offset = 0
     first = True
@@ -102,8 +133,29 @@ def add_healpix_29_column(
             offset += chunk_size
 
         n_rows += len(data)
-        print(f"Processed {n_rows:,} rows.", end="\r")
+        print(f"\rProcessed {n_rows:,} rows.", end="", flush=True)
 
         first = False
 
     print()
+
+    with psycopg.connect(database_uri) as conn:
+        with conn.cursor() as cur:
+            # print(f"Adding primary key to temporary table {tmp_table} ...")
+            tmp_id = Identifier(temp_schema, f"{table_name}_healpix_29")
+            # cur.execute(t"ALTER TABLE {tmp_id:i} ADD PRIMARY KEY ({primary_key:i})")
+            # cur.execute(t"ANALYZE {tmp_id:i}")
+
+            # print("Adding column to original table...")
+            table_id = Identifier(schema, table_name)
+            # cur.execute(t"ALTER TABLE {table_id:i} ADD COLUMN {column_name:i} BIGINT")
+
+            print("Updating original table with HEALPix values...")
+            cur.execute(
+                t"UPDATE {table_id:i} SET {column_name:i} = "
+                t"(SELECT {column_name:i} FROM {tmp_id:i} WHERE "
+                t"{tmp_id:i}.{primary_key:i} = {table_id:i}.{primary_key:i})"
+            )
+
+            print("Adding index to original table ...")
+            cur.execute(t"CREATE INDEX ON {table_id:i} ({column_name:i})")
