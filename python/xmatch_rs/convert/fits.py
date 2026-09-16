@@ -15,7 +15,7 @@ import pathlib
 from typing import TYPE_CHECKING, Literal, Sequence
 
 import polars
-from astropy.io import fits
+from astropy.table import Table
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -45,7 +45,8 @@ def read_fits_to_dataframe(
 ) -> polars.DataFrame:
     """Reads a FITS file into a Polars DataFrame."""
 
-    data = fits.getdata(fits_path, hdu=hdu)
+    data = Table.read(fits_path, hdu=hdu)
+    data.convert_bytestring_to_unicode()
 
     data_input = {}
     for col in data.dtype.names:
@@ -204,7 +205,7 @@ def convert_fits_to_parquet(
 
     # Handle parallelisation options.
     if parallelise and n_workers is None:
-        n_workers = multiprocessing.cpu_count()
+        n_workers = multiprocessing.cpu_count() // 2
     if n_workers is None:
         n_workers = 1
 
