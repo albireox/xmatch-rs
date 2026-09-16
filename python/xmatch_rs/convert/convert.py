@@ -418,9 +418,11 @@ def _process_lazy_frame(
         if not col_model:
             continue
 
-        cast_to = col_model.cast_to
-        if cast_to and col_model.dtype:
-            cast_to_dtype = get_polars_dtype(cast_to)
+        if col_model.cast_to:
+            cast_to_dtype = get_polars_dtype(col_model.cast_to)
+            lf = lf.with_columns(polars.col(lf_col).cast(cast_to_dtype))
+        elif col_model.dtype:
+            cast_to_dtype = col_model.dtype.to_polars_dtype()
             lf = lf.with_columns(polars.col(lf_col).cast(cast_to_dtype))
 
         apply_functions = col_model.apply_functions or []
@@ -452,7 +454,7 @@ def _process_lazy_frame(
 
                 lf = callbacks[callback_func](lf)
             else:
-                lf = callback_func(lf)  # ty:ignore[call-non-callable]
+                lf = callback_func(lf)
 
     if ra_column_unit != "degrees":
         ra_column_deg = _generate_column_name(
