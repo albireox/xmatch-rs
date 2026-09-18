@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import polars
 import psycopg
+import psycopg.sql as sql
 from psycopg.sql import Identifier
 
 from xmatch_rs.expressions import get_healpix
 
 
-def table_exists(database_uri: str, table_name: str, schema: str | None = None):
+def table_exists(database_uri: str, table_name: str, schema: str | None = None) -> bool:
     """Check if a table exists in the database."""
 
     db_conn = psycopg.connect(database_uri)
@@ -159,3 +160,21 @@ def add_healpix_29_column(
 
             print("Adding index to original table ...")
             cur.execute(t"CREATE INDEX ON {table_id:i} ({column_name:i})")
+def function_to_composed(func: str) -> sql.Composed:
+    """Converts a function call string to a psycopg ``Composed`` object."""
+
+    match = re.match(r"(\w+)\((.*)\)", func)
+    if not match:
+        raise ValueError(f"Invalid function call: {func}")
+
+    func_name, args_str = match.groups()
+    args = [arg.strip() for arg in args_str.split(",") if arg.strip()]
+
+    return sql.Composed(
+        [
+            sql.Identifier(func_name),
+            sql.SQL("("),
+            sql.SQL(", ").join(sql.Identifier(arg) for arg in args),
+            sql.SQL(")"),
+        ]
+    )

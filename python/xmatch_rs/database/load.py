@@ -27,6 +27,8 @@ from rich.progress import (
 )
 
 from xmatch_rs import console
+from xmatch_rs.database import create_table_sql
+from xmatch_rs.database.tools import function_to_composed
 from xmatch_rs.hats.tools import get_pixel_path
 
 
@@ -68,6 +70,7 @@ def write_dataset_to_database(
     table_name: str | None = None,
     schema: str | None = None,
     load_hats_columns: bool = True,
+    create_table: bool = True,
     create_indices: bool = False,
 ) -> None:
     """Loads a HATS dataset into a database.
@@ -97,6 +100,8 @@ def write_dataset_to_database(
     load_hats_columns
         Whether to load the HATS-specific columns (``healpix_29``,
         ``hats_norder``, ...).
+    create_table
+        Whether to create the table defined in the HATS schema if it does not exist.
     create_indices
         Whether to create the indices defined in the ``database.indices`` section
         of the schema after the data has been loaded.
@@ -139,9 +144,21 @@ def write_dataset_to_database(
         raise ConnectionError(f"Could not connect to database {dbname!r}.") from exc
 
     if table_exists is None or not table_exists[0]:
-        raise ValueError(
-            f"Table {schema}.{table_name} does not exist in database {dbname!r}."
-        )
+        if not create_table:
+            raise ValueError(
+                f"Table {schema}.{table_name} does not exist in database {dbname!r}."
+            )
+        else:
+            if show_progress:
+                console.print(
+                    f"Creating table {schema}.{table_name} in database {dbname!r} ..."
+                )
+
+            with psycopg.connect(db_uri) as conn:
+                with conn.cursor() as cursor:
+                    # This is SQL injection of the worst kind but we are generating it
+                    # and we trust the code so let's just do it.
+                    cursor.execute(create_table_sql(hats))  # type: ignore
 
     pbar = Progress(
         SpinnerColumn(),
@@ -215,11 +232,20 @@ def _create_indices(
     with psycopg.connect(db_uri) as conn:
         with conn.cursor() as cursor:
             for index in indices:
-                columns = ", ".join(index) if isinstance(index, list) else index
+                # Depending on the type of index (list of columns, single column, or
+                # function), we need to create the appropriate SQL object for psycopg.
+                if isinstance(index, list):
+                    columns = sql.SQL(", ").join(sql.Identifier(col) for col in index)
+                else:
+                    if "(" in index:
+                        columns = function_to_composed(index)
+                    else:
+                        columns = sql.Identifier(index)
+
+                # Runs the CREATE INDEX statement.
                 cursor.execute(
-                    sql.SQL("CREATE INDEX ON {}.{} ({})").format(
-                        sql.Identifier(schema),
-                        sql.Identifier(table_name),
+                    sql.SQL("CREATE INDEX ON {} ({})").format(
+                        sql.Identifier(schema, table_name),
                         columns,
                     )
                 )
