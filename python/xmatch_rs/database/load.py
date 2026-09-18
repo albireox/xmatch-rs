@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 import polars
 import psycopg
+from psycopg import sql
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -192,7 +193,13 @@ def _create_indices(
         with conn.cursor() as cursor:
             for index in indices:
                 columns = ", ".join(index) if isinstance(index, list) else index
-                cursor.execute(f"CREATE INDEX ON {schema}.{table_name} ({columns});")
+                cursor.execute(
+                    sql.SQL("CREATE INDEX ON {}.{} ({})").format(
+                        sql.Identifier(schema),
+                        sql.Identifier(table_name),
+                        columns,
+                    )
+                )
 
 
 def _write_pixel_to_database(
