@@ -15,6 +15,7 @@ import pathlib
 from typing import TYPE_CHECKING
 
 import polars
+import psycopg
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -66,6 +67,7 @@ def write_dataset_to_database(
     table_name: str | None = None,
     schema: str | None = None,
     load_hats_columns: bool = True,
+    create_indices: bool = False,
 ) -> None:
     """Loads a HATS dataset into a database.
 
@@ -94,6 +96,9 @@ def write_dataset_to_database(
     load_hats_columns
         Whether to load the HATS-specific columns (``healpix_29``,
         ``hats_norder``, ...).
+    create_indices
+        Whether to create the indices defined in the ``database.indices`` section
+        of the schema after the data has been loaded.
 
     """
 
@@ -160,6 +165,34 @@ def write_dataset_to_database(
 
     if pbar_task is not None:
         pbar.stop()
+
+    if create_indices:
+        indices = hats.schema.model.database.indices
+        if len(indices) > 0:
+            if show_progress:
+                console.print("Creating indices ...")
+
+            _create_indices(
+                db_uri,
+                schema=schema,
+                table_name=table_name,
+                indices=indices,
+            )
+
+
+def _create_indices(
+    db_uri: str,
+    schema: str,
+    table_name: str,
+    indices: list[str | list[str]],
+) -> None:
+    """Creates the indices defined in the schema for a table."""
+
+    with psycopg.connect(db_uri) as conn:
+        with conn.cursor() as cursor:
+            for index in indices:
+                columns = ", ".join(index) if isinstance(index, list) else index
+                cursor.execute(f"CREATE INDEX ON {schema}.{table_name} ({columns});")
 
 
 def _write_pixel_to_database(
