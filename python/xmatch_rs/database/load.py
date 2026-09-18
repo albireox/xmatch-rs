@@ -158,7 +158,7 @@ def write_dataset_to_database(
                 with conn.cursor() as cursor:
                     # This is SQL injection of the worst kind but we are generating it
                     # and we trust the code so let's just do it.
-                    cursor.execute(create_table_sql(hats))  # type: ignore
+                    cursor.execute(create_table_sql(hats))  # INJECTION! # type: ignore
 
     pbar = Progress(
         SpinnerColumn(),
