@@ -120,6 +120,29 @@ def write_dataset_to_database(
 
     db_uri = get_database_uri(dbname=dbname, host=host, user=username)
 
+    try:
+        with psycopg.connect(db_uri) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM information_schema.tables
+                        WHERE table_schema = %s
+                          AND table_name = %s
+                    )
+                    """,
+                    (schema, table_name),
+                )
+                table_exists = cursor.fetchone()
+    except psycopg.Error as exc:
+        raise ConnectionError(f"Could not connect to database {dbname!r}.") from exc
+
+    if table_exists is None or not table_exists[0]:
+        raise ValueError(
+            f"Table {schema}.{table_name} does not exist in database {dbname!r}."
+        )
+
     pbar = Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
