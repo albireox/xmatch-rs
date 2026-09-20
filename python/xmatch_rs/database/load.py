@@ -71,7 +71,8 @@ def write_dataset_to_database(
     schema: str | None = None,
     load_hats_columns: bool = True,
     create_table: bool = True,
-    create_indices: bool = False,
+    create_primary_key: bool = True,
+    create_indices: bool = True,
 ) -> None:
     """Loads a HATS dataset into a database.
 
@@ -102,6 +103,9 @@ def write_dataset_to_database(
         ``hats_norder``, ...).
     create_table
         Whether to create the table defined in the HATS schema if it does not exist.
+    create_primary_key
+        Whether to create the primary key defined in the ``primary_key``
+        section of the schema after the data has been loaded.
     create_indices
         Whether to create the indices defined in the ``database.indices`` section
         of the schema after the data has been loaded.
@@ -206,6 +210,20 @@ def write_dataset_to_database(
 
     if pbar_task is not None:
         pbar.stop()
+
+    if create_primary_key:
+        primary_key = hats.schema.model.primary_key
+        if primary_key:
+            if show_progress:
+                console.print("Creating primary key ...")
+
+            with psycopg.connect(db_uri) as conn, conn.cursor() as cursor:
+                cursor.execute(
+                    sql.SQL("ALTER TABLE {} ADD PRIMARY KEY ({})").format(
+                        sql.Identifier(schema, table_name),
+                        primary_key,
+                    )
+                )
 
     if create_indices:
         indices = hats.schema.model.database.indices
