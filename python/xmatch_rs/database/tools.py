@@ -360,7 +360,7 @@ def copy_table(
     create_indices: bool = True,
     create_primary_key: bool = True,
     if_exists: Literal["fail", "replace", "append"] = "fail",
-    chunk_size: int | None = 100_000,
+    chunk_size: int | None = None,
 ) -> None:
     """Copies a table, and optionally its indices, from one database to another.
 
@@ -405,6 +405,11 @@ def copy_table(
 
     target_schema = target_schema or schema
     target_table_name = target_table_name or table_name
+
+    if not table_exists(source_uri, table_name, schema):
+        raise ValueError(
+            f"Table {schema}.{table_name} does not exist in the source database."
+        )
 
     # Get information about columns and pks.
     columns = get_table_columns(source_uri, table_name, schema)
@@ -458,49 +463,27 @@ def copy_table(
 
         tgt_conn.commit()
 
-    # Copy the data from one database to the other, optionally in batches. In the
-    # latter case, use the built-in ctid column to paginate through the source table.
-    with psycopg.connect(source_uri) as src_conn:
-        with psycopg.connect(target_uri) as tgt_conn:
-            with src_conn.cursor() as src_cursor:
-                with tgt_conn.cursor() as tgt_cursor:
-                    copy_in = sql.SQL("COPY {} ({}) FROM STDIN").format(
-                        sql.Identifier(target_schema, target_table_name), columns_ident
-                    )
+    # Copy the data from one database to the other. We do not use batches as it
+    # seems this way of copying things does so in a memory-friendly way.
+    with psycopg.connect(source_uri) as src_conn, src_conn.cursor() as src_cursor:
+        with psycopg.connect(target_uri) as tgt_conn, tgt_conn.cursor() as tgt_cursor:
+            # Lock the table in share mode to prevent concurrent modifications
+            # during the copy.
+            src_cursor.execute(
+                sql.SQL("LOCK TABLE {} IN SHARE MODE").format(source_table_ident)
+            )
 
-                    n_rows = 0
-                    offset = 0
-                    while True:
-                        # Batches are paginated by ctid, which assumes the source
-                        # table is not being concurrently modified during the copy.
-                        if chunk_size is None:
-                            copy_out = sql.SQL("COPY {} ({}) TO STDOUT").format(
-                                source_table_ident,
-                                columns_ident,
-                            )
-                        else:
-                            copy_out = sql.SQL(
-                                "COPY (SELECT {} FROM {} ORDER BY ctid "
-                                "LIMIT {} OFFSET {}) TO STDOUT"
-                            ).format(
-                                columns_ident,
-                                source_table_ident,
-                                sql.Literal(chunk_size),
-                                sql.Literal(offset),
-                            )
+            copy_in = sql.SQL("COPY {} FROM STDIN (FORMAT BINARY)").format(
+                target_table_ident
+            )
+            copy_out = sql.SQL("COPY {} TO STDOUT (FORMAT BINARY)").format(
+                source_table_ident
+            )
 
-                        with src_cursor.copy(copy_out) as src_copy:
-                            with tgt_cursor.copy(copy_in) as tgt_copy:
-                                for data in src_copy:
-                                    tgt_copy.write(data)
-
-                        batch_rows = src_cursor.rowcount or 0
-                        n_rows += batch_rows
-
-                        if chunk_size is None or batch_rows < chunk_size:
-                            break
-
-                        offset += chunk_size
+            with src_cursor.copy(copy_out) as src_copy:
+                with tgt_cursor.copy(copy_in) as tgt_copy:
+                    for data in src_copy:
+                        tgt_copy.write(data)
 
             tgt_conn.commit()
 
