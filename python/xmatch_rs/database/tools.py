@@ -360,7 +360,6 @@ def copy_table(
     create_indices: bool = True,
     create_primary_key: bool = True,
     if_exists: Literal["fail", "replace", "append"] = "fail",
-    chunk_size: int | None = None,
 ) -> None:
     """Copies a table, and optionally its indices, from one database to another.
 
@@ -394,9 +393,6 @@ def copy_table(
         What to do if the target table already exists. One of ``"fail"``,
         ``"replace"``, or ``"append"``. If ``"append"``, the table must already
         have a compatible schema and no new table or indices are created.
-    chunk_size
-        The number of rows to copy per batch. If None, the entire table is
-        copied in a single ``COPY`` statement.
 
     """
 
