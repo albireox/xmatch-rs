@@ -130,20 +130,18 @@ def write_dataset_to_database(
     db_uri = get_database_uri(dbname=dbname, host=host, user=username)
 
     try:
-        with psycopg.connect(db_uri) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT EXISTS (
-                        SELECT 1
-                        FROM information_schema.tables
-                        WHERE table_schema = %s
-                          AND table_name = %s
-                    )
-                    """,
-                    (schema, table_name),
+        with psycopg.connect(db_uri) as conn, conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.tables
+                    WHERE table_schema = %s AND table_name = %s
                 )
-                table_exists = cursor.fetchone()
+                """,
+                (schema, table_name),
+            )
+            table_exists = cursor.fetchone()
     except psycopg.Error as exc:
         raise ConnectionError(f"Could not connect to database {dbname!r}.") from exc
 
@@ -158,11 +156,10 @@ def write_dataset_to_database(
                     f"Creating table {schema}.{table_name} in database {dbname!r} ..."
                 )
 
-            with psycopg.connect(db_uri) as conn:
-                with conn.cursor() as cursor:
-                    # This is SQL injection of the worst kind but we are generating it
-                    # and we trust the code so let's just do it.
-                    cursor.execute(create_table_sql(hats))  # INJECTION! # type: ignore
+            with psycopg.connect(db_uri) as conn, conn.cursor() as cursor:
+                # This is SQL injection of the worst kind but we are generating it
+                # and we trust the code so let's just do it.
+                cursor.execute(create_table_sql(hats))  # INJECTION! # type: ignore
 
     pbar = Progress(
         SpinnerColumn(),
@@ -247,26 +244,25 @@ def _create_indices(
 ) -> None:
     """Creates the indices defined in the schema for a table."""
 
-    with psycopg.connect(db_uri) as conn:
-        with conn.cursor() as cursor:
-            for index in indices:
-                # Depending on the type of index (list of columns, single column, or
-                # function), we need to create the appropriate SQL object for psycopg.
-                if isinstance(index, list):
-                    columns = sql.SQL(", ").join(sql.Identifier(col) for col in index)
+    with psycopg.connect(db_uri) as conn, conn.cursor() as cursor:
+        for index in indices:
+            # Depending on the type of index (list of columns, single column, or
+            # function), we need to create the appropriate SQL object for psycopg.
+            if isinstance(index, list):
+                columns = sql.SQL(", ").join(sql.Identifier(col) for col in index)
+            else:
+                if "(" in index:
+                    columns = function_to_composed(index)
                 else:
-                    if "(" in index:
-                        columns = function_to_composed(index)
-                    else:
-                        columns = sql.Identifier(index)
+                    columns = sql.Identifier(index)
 
-                # Runs the CREATE INDEX statement.
-                cursor.execute(
-                    sql.SQL("CREATE INDEX ON {} ({})").format(
-                        sql.Identifier(schema, table_name),
-                        columns,
-                    )
+            # Runs the CREATE INDEX statement.
+            cursor.execute(
+                sql.SQL("CREATE INDEX ON {} ({})").format(
+                    sql.Identifier(schema, table_name),
+                    columns,
                 )
+            )
 
 
 def _write_pixel_to_database(
