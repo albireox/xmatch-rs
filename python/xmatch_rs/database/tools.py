@@ -16,6 +16,9 @@ import polars
 import psycopg
 import psycopg.sql as sql
 from psycopg.sql import Identifier
+from rich.console import Console
+
+from sdsstools.utils import Timer
 
 from xmatch_rs.expressions import get_healpix
 
@@ -360,6 +363,7 @@ def copy_table(
     create_indices: bool = True,
     create_primary_key: bool = True,
     if_exists: Literal["fail", "replace", "append"] = "fail",
+    verbose: bool = False,
 ) -> None:
     """Copies a table, and optionally its indices, from one database to another.
 
@@ -393,8 +397,12 @@ def copy_table(
         What to do if the target table already exists. One of ``"fail"``,
         ``"replace"``, or ``"append"``. If ``"append"``, the table must already
         have a compatible schema and no new table or indices are created.
+    verbose
+        Whether to print progress messages to the console.
 
     """
+
+    cl = Console(quiet=not verbose)
 
     if if_exists not in ("fail", "replace", "append"):
         raise ValueError("if_exists must be one of 'fail', 'replace', or 'append'.")
@@ -402,10 +410,11 @@ def copy_table(
     target_schema = target_schema or schema
     target_table_name = target_table_name or table_name
 
+    src_qual = f"{schema}.{table_name}"
+    tgt_qual = f"{target_schema}.{target_table_name}"
+
     if not table_exists(source_uri, table_name, schema):
-        raise ValueError(
-            f"Table {schema}.{table_name} does not exist in the source database."
-        )
+        raise ValueError(f"Table {src_qual} does not exist in the source database.")
 
     # Get information about columns and pks.
     columns = get_table_columns(source_uri, table_name, schema)
@@ -413,9 +422,7 @@ def copy_table(
     pk_index_name = get_primary_key_index_name(source_uri, table_name, schema)
 
     if not columns:
-        raise ValueError(
-            f"Table {schema}.{table_name} does not exist or has no columns."
-        )
+        raise ValueError(f"Table {src_qual} does not exist or has no columns.")
 
     target_exists = table_exists(target_uri, target_table_name, target_schema)
 
@@ -427,12 +434,15 @@ def copy_table(
         if target_exists:
             if if_exists == "fail":
                 raise ValueError(
-                    f"Table {target_schema}.{target_table_name} already exists "
-                    "in the target database."
+                    f"Table {tgt_qual} already exists in the target database."
                 )
             elif if_exists == "replace":
                 tgt_cursor.execute(sql.SQL("DROP TABLE {}").format(target_table_ident))
                 target_exists = False
+                cl.print(
+                    f"⚠️ Dropped existing table [blue]{tgt_qual}[/] "
+                    "in destination database."
+                )
 
         if not target_exists:
             tgt_cursor.execute(
@@ -457,6 +467,8 @@ def copy_table(
                 )
             )
 
+            cl.print(f"✅ Created table [blue]{tgt_qual}[/].")
+
         tgt_conn.commit()
 
     # Copy the data from one database to the other. We do not use batches as it
@@ -476,16 +488,30 @@ def copy_table(
                 source_table_ident
             )
 
-            with src_cursor.copy(copy_out) as src_copy:
-                with tgt_cursor.copy(copy_in) as tgt_copy:
-                    for data in src_copy:
-                        tgt_copy.write(data)
+            with (
+                Timer() as timer,
+                cl.status(f"Copying [blue]{src_qual}[/] to [blue]{tgt_qual}[/] ..."),
+                src_cursor.copy(copy_out) as src_copy,
+                tgt_cursor.copy(copy_in) as tgt_copy,
+            ):
+                for data in src_copy:
+                    tgt_copy.write(data)
 
             tgt_conn.commit()
 
+    cl.print(
+        f"✅ Copied [blue]{src_qual}[/] to [blue]{tgt_qual}[/] "
+        f"in {timer.elapsed:,.1f} seconds."
+    )
+
     # Create the primary key in the target table.
     if create_primary_key and pk_columns and if_exists != "append":
-        with psycopg.connect(target_uri) as tgt_conn, tgt_conn.cursor() as tgt_cursor:
+        with (
+            Timer() as timer,
+            cl.status(f"Creating primary key on [blue]{tgt_qual}[/] ..."),
+            psycopg.connect(target_uri) as tgt_conn,
+            tgt_conn.cursor() as tgt_cursor,
+        ):
             tgt_cursor.execute(
                 sql.SQL("ALTER TABLE {} ADD PRIMARY KEY ({})").format(
                     target_table_ident,
@@ -494,13 +520,23 @@ def copy_table(
             )
             tgt_conn.commit()
 
+            cl.print(
+                f"✅ Created primary key on [blue]{tgt_qual}[/] "
+                f"in {timer.elapsed:,.1f} seconds."
+            )
+
     # Create the indices in the target table.
     if create_indices and if_exists != "append":
         index_info = get_index_info(source_uri, table_name, schema)
 
         renamed = (schema, table_name) != (target_schema, target_table_name)
 
-        with psycopg.connect(target_uri) as tgt_conn, tgt_conn.cursor() as tgt_cursor:
+        with (
+            Timer() as timer,
+            cl.status(f"Creating indices on [blue]{tgt_qual}[/] ..."),
+            psycopg.connect(target_uri) as tgt_conn,
+            tgt_conn.cursor() as tgt_cursor,
+        ):
             for index in index_info:
                 # The primary key index was already created above.
                 if create_primary_key and pk_columns and index.name == pk_index_name:
@@ -522,10 +558,15 @@ def copy_table(
                 try:
                     tgt_cursor.execute(new_index_def)
                 except Exception:
-                    print(f"Failed to create index {index_name!r}.")
+                    cl.print(f"⚠️ Failed to create index {index_name!r}.")
                     tgt_conn.rollback()
 
             tgt_conn.commit()
+
+        cl.print(
+            f"✅ Created indices on [blue]{tgt_qual}[/] "
+            f"in {timer.elapsed:,.1f} seconds."
+        )
 
 
 def function_to_composed(func: str) -> sql.Composed:
