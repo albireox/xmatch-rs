@@ -22,19 +22,12 @@ from pydantic import (
     model_serializer,
 )
 
-from xmatch_rs.schema import Schema, SchemaModel
-
 
 __all__: list[str] = ["ConvertToHATSModel", "PhaseModel", "HATSPropertiesModel"]
 
 
 class ConvertToHATSModel(BaseModel):
     """Model representing the conversion to HATS format."""
-
-    catalogue_model: Annotated[
-        SchemaModel,
-        Field(description="The schema to use for the conversion."),
-    ]
 
     object_path: Annotated[
         pathlib.Path,
@@ -90,11 +83,6 @@ class ConvertToHATSModel(BaseModel):
                 return phase
 
         return None
-
-    def get_schema(self) -> Schema:
-        """Returns the schema of the conversion model."""
-
-        return Schema(self.catalogue_model.model_dump())
 
     def add_phase(
         self,

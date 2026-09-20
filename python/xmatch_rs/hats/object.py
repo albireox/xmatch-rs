@@ -96,7 +96,8 @@ def convert_to_hats_object_catalogue(
         along with the necessary metadata files.
     schema
         The schema of the input dataset. Must be a :obj:`~xmatch_rs.schema.Schema`
-        object.
+        object or a path to a schema file. If the schema is not set, we will try
+        to read the schema from the ``_schema.yaml`` file in the collection directory.
     format
         The format of the output files. If not provided, it will be inferred from
         the files in ``data_path``.
@@ -199,26 +200,27 @@ def convert_to_hats_object_catalogue(
 
     dataset_path.mkdir(parents=True, exist_ok=True)
 
+    if schema is None:
+        schema_path = pathlib.Path(collection_path) / "_schema.yaml"
+        if not schema_path.exists():
+            raise ValueError(
+                "No schema provided and no '_schema.yaml' file found in "
+                f"{collection_path!s}."
+            )
+        schema = Schema(schema_path)
+
     # Try to load the _convert.yaml file or create a new instance.
     if (object_path / "_convert.yaml").exists():
         log.info(f"Loading _convert.yaml from {object_path!s}.")
         convert_dict = read_yaml_file(object_path / "_convert.yaml", return_class=dict)
         convert_model = ConvertToHATSModel.model_validate(convert_dict)
         convert_model.object_path = object_path
-        if schema is not None:
-            convert_model.catalogue_model = schema.model
     else:
         if not dynamic_planning:
             raise FileNotFoundError(
                 f"No _convert.yaml file found in {object_path!s} and "
                 "dynamic_planning is False. Please provide a conversion model "
                 "or set dynamic_planning to True.",
-            )
-
-        if schema is None:
-            raise ValueError(
-                "No schema provided and no _convert.yaml file found in the output "
-                "directory. Please provide a schema for the input data.",
             )
 
         # Build the conversion model and the initial phase and

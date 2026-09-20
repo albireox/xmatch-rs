@@ -178,7 +178,7 @@ class HATS:
         schema
             The schema of the input dataset. Can be a Schema object, a path to a schema
             file, or a dictionary representing the schema. If the schema is not set,
-            the function will look for the ``_convert.yaml`` file in the output
+            the function will look for the ``_schema.yaml`` file in the collection
             directory and, if it exists, will read the schema from there.
         format
             The format of the output files. If not provided, it will be inferred from
@@ -274,8 +274,16 @@ class HATS:
         # Load the schema.
         if schema is not None and not isinstance(schema, Schema):
             schema = Schema(schema)
+        elif schema is None:
+            schema_path = pathlib.Path(collection_path) / "_schema.yaml"
+            if not schema_path.exists():
+                raise ValueError(
+                    "No schema provided and no '_schema.yaml' file found in "
+                    f"{collection_path!s}."
+                )
+            schema = Schema(schema_path)
 
-        convert_model = convert_to_hats_object_catalogue(
+        convert_to_hats_object_catalogue(
             data_path=data_path,
             schema=schema,
             collection_path=collection_path,
@@ -295,9 +303,6 @@ class HATS:
             log=log,
             overwrite=overwrite,
         )
-
-        if schema is None:
-            schema = convert_model.get_schema()
 
         # Write the schema file to the root of the collection.
         collection_path = pathlib.Path(collection_path)
