@@ -595,3 +595,173 @@ def function_to_composed(func: str) -> sql.Composed:
             sql.SQL(")"),
         ]
     )
+
+
+def get_row_count(
+    connection_uri: str,
+    table_name: str,
+    schema: str = "public",
+    approximate=True,
+):
+    """Returns the row count for a table.
+
+    Parameters
+    ----------
+    connection_uri
+        The database connection URI.
+    table
+        The table name.
+    schema
+        The schema in which the table lives.
+    approximate
+        If True, returns the approximate row count from the ``pg_class``
+        table (much faster). Otherwise calculates the exact count.
+
+    """
+
+    if not table_exists(connection_uri, table_name, schema):
+        raise ValueError(f"Table {schema}.{table_name} does not exist.")
+
+    with psycopg.connect(connection_uri) as conn, conn.cursor() as cursor:
+        if approximate:
+            cursor.execute(
+                "SELECT reltuples AS approximate_row_count FROM pg_class "
+                "JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace "
+                "WHERE pg_namespace.nspname = %s AND relname = %s;",
+                (
+                    schema,
+                    table_name,
+                ),
+            )
+        else:
+            cursor.execute(
+                sql.SQL("SELECT COUNT(*) FROM {};").format(
+                    sql.Identifier(schema, table_name)
+                )
+            )
+        count = cursor.fetchall()
+
+    return int(count[0][0])
+
+
+def download_table_from_db(
+    database_uri: str,
+    table_name: str,
+    schema: str = "public",
+    output_path: pathlib.Path | str = "./",
+    chunk_size: int | None = 10_000_000,
+    quiet: bool = False,
+    overwrite: bool = False,
+):
+    """Downloads a table from the database and writes it to disk as Parquet files.
+
+    Parameters
+    ----------
+    database_uri
+        The URI of the database to connect to.
+    table_name
+        The name of the table to download.
+    schema
+        The schema of the table.
+    output_path
+        the path where the Parquet files will be saved. Each chunk is saved as
+        ``<output_path>/<table_name>_<NNNN>.parquet``.
+    chunk_size
+        The number of rows to read at a time. Each chunk is saved to a separate
+        Parquet file.
+    quiet
+        If True, suppresses progress messages. Otherwise, prints progress messages
+        to the console.
+    overwrite
+        If True, overwrites existing Parquet files. Otherwise, raises an error if
+        the output files already exist.
+
+    """
+
+    if not table_exists(database_uri, table_name, schema):
+        raise ValueError(
+            f"Table {schema}.{table_name} does not exist or the provided "
+            "database_uri is invalid."
+        )
+
+    output_path = pathlib.Path(output_path)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    cl = Console(quiet=quiet)
+
+    dt = datetime.datetime.now(tz=datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    cl.print(rf"[blue]\[i][/] Starting download process on {dt} UTC.")
+
+    with (
+        Timer() as timer,
+        cl.status(f"Downloading table [blue]{schema}.{table_name}[/] ..."),
+    ):
+        if chunk_size is None:
+            output_file = output_path / f"{table_name}_0001.parquet"
+            if not overwrite and output_file.exists():
+                raise FileExistsError(f"Output file {output_file} already exists.")
+
+            query = f'SELECT * FROM "{schema}"."{table_name}"'
+            df = polars.read_database_uri(query, uri=database_uri, engine="adbc")
+            df.write_parquet(output_path / f"{table_name}.parquet")
+
+        else:
+            n_rows = get_row_count(
+                database_uri,
+                table_name,
+                schema,
+                approximate=True,
+            )
+
+            n_chunks = n_rows // chunk_size + 1
+
+            nn = 1
+            offset = 0
+
+            pk = get_primary_key_columns(database_uri, table_name, schema)
+            if not pk:
+                raise ValueError(
+                    f"Table {schema}.{table_name} has no primary key. "
+                    "A primary key is required to download the table in chunks."
+                )
+            elif len(pk) > 1:
+                raise ValueError(
+                    f"Table {schema}.{table_name} has a composite primary key. "
+                    "A single-column primary key is required to download the table "
+                    "in chunks."
+                )
+
+            with cl.status(f"Downloading chunk {nn} of {n_chunks} ...") as status:
+                while True:
+                    query = (
+                        f'SELECT * FROM "{schema}"."{table_name}" '
+                        f"ORDER BY {pk[0]} LIMIT {chunk_size} OFFSET {offset}"
+                    )
+                    df = polars.read_database_uri(
+                        query,
+                        uri=database_uri,
+                        engine="adbc",
+                    )
+
+                    output_file = output_path / f"{table_name}_{nn:04d}.parquet"
+                    if not overwrite and output_file.exists():
+                        raise FileExistsError(f"File {output_file} already exists.")
+
+                    df.write_parquet(output_file)
+
+                    if df.is_empty() or df.height < chunk_size:
+                        break
+
+                    offset += chunk_size
+                    nn += 1
+
+                    status.update(f"Downloading chunk {nn} of {n_chunks} ...")
+
+    cl.print(
+        f"[green][✔][/] Downloaded table [blue]{schema}.{table_name}[/] "
+        f"in {timer.elapsed:,.1f} seconds."
+    )
+
+    cl.print(rf"[blue]\[i][/] Table saved to [blue]{output_path.absolute()}[/].")
+
+    return
