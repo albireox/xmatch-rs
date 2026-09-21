@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import datetime
+import pathlib
 import re
 
 from typing import Literal, NamedTuple
@@ -406,7 +407,7 @@ def copy_table(
     cl = Console(quiet=not verbose)
 
     dt = datetime.datetime.now(tz=datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    cl.print(f"[blue][i][/] Starting copy process on {dt} UTC.")
+    cl.print(rf"[blue]\[i][/] Starting copy process on {dt} UTC.")
 
     if if_exists not in ("fail", "replace", "append"):
         raise ValueError("if_exists must be one of 'fail', 'replace', or 'append'.")

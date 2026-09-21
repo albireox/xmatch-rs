@@ -121,7 +121,7 @@ def write_dataset_to_database(
     cl = Console(quiet=not verbose)
 
     dt = datetime.datetime.now(tz=datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    cl.print(f"[blue][i][/] Starting DB write process on {dt} UTC.")
+    cl.print(rf"[blue]\[i][/] Starting DB write process on {dt} UTC.")
 
     dataset_path = hats.path / "object"
     if not dataset_path.is_dir():
