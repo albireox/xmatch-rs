@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import datetime
 import re
 
 from typing import Literal, NamedTuple
@@ -404,6 +405,9 @@ def copy_table(
 
     cl = Console(quiet=not verbose)
 
+    dt = datetime.datetime.now(tz=datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    cl.print(f"[blue][i][/] Starting copy process on {dt} UTC.")
+
     if if_exists not in ("fail", "replace", "append"):
         raise ValueError("if_exists must be one of 'fail', 'replace', or 'append'.")
 
@@ -440,7 +444,7 @@ def copy_table(
                 tgt_cursor.execute(sql.SQL("DROP TABLE {}").format(target_table_ident))
                 target_exists = False
                 cl.print(
-                    f"⚠️ Dropped existing table [blue]{tgt_qual}[/] "
+                    f"[yellow][!][/] Dropped existing table [blue]{tgt_qual}[/] "
                     "in destination database."
                 )
 
@@ -467,7 +471,7 @@ def copy_table(
                 )
             )
 
-            cl.print(f"✅ Created table [blue]{tgt_qual}[/].")
+            cl.print(f"[green][✔][/] Created table [blue]{tgt_qual}[/].")
 
         tgt_conn.commit()
 
@@ -500,7 +504,7 @@ def copy_table(
             tgt_conn.commit()
 
     cl.print(
-        f"✅ Copied [blue]{src_qual}[/] to [blue]{tgt_qual}[/] "
+        f"[green][✔][/] Copied [blue]{src_qual}[/] to [blue]{tgt_qual}[/] "
         f"in {timer.elapsed:,.1f} seconds."
     )
 
@@ -521,7 +525,7 @@ def copy_table(
             tgt_conn.commit()
 
             cl.print(
-                f"✅ Created primary key on [blue]{tgt_qual}[/] "
+                f"[green][✔][/] Created primary key on [blue]{tgt_qual}[/] "
                 f"in {timer.elapsed:,.1f} seconds."
             )
 
@@ -555,16 +559,20 @@ def copy_table(
                 )
 
                 # We allow failures while creating indices.
-                try:
-                    tgt_cursor.execute(new_index_def)
-                except Exception:
-                    cl.print(f"⚠️ Failed to create index {index_name!r}.")
-                    tgt_conn.rollback()
+                with cl.status(f"Creating index [blue]{index_name}[/] ..."):
+                    try:
+                        tgt_cursor.execute(new_index_def)
+                    except Exception:
+                        cl.print(
+                            "[yellow][!][/] Failed to create index "
+                            f"[blue]{index_name}[/]."
+                        )
+                        tgt_conn.rollback()
 
             tgt_conn.commit()
 
         cl.print(
-            f"✅ Created indices on [blue]{tgt_qual}[/] "
+            f"[green][✔][/] Created indices on [blue]{tgt_qual}[/] "
             f"in {timer.elapsed:,.1f} seconds."
         )
 
