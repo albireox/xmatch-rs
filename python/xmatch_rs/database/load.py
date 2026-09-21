@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import datetime
 import functools
 import multiprocessing
 import pathlib
@@ -17,6 +18,7 @@ from typing import TYPE_CHECKING
 import polars
 import psycopg
 from psycopg import sql
+from rich.console import Console
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -26,7 +28,8 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-from xmatch_rs import console
+from sdsstools.utils import Timer
+
 from xmatch_rs.database import create_table_sql
 from xmatch_rs.database.tools import function_to_composed
 from xmatch_rs.hats.tools import get_pixel_path
@@ -73,6 +76,7 @@ def write_dataset_to_database(
     create_table: bool = True,
     create_primary_key: bool = True,
     create_indices: bool = True,
+    verbose: bool = False,
 ) -> None:
     """Loads a HATS dataset into a database.
 
@@ -109,8 +113,15 @@ def write_dataset_to_database(
     create_indices
         Whether to create the indices defined in the ``database.indices`` section
         of the schema after the data has been loaded.
+    verbose
+        Whether to print verbose messages while loading the data.
 
     """
+
+    cl = Console(quiet=not verbose)
+
+    dt = datetime.datetime.now(tz=datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    cl.print(f"[blue][i][/] Starting DB write process on {dt} UTC.")
 
     dataset_path = hats.path / "object"
     if not dataset_path.is_dir():
@@ -151,15 +162,15 @@ def write_dataset_to_database(
                 f"Table {schema}.{table_name} does not exist in database {dbname!r}."
             )
         else:
-            if show_progress:
-                console.print(
-                    f"Creating table {schema}.{table_name} in database {dbname!r} ..."
-                )
-
             with psycopg.connect(db_uri) as conn, conn.cursor() as cursor:
                 # This is SQL injection of the worst kind but we are generating it
                 # and we trust the code so let's just do it.
                 cursor.execute(create_table_sql(hats))  # INJECTION! # type: ignore
+
+            cl.print(
+                f"[green][✔][/] Created table [blue]{schema}.{table_name}[/] "
+                f"in database {dbname!r}."
+            )
 
     pbar = Progress(
         SpinnerColumn(),
@@ -167,7 +178,7 @@ def write_dataset_to_database(
         BarColumn(),
         MofNCompleteColumn(),
         TimeRemainingColumn(),
-        console=console,
+        console=cl if verbose else Console(),
         transient=True,
     )
 
@@ -193,13 +204,14 @@ def write_dataset_to_database(
         if n_workers is None:
             n_workers = multiprocessing.cpu_count()
 
-        with multiprocessing.Pool(n_workers) as pool:
-            for _ in pool.imap_unordered(
-                _write_pixel_to_database_partial,
-                pixel_data,
-            ):
-                if pbar_task is not None:
-                    pbar.update(pbar_task, advance=1)
+        with Timer() as timer:
+            with multiprocessing.Pool(n_workers) as pool:
+                for _ in pool.imap_unordered(
+                    _write_pixel_to_database_partial,
+                    pixel_data,
+                ):
+                    if pbar_task is not None:
+                        pbar.update(pbar_task, advance=1)
     except Exception:
         if pbar_task is not None:
             pbar.stop()
@@ -208,60 +220,66 @@ def write_dataset_to_database(
     if pbar_task is not None:
         pbar.stop()
 
+    cl.print(
+        f"[green][✔][/] Loaded dataset into database [blue]{schema}.{table_name}[/] "
+        f"in {timer.elapsed:,.1f} seconds."
+    )
+
     if create_primary_key:
         primary_key = hats.schema.model.primary_key
         if primary_key:
-            if show_progress:
-                console.print("Creating primary key ...")
-
-            with psycopg.connect(db_uri) as conn, conn.cursor() as cursor:
+            with (
+                Timer() as timer,
+                cl.status(f"Creating PK on [blue]{schema}.{table_name}[/] ..."),
+                psycopg.connect(db_uri) as conn,
+                conn.cursor() as cursor,
+            ):
                 cursor.execute(
                     sql.SQL("ALTER TABLE {} ADD PRIMARY KEY ({})").format(
                         sql.Identifier(schema, table_name),
-                        primary_key,
+                        sql.Identifier(primary_key),
                     )
                 )
+
+            cl.print(
+                f"[green][✔][/] Created PK on [blue]{schema}.{table_name}[/] "
+                f"in {timer.elapsed:,.1f} seconds."
+            )
 
     if create_indices:
         indices = hats.schema.model.database.indices
         if len(indices) > 0:
-            if show_progress:
-                console.print("Creating indices ...")
+            with (
+                Timer() as timer,
+                cl.status(f"Creating indices on [blue]{schema}.{table_name}[/] ..."),
+                psycopg.connect(db_uri) as conn,
+                conn.cursor() as cursor,
+            ):
+                for index in indices:
+                    # Depending on the type of index (list of columns, single column, or
+                    # function), we need to create the appropriate SQL object.
+                    if isinstance(index, list):
+                        columns = sql.SQL(", ").join(
+                            sql.Identifier(col) for col in index
+                        )
+                    else:
+                        if "(" in index:
+                            columns = function_to_composed(index)
+                        else:
+                            columns = sql.Identifier(index)
 
-            _create_indices(
-                db_uri,
-                schema=schema,
-                table_name=table_name,
-                indices=indices,
-            )
+                    # Runs the CREATE INDEX statement.
+                    with cl.status(f"Creating index [blue]{index}[/] ..."):
+                        cursor.execute(
+                            sql.SQL("CREATE INDEX ON {} ({})").format(
+                                sql.Identifier(schema, table_name),
+                                columns,
+                            )
+                        )
 
-
-def _create_indices(
-    db_uri: str,
-    schema: str,
-    table_name: str,
-    indices: list[str | list[str]],
-) -> None:
-    """Creates the indices defined in the schema for a table."""
-
-    with psycopg.connect(db_uri) as conn, conn.cursor() as cursor:
-        for index in indices:
-            # Depending on the type of index (list of columns, single column, or
-            # function), we need to create the appropriate SQL object for psycopg.
-            if isinstance(index, list):
-                columns = sql.SQL(", ").join(sql.Identifier(col) for col in index)
-            else:
-                if "(" in index:
-                    columns = function_to_composed(index)
-                else:
-                    columns = sql.Identifier(index)
-
-            # Runs the CREATE INDEX statement.
-            cursor.execute(
-                sql.SQL("CREATE INDEX ON {} ({})").format(
-                    sql.Identifier(schema, table_name),
-                    columns,
-                )
+            cl.print(
+                f"[green][✔][/] Created indices on [blue]{schema}.{table_name}[/] "
+                f"in {timer.elapsed:,.1f} seconds."
             )
 
 
