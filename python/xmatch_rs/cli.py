@@ -599,3 +599,107 @@ def generate_schema(
         return
 
     print(yaml.dump(schema_model.model_dump(mode="json"), sort_keys=False, indent=2))
+
+
+@xmatch_rs_cli.group(
+    "database",
+    cls=NaturalOrderGroup,
+    context_settings={"obj": {}},
+    no_args_is_help=True,
+    help="Handle database operations.",
+)
+def database_cli():
+    """Handle database operations."""
+
+    pass
+
+
+@database_cli.command("load-hats")
+@cloup.argument(
+    "DATABASE_URI",
+    type=str,
+    help="URI of the database to load the HATS collection into.",
+)
+@cloup.argument(
+    "HATS_COLLECTION_PATH",
+    type=cloup.Path(
+        exists=True,
+        path_type=pathlib.Path,
+        file_okay=False,
+    ),
+    help="Path to the HATS collection directory.",
+)
+@cloup.option(
+    "--table",
+    type=str,
+    required=False,
+    help="Name of the table to load the HATS collection into. "
+    "Defaults to the HATS collection short name.",
+)
+@cloup.option(
+    "--schema",
+    type=str,
+    required=False,
+    help="Name of the schema to load the HATS collection into. "
+    "Defaults to the public schema.",
+)
+@cloup.option(
+    "--create-table/--no-create-table",
+    default=True,
+    help="Whether to create the table if it does not exist.",
+)
+@cloup.option(
+    "--create-primary-key/--no-create-primary-key",
+    default=True,
+    help="Whether to create the primary key on the loaded table.",
+)
+@cloup.option(
+    "--create-indices/--no-create-indices",
+    default=True,
+    help="Whether to create the indices on the loaded table.",
+)
+@cloup.option(
+    "--n-workers",
+    "-w",
+    type=int,
+    default=None,
+    help=("Number of worker processes to use."),
+)
+@cloup.option(
+    "--quiet",
+    "-q",
+    is_flag=True,
+    default=False,
+    help="Suppress logging output.",
+)
+def database_load_hats(
+    database_uri: str,
+    hats_collection_path: pathlib.Path,
+    n_workers: int | None = None,
+    quiet: bool = False,
+    table: str | None = None,
+    schema: str | None = None,
+    create_table: bool = True,
+    create_primary_key: bool = True,
+    create_indices: bool = True,
+):
+    """Load a HATS collection into the database."""
+
+    from xmatch_rs.database.load import write_dataset_to_database
+    from xmatch_rs.hats.hats import HATS
+
+    hats = HATS(hats_collection_path)
+
+    table = table or hats.schema.model.short_name.lower()
+
+    write_dataset_to_database(
+        hats=hats,
+        database_uri=database_uri,
+        schema=schema or "public",
+        table_name=table,
+        create_table=create_table,
+        create_primary_key=create_primary_key,
+        create_indices=create_indices,
+        n_workers=n_workers,
+        quiet=quiet,
+    )
