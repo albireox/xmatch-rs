@@ -365,7 +365,7 @@ def copy_table(
     create_indices: bool = True,
     create_primary_key: bool = True,
     if_exists: Literal["fail", "replace", "append"] = "fail",
-    verbose: bool = False,
+    quiet: bool = False,
 ) -> None:
     """Copies a table, and optionally its indices, from one database to another.
 
@@ -399,12 +399,12 @@ def copy_table(
         What to do if the target table already exists. One of ``"fail"``,
         ``"replace"``, or ``"append"``. If ``"append"``, the table must already
         have a compatible schema and no new table or indices are created.
-    verbose
-        Whether to print progress messages to the console.
+    quiet
+        Whether to suppress logging output while copying the table.
 
     """
 
-    cl = Console(quiet=not verbose)
+    cl = Console(quiet=quiet)
 
     dt = datetime.datetime.now(tz=datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     cl.print(rf"[blue]\[i][/] Starting copy process on {dt} UTC.")
