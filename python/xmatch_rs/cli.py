@@ -703,3 +703,149 @@ def database_load_hats(
         n_workers=n_workers,
         quiet=quiet,
     )
+
+
+@database_cli.command("copy-table")
+@cloup.argument(
+    "SOURCE_DATABASE_URI",
+    type=str,
+    help="URI of the source database containing the table to copy.",
+)
+@cloup.argument(
+    "TARGET_DATABASE_URI",
+    type=str,
+    help="URI of the target database to copy the table into.",
+)
+@cloup.argument(
+    "TABLE_NAME",
+    type=str,
+    help="Name of the table to copy.",
+)
+@cloup.option(
+    "--source-table",
+    type=str,
+    required=False,
+    help="Name of the source table. Defaults to the same as TABLE_NAME.",
+)
+@cloup.option(
+    "--source-schema",
+    type=str,
+    required=False,
+    help="Name of the schema containing the table to copy. "
+    "Defaults to the public schema.",
+)
+@cloup.option(
+    "--target-table",
+    type=str,
+    required=False,
+    help="Name of the target table. Defaults to the same as TABLE_NAME.",
+)
+@cloup.option(
+    "--target-schema",
+    type=str,
+    required=False,
+    help="Name of the schema to copy the table into. Defaults to the public schema.",
+)
+@cloup.option(
+    "--create-primary-key/--no-create-primary-key",
+    default=True,
+    help="Whether to create the primary key on the loaded table.",
+)
+@cloup.option(
+    "--create-indices/--no-create-indices",
+    default=True,
+    help="Whether to create the indices on the loaded table.",
+)
+@cloup.option(
+    "--quiet",
+    "-q",
+    is_flag=True,
+    default=False,
+    help="Suppress logging output.",
+)
+def copy_table(
+    source_database_uri: str,
+    target_database_uri: str,
+    table_name: str,
+    source_table: str | None = None,
+    source_schema: str | None = None,
+    target_table: str | None = None,
+    target_schema: str | None = None,
+    create_primary_key: bool = True,
+    create_indices: bool = True,
+    quiet: bool = False,
+) -> None:
+    """Copies a table from one database to another."""
+
+    from xmatch_rs.database.tools import copy_table as copy_table_fn
+
+    copy_table_fn(
+        source_uri=source_database_uri,
+        target_uri=target_database_uri,
+        table_name=source_table or table_name,
+        schema=source_schema or "public",
+        target_table_name=target_table or table_name,
+        target_schema=target_schema or "public",
+        create_primary_key=create_primary_key,
+        create_indices=create_indices,
+        quiet=quiet,
+    )
+
+
+@cloup.command("download-table")
+@cloup.argument(
+    "DATABASE_URI",
+    type=str,
+    help="URI of the database containing the table to download.",
+)
+@cloup.argument(
+    "TABLE_NAME",
+    type=str,
+    help="Name of the table to download.",
+)
+@cloup.argument(
+    "OUTPUT_PATH",
+    type=cloup.Path(exists=False, path_type=pathlib.Path),
+    help="Path to save the downloaded table.",
+)
+@cloup.option(
+    "--schema",
+    type=str,
+    required=False,
+    help="Name of the schema containing the table to download. "
+    "Defaults to the public schema.",
+)
+@cloup.option(
+    "--chunk-size",
+    type=int,
+    required=False,
+    default=10_000_000,
+    help="Number of rows to download at a time. Defaults to 10_000_000 rows.",
+)
+@cloup.option(
+    "--quiet",
+    "-q",
+    is_flag=True,
+    default=False,
+    help="Suppress logging output.",
+)
+def download_table(
+    database_uri: str,
+    table_name: str,
+    output_path: pathlib.Path,
+    schema: str | None = None,
+    chunk_size: int = 10_000_000,
+    quiet: bool = False,
+) -> None:
+    """Downloads a table from the specified database."""
+
+    from xmatch_rs.database.tools import download_table_from_db as download_table_fn
+
+    download_table_fn(
+        database_uri=database_uri,
+        table_name=table_name,
+        output_path=output_path,
+        schema=schema or "public",
+        chunk_size=chunk_size,
+        quiet=quiet,
+    )
