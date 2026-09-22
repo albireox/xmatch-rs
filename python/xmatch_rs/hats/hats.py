@@ -76,8 +76,16 @@ class HATS:
 
         return HATSPropertiesModel.read(properties_path)
 
-    def validate(self):
-        """Validates the HATS collection."""
+    def validate(self, check_rows: bool = False):
+        """Validates the HATS collection.
+
+        Parameters
+        ----------
+        check_rows
+            If True, also checks the number of rows within the products
+            for consistency.
+
+        """
 
         if not (self.path / "object").exists():
             raise ValueError("The HATS collection must contain an 'object' product.")
@@ -88,6 +96,9 @@ class HATS:
         if not (self.path / "_schema.yaml").exists():
             raise ValueError("Missing '_schema.yaml' file.")
 
+        if check_rows:
+            self.get_product("object")._validate_nrows()
+
         properties = self.properties
         if properties.all_margins is not None:
             for margin in properties.all_margins.split(" "):
@@ -97,6 +108,9 @@ class HATS:
                         f"not found in collection."
                     )
 
+                if check_rows:
+                    self.get_product(margin)._validate_nrows()
+
         if properties.all_indexes is not None:
             for index in properties.all_indexes.split(" ")[1::2]:
                 if not (self.path / index).exists():
@@ -104,6 +118,36 @@ class HATS:
                         f"Index {index!r} listed in collection properties but "
                         f"not found in collection."
                     )
+
+                if check_rows:
+                    self.get_product(index)._validate_nrows()
+
+    def get_product(self, product: str) -> HATSProduct:
+        """Returns the specified product from the HATS collection."""
+
+        product_path = self.path / product
+        if not product_path.exists():
+            raise FileNotFoundError(f"Product {product!r} not found in the collection.")
+
+        indices = (
+            self.properties.all_indexes.split(" ")[1::2]
+            if self.properties.all_indexes is not None
+            else []
+        )
+        margins = (
+            self.properties.all_margins.split(" ")
+            if self.properties.all_margins is not None
+            else []
+        )
+
+        if product == "object":
+            return HATSProduct(self, "object", "object")
+        elif product in indices:
+            return HATSProduct(self, "index", product)
+        elif product in margins:
+            return HATSProduct(self, "margin", product)
+
+        raise ValueError(f"Invalid product type: {product!r}")
 
     def list_products(self) -> list[str]:
         """Lists the products available in the HATS collection."""
@@ -128,14 +172,7 @@ class HATS:
     def get_as_lazyframe(self, product: str = "object") -> polars.LazyFrame:
         """Returns a lazy frame for a given product."""
 
-        if product not in self.list_products():
-            raise ValueError(f"Product {product!r} not found in collection.")
-
-        dataset_path = self.path / product / "dataset"
-        if not dataset_path.exists():
-            raise FileNotFoundError(f"No dataset found for product {product!r}.")
-
-        return polars.scan_parquet(dataset_path)
+        return self.get_product(product).as_lazyframe()
 
     @classmethod
     def convert_to_hats(
@@ -703,3 +740,82 @@ class HATS:
             partition_info_path,
             schema={"Norder": polars.Int8, "Npix": polars.Int64},
         )
+
+
+class HATSProduct:
+    """Base class for HATS products.
+
+    Parameters
+    ----------
+    hats_collection
+        The HATS collection to which this product belongs.
+    product_type
+        The type of the product.
+    product_path
+        The path to the product.
+
+    """
+
+    def __init__(
+        self,
+        hats_collection: HATS,
+        product_type: Literal["object", "margin", "index"],
+        product_name: str,
+    ):
+        self.product_name = product_name
+        self.collection_path = hats_collection.path
+
+        self.product_type = product_type
+        if self.product_type not in ["object", "margin", "index"]:
+            raise ValueError(f"Invalid product type: {self.product_type!r}")
+
+        self.product_path = self.collection_path / product_name
+        if not self.product_path.exists():
+            raise FileNotFoundError(f"Product path not found: {self.product_path!s}")
+
+        self.dataset_path = self.product_path / "dataset"
+        if not self.dataset_path.exists():
+            raise FileNotFoundError(f"Dataset path not found: {self.dataset_path!s}")
+
+    def __repr__(self) -> str:
+        return (
+            f"HATSProduct(product_type={self.product_type!r}, "
+            f"product_name={self.product_name!r})"
+        )
+
+    @property
+    def properties(self) -> HATSPropertiesModel:
+        """Returns the properties model."""
+
+        assert self.product_path is not None, "Product path must be specified."
+        properties_file = self.product_path / "properties"
+        if not properties_file.exists():
+            raise FileNotFoundError(f"Properties file not found: {properties_file!s}")
+
+        return HATSPropertiesModel.read(properties_file)
+
+    def as_lazyframe(self) -> polars.LazyFrame:
+        """Return a Polars LazyFrame with the product data."""
+
+        return polars.scan_parquet(self.dataset_path)
+
+    def _validate_nrows(self) -> None:
+        """Checks that the number of rows in the dataset matches the properties file."""
+
+        props_nrows = self.properties.hats_nrows
+        if props_nrows is None:
+            raise ValueError(
+                f"Number of rows for product {self.product_name!r} is "
+                "missing from the properties file."
+            )
+
+        dataset_lf = self.as_lazyframe()
+        dataset_nrows: int = (
+            dataset_lf.select(polars.len()).collect(engine="streaming").item()
+        )
+
+        if dataset_nrows != props_nrows:
+            raise ValueError(
+                f"Number of rows for product {self.product_name!r} does not match the "
+                "value specified in the properties file."
+            )
