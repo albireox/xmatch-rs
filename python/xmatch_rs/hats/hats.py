@@ -14,6 +14,7 @@ import shutil
 from typing import TYPE_CHECKING, Iterator, Literal
 
 import polars
+from rich.live import Live
 
 import sdsstools.logger
 
@@ -868,4 +869,23 @@ class HATSStore:
         """Validates all HATS collections in the store."""
 
         for collection in self.iter_collections():
-            collection.validate(check_rows=check_rows)
+            # message = Text("[*] ", style="blue")
+            # message.append(f"Validating collection {collection.path!r}.")
+
+            with Live(
+                f"[blue][*][/] Validating collection {collection.path!s}",
+                transient=False,
+                auto_refresh=True,
+                refresh_per_second=10,
+            ) as live:
+                try:
+                    collection.validate(check_rows=check_rows)
+                    live.update(
+                        f"[green][✔][/] Collection {collection.path!s}: "
+                        "successfully validated."
+                    )
+                except Exception as e:
+                    live.update(
+                        f"[red][✖][/] Collection {collection.path!s}: "
+                        f"validation failed: {e}"
+                    )
