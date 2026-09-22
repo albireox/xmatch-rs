@@ -11,7 +11,7 @@ from __future__ import annotations
 import pathlib
 import shutil
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Iterator, Literal
 
 import polars
 
@@ -857,3 +857,15 @@ class HATSStore:
             raise FileNotFoundError(f"Collection {collection_name!r} not found.")
 
         return HATS(collection_path)
+
+    def iter_collections(self) -> Iterator[HATS]:
+        """Iterates over all HATS collections in the store."""
+
+        for collection_name in self.list_collections():
+            yield self.get_collection(collection_name)
+
+    def validate_all(self, check_rows: bool = False) -> None:
+        """Validates all HATS collections in the store."""
+
+        for collection in self.iter_collections():
+            collection.validate(check_rows=check_rows)
