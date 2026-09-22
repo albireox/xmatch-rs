@@ -79,6 +79,7 @@ class Dtype(str, enum.Enum):
     FLOAT32 = "Float32"
     FLOAT64 = "Float64"
     BOOLEAN = "Boolean"
+    DATE = "Date"
 
     def to_polars_dtype(self) -> Type[polars.DataType]:
         """Converts the Dtype to a Polars data type."""
