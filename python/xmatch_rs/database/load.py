@@ -94,8 +94,7 @@ def write_dataset_to_database(
     show_progress
         Whether to show a progress bar while loading the data.
     n_workers
-        The number of workers to use for loading the data. If None, uses all
-        available CPU cores.
+        The number of workers to use for loading the data. If None, uses a single core.
     table_name
         The name of the table to load the data into. This can be used to override
         the table name defined in the HATS schema.
@@ -202,7 +201,7 @@ def write_dataset_to_database(
         )
 
         if n_workers is None:
-            n_workers = multiprocessing.cpu_count()
+            n_workers = 1
 
         with Timer() as timer:
             with multiprocessing.Pool(n_workers) as pool:
