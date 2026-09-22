@@ -660,7 +660,7 @@ def download_table_from_db(
     quiet: bool = False,
     overwrite: bool = False,
     skip_existing: bool = True,
-    use_copy: bool = False,
+    use_copy: bool | None = None,
 ):
     """Downloads a table from the database and writes it to disk as Parquet files.
 
@@ -698,13 +698,14 @@ def download_table_from_db(
         to the console.
     use_copy
         If True, uses the PostgreSQL COPY command for faster downloads. Otherwise,
-        falls back to standard SQL SELECT queries.
+        falls back to standard SQL SELECT queries. If None, the best mode will be
+        decided automatically based on the table size.
     overwrite
         If True, overwrites existing Parquet files. Otherwise, raises an error if
         the output files already exist. Not supported for ``use_copy=True``.
     skip_existing
         If True, skips downloading chunks that already exist as Parquet files.
-        This is useful for resuming interrupted downloads without re-downloading
+        This is useful for resuming interrupted downloads without re-downloading.
         Ignored if ``overwrite`` is True or ``use_copy`` is True.
 
     """
@@ -723,7 +724,20 @@ def download_table_from_db(
     dt = datetime.datetime.now(tz=datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     cl.print(rf"[blue]\[i][/] Starting download process on {dt} UTC.")
 
+    approx_nrows = get_row_count(
+        database_uri,
+        table_name,
+        schema,
+        approximate=True,
+    )
+    cl.print(rf"[blue]\[i][/] Approximate number of rows: {approx_nrows:,}")
+
+    USE_COPY_THRESHOLD = 10_000_000
+    if use_copy is None:
+        use_copy = approx_nrows >= USE_COPY_THRESHOLD
+
     if use_copy:
+        cl.print(r"[blue]\[i][/] Using COPY command.")
         _download_table_using_copy(
             console=cl,
             database_uri=database_uri,
@@ -733,6 +747,8 @@ def download_table_from_db(
             chunk_size=chunk_size,
         )
         return
+
+    cl.print(r"[blue]\[i][/] Using paginated SQL SELECT queries.")
 
     with (
         Timer() as timer,
