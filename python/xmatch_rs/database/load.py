@@ -65,9 +65,7 @@ def get_database_uri(
 
 def write_dataset_to_database(
     hats: HATS,
-    dbname: str,
-    username: str,
-    host: str | None = None,
+    database_uri: str,
     show_progress: bool = True,
     n_workers: int | None = None,
     table_name: str | None = None,
@@ -76,7 +74,7 @@ def write_dataset_to_database(
     create_table: bool = True,
     create_primary_key: bool = True,
     create_indices: bool = True,
-    verbose: bool = False,
+    quiet: bool = False,
 ) -> None:
     """Loads a HATS dataset into a database.
 
@@ -84,13 +82,8 @@ def write_dataset_to_database(
     ----------
     hats
         The HATS dataset to load.
-    dbname
-        The name of the database to load into.
-    username
-        The username to use to connect to the database. The password will be read from
-        ``.pgpass``.
-    host
-        The host to connect to the database. If None, it will connect to the localhost.
+    database_uri
+        The URI of the database to load into.
     show_progress
         Whether to show a progress bar while loading the data.
     n_workers
@@ -112,12 +105,12 @@ def write_dataset_to_database(
     create_indices
         Whether to create the indices defined in the ``database.indices`` section
         of the schema after the data has been loaded.
-    verbose
-        Whether to print verbose messages while loading the data.
+    quiet
+        Whether to suppress logging output while loading the data.
 
     """
 
-    cl = Console(quiet=not verbose)
+    cl = Console(quiet=quiet)
 
     dt = datetime.datetime.now(tz=datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     cl.print(rf"[blue]\[i][/] Starting DB write process on {dt} UTC.")
@@ -137,10 +130,8 @@ def write_dataset_to_database(
 
         pixel_data.append((norder, npix))
 
-    db_uri = get_database_uri(dbname=dbname, host=host, user=username)
-
     try:
-        with psycopg.connect(db_uri) as conn, conn.cursor() as cursor:
+        with psycopg.connect(database_uri) as conn, conn.cursor() as cursor:
             cursor.execute(
                 """
                 SELECT EXISTS (
@@ -153,22 +144,22 @@ def write_dataset_to_database(
             )
             table_exists = cursor.fetchone()
     except psycopg.Error as exc:
-        raise ConnectionError(f"Could not connect to database {dbname!r}.") from exc
+        raise ConnectionError("Could not connect to the database.") from exc
 
     if table_exists is None or not table_exists[0]:
         if not create_table:
             raise ValueError(
-                f"Table {schema}.{table_name} does not exist in database {dbname!r}."
+                f"Table {schema}.{table_name} does not exist in the database."
             )
         else:
-            with psycopg.connect(db_uri) as conn, conn.cursor() as cursor:
+            with psycopg.connect(database_uri) as conn, conn.cursor() as cursor:
                 # This is SQL injection of the worst kind but we are generating it
                 # and we trust the code so let's just do it.
                 cursor.execute(create_table_sql(hats))  # INJECTION! # type: ignore
 
             cl.print(
                 f"[green][✔][/] Created table [blue]{schema}.{table_name}[/] "
-                f"in database {dbname!r}."
+                f"in the database."
             )
 
     pbar = Progress(
@@ -177,7 +168,7 @@ def write_dataset_to_database(
         BarColumn(),
         MofNCompleteColumn(),
         TimeElapsedColumn(),
-        console=cl if verbose else Console(),
+        console=cl if not quiet else Console(),
         transient=True,
     )
 
@@ -194,7 +185,7 @@ def write_dataset_to_database(
         _write_pixel_to_database_partial = functools.partial(
             _write_pixel_to_database,
             dataset_path=dataset_path,
-            db_uri=db_uri,
+            database_uri=database_uri,
             schema=schema,
             table_name=table_name,
             load_hats_columns=load_hats_columns,
@@ -230,7 +221,7 @@ def write_dataset_to_database(
             with (
                 Timer() as timer,
                 cl.status(f"Creating PK on [blue]{schema}.{table_name}[/] ..."),
-                psycopg.connect(db_uri) as conn,
+                psycopg.connect(database_uri) as conn,
                 conn.cursor() as cursor,
             ):
                 cursor.execute(
@@ -251,7 +242,7 @@ def write_dataset_to_database(
             with (
                 Timer() as timer,
                 cl.status(f"Creating indices on [blue]{schema}.{table_name}[/] ..."),
-                psycopg.connect(db_uri) as conn,
+                psycopg.connect(database_uri) as conn,
                 conn.cursor() as cursor,
             ):
                 for index in indices:
@@ -285,7 +276,7 @@ def write_dataset_to_database(
 def _write_pixel_to_database(
     pixel_data: tuple[int, int],
     dataset_path: pathlib.Path,
-    db_uri: str,
+    database_uri: str,
     schema: str,
     table_name: str,
     load_hats_columns: bool,
@@ -311,7 +302,7 @@ def _write_pixel_to_database(
 
     data.write_database(
         table_name=f"{schema}.{table_name}",
-        connection=db_uri,
+        connection=database_uri,
         if_table_exists="append",
         engine="adbc",
     )
