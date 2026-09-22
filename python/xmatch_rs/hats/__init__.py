@@ -8,6 +8,6 @@
 
 from __future__ import annotations
 
-from .hats import HATS
+from .hats import *
 from .metadata import *
 from .models import *

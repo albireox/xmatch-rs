@@ -31,8 +31,11 @@ if TYPE_CHECKING:
     from xmatch_rs.types import APPLY_CALLBACK_T
 
 
+__all__ = ["HATS", "HATSProduct", "HATSStore"]
+
+
 class HATS:
-    """A representation of a dataset in the HATS format."""
+    """A representation of a HATS collection."""
 
     def __init__(self, path: str | pathlib.Path):
         """A representation of a HATS collection.
@@ -52,7 +55,7 @@ class HATS:
             raise FileNotFoundError(f"The path {self.path!r} is not a directory.")
 
     def __repr__(self) -> str:
-        return f"<HATS (path={str(self.path)!r})>"
+        return f"HATS(path={self.path!s})"
 
     @property
     def schema(self) -> Schema:
@@ -819,3 +822,38 @@ class HATSProduct:
                 f"Number of rows for product {self.product_name!r} does not match the "
                 "value specified in the properties file."
             )
+
+
+class HATSStore:
+    """Represents a store of HATS collections, one for each catalogue."""
+
+    def __init__(self, store_path: str | pathlib.Path):
+        self.store_path = pathlib.Path(store_path)
+        if not self.store_path.exists():
+            raise FileNotFoundError(f"Store path not found: {self.store_path!s}")
+
+    def __repr__(self) -> str:
+        return f"HATSStore(store_path={self.store_path!s})"
+
+    def list_collections(self) -> list[str]:
+        """Lists all HATS collections available in the store."""
+
+        return [
+            pp.name
+            for pp in self.store_path.iterdir()
+            if pp.is_dir()
+            and (pp / "_schema.yaml").exists()
+            and (pp / "collection.properties").exists()
+        ]
+
+    def get_collection(self, collection_name: str) -> HATS:
+        """Returns the specified HATS collection from the store."""
+
+        if collection_name not in self.list_collections():
+            raise ValueError(f"Collection {collection_name!r} not found in the store.")
+
+        collection_path = self.store_path / collection_name
+        if not collection_path.exists():
+            raise FileNotFoundError(f"Collection {collection_name!r} not found.")
+
+        return HATS(collection_path)
