@@ -234,7 +234,6 @@ def convert_to_hats_object_catalogue(
         )
 
         convert_model = ConvertToHATSModel(
-            catalogue_model=schema.model,
             object_path=object_path,
             complete=False,
             reference_order=reference_order,
@@ -272,7 +271,7 @@ def convert_to_hats_object_catalogue(
     convert_model.write()
 
     if format is None:
-        format = convert_model.catalogue_model.source_catalogue.format.value
+        format = schema.model.source_catalogue.format.value
 
     # Check if conversion is complete.
     if convert_model.complete:
@@ -316,6 +315,7 @@ def convert_to_hats_object_catalogue(
         _run_hats_healpix_phase(
             data_path=data_path,
             model=convert_model,
+            schema=schema,
             phase_name=phase.name,
             format=format,
             apply_callback=apply_callback,
@@ -373,6 +373,7 @@ def convert_to_hats_object_catalogue(
 def _run_hats_healpix_phase(
     data_path: DATA_PATH_T,
     model: ConvertToHATSModel,
+    schema: Schema,
     phase_name: str,
     log: SDSSLogger,
     format: str | None = None,
@@ -381,8 +382,6 @@ def _run_hats_healpix_phase(
     n_workers: int | None = None,
 ) -> None:
     """Runs the first phase of the HATS conversion: convert to a fixed tiling order."""
-
-    schema = model.get_schema()
 
     phase = model.get_phase(phase_name)
     if not phase:
@@ -459,7 +458,7 @@ def _run_hats_healpix_phase(
         log.info("Adding primary key column to dataset.")
         add_sequential_primary_key(
             path=model.object_path / "dataset",
-            primary_key_column=model.catalogue_model.primary_key,
+            primary_key_column=schema.model.primary_key,
         )
         model.update_phase(phase_name, complete=True)
 

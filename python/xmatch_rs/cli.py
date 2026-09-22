@@ -83,9 +83,10 @@ def hats_cli():
     "collection_path",
     type=cloup.Path(exists=False, path_type=pathlib.Path),
 )
-@cloup.argument(
-    "schema",
+@cloup.option(
+    "--schema",
     type=cloup.Path(exists=True, path_type=pathlib.Path, dir_okay=False),
+    help="Path to the catalogue schema YAML file.",
 )
 @cloup.option(
     "--format",
@@ -230,7 +231,7 @@ def hats_cli():
 def convert(
     data_paths: tuple[str, ...],
     collection_path: pathlib.Path,
-    schema: pathlib.Path,
+    schema: pathlib.Path | None,
     format: Literal["csv", "parquet"] | None,
     initial_order: int,
     reference_order: int,
