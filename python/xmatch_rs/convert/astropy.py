@@ -23,7 +23,7 @@ from rich.progress import (
     Progress,
     SpinnerColumn,
     TextColumn,
-    TimeRemainingColumn,
+    TimeElapsedColumn,
 )
 
 from xmatch_rs import console
@@ -188,7 +188,7 @@ def convert_astropy_to_parquet(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         MofNCompleteColumn(),
-        TimeRemainingColumn(),
+        TimeElapsedColumn(),
         console=console,
         transient=True,
     )

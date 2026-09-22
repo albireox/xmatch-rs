@@ -24,7 +24,7 @@ from rich.progress import (
     Progress,
     SpinnerColumn,
     TextColumn,
-    TimeRemainingColumn,
+    TimeElapsedColumn,
 )
 
 from sdsstools import Timer, read_yaml_file
@@ -748,7 +748,7 @@ def _monitor_progress(progress_file: pathlib.Path | None, log: SDSSLogger) -> No
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         MofNCompleteColumn(),
-        TimeRemainingColumn(),
+        TimeElapsedColumn(),
         console=console,
         transient=True,
     )

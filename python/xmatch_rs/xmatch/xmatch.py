@@ -31,7 +31,7 @@ from rich.progress import (
     SpinnerColumn,
     TaskID,
     TextColumn,
-    TimeRemainingColumn,
+    TimeElapsedColumn,
 )
 
 from sdsstools import Timer
@@ -792,7 +792,7 @@ class ProgressTracker:
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
             MofNCompleteColumn(),
-            TimeRemainingColumn(),
+            TimeElapsedColumn(),
             console=console,
             transient=True,
         )

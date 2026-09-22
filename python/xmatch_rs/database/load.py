@@ -25,7 +25,7 @@ from rich.progress import (
     Progress,
     SpinnerColumn,
     TextColumn,
-    TimeRemainingColumn,
+    TimeElapsedColumn,
 )
 
 from sdsstools.utils import Timer
@@ -177,7 +177,7 @@ def write_dataset_to_database(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         MofNCompleteColumn(),
-        TimeRemainingColumn(),
+        TimeElapsedColumn(),
         console=cl if verbose else Console(),
         transient=True,
     )
