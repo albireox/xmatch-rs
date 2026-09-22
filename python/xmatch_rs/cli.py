@@ -840,6 +840,12 @@ def copy_table(
     default=True,
     help="Whether to skip downloading if the output file already exists.",
 )
+@cloup.option(
+    "--use-copy/--no-use-copy",
+    default=None,
+    help="Whether to use the COPY command for faster downloads. If not specified, "
+    "the best mode will be decided automatically based on the table size.",
+)
 def download_table(
     database_uri: str,
     table_name: str,
@@ -849,6 +855,7 @@ def download_table(
     quiet: bool = False,
     overwrite: bool = False,
     skip_existing: bool = True,
+    use_copy: bool | None = None,
 ) -> None:
     """Downloads a table from the specified database."""
 
@@ -863,4 +870,5 @@ def download_table(
         quiet=quiet,
         overwrite=overwrite,
         skip_existing=skip_existing,
+        use_copy=use_copy,
     )
