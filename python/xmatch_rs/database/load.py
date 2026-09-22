@@ -31,7 +31,7 @@ from rich.progress import (
 from sdsstools.utils import Timer
 
 from xmatch_rs.database import create_table_sql
-from xmatch_rs.database.tools import function_to_composed
+from xmatch_rs.database.tools import function_to_composed, rich_status
 from xmatch_rs.hats.tools import get_pixel_path
 
 
@@ -121,6 +121,7 @@ def write_dataset_to_database(
 
     schema = schema or hats.schema.model.database.schema_
     table_name = table_name or hats.schema.model.database.table_name
+    tbl_qual = f"{schema}.{table_name}"
 
     partition_info = hats.read_partition_info()
     pixel_data: list[tuple[int, int]] = []
@@ -211,7 +212,7 @@ def write_dataset_to_database(
         pbar.stop()
 
     cl.print(
-        f"[green][✔][/] Loaded dataset into database [blue]{schema}.{table_name}[/] "
+        f"[green][✔][/] Loaded dataset into database [blue]{tbl_qual}[/] "
         f"in {timer.elapsed:,.1f} seconds."
     )
 
@@ -220,7 +221,7 @@ def write_dataset_to_database(
         if primary_key:
             with (
                 Timer() as timer,
-                cl.status(f"Creating PK on [blue]{schema}.{table_name}[/] ..."),
+                rich_status(cl, f"Creating PK on [blue]{tbl_qual}[/] ..."),
                 psycopg.connect(database_uri) as conn,
                 conn.cursor() as cursor,
             ):
@@ -232,7 +233,7 @@ def write_dataset_to_database(
                 )
 
             cl.print(
-                f"[green][✔][/] Created PK on [blue]{schema}.{table_name}[/] "
+                f"[green][✔][/] Created PK on [blue]{tbl_qual}[/] "
                 f"in {timer.elapsed:,.1f} seconds."
             )
 
@@ -241,7 +242,7 @@ def write_dataset_to_database(
         if len(indices) > 0:
             with (
                 Timer() as timer,
-                cl.status(f"Creating indices on [blue]{schema}.{table_name}[/] ..."),
+                rich_status(cl, f"Creating indices on [blue]{tbl_qual}[/] ..."),
                 psycopg.connect(database_uri) as conn,
                 conn.cursor() as cursor,
             ):
@@ -259,7 +260,7 @@ def write_dataset_to_database(
                             columns = sql.Identifier(index)
 
                     # Runs the CREATE INDEX statement.
-                    with cl.status(f"Creating index [blue]{index}[/] ..."):
+                    with rich_status(cl, f"Creating index [blue]{index}[/] ..."):
                         cursor.execute(
                             sql.SQL("CREATE INDEX ON {} ({})").format(
                                 sql.Identifier(schema, table_name),

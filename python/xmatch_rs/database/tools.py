@@ -12,6 +12,7 @@ import datetime
 import pathlib
 import re
 import subprocess
+import time
 
 from typing import Literal, NamedTuple
 
@@ -20,6 +21,7 @@ import psycopg
 import psycopg.sql as sql
 from psycopg.sql import Identifier
 from rich.console import Console
+from rich.status import Status
 
 from sdsstools.utils import Timer
 
@@ -496,7 +498,10 @@ def copy_table(
 
             with (
                 Timer() as timer,
-                cl.status(f"Copying [blue]{src_qual}[/] to [blue]{tgt_qual}[/] ..."),
+                rich_status(
+                    cl,
+                    f"Copying [blue]{src_qual}[/] to [blue]{tgt_qual}[/] ...",
+                ),
                 src_cursor.copy(copy_out) as src_copy,
                 tgt_cursor.copy(copy_in) as tgt_copy,
             ):
@@ -514,7 +519,7 @@ def copy_table(
     if create_primary_key and pk_columns and if_exists != "append":
         with (
             Timer() as timer,
-            cl.status(f"Creating primary key on [blue]{tgt_qual}[/] ..."),
+            rich_status(cl, f"Creating primary key on [blue]{tgt_qual}[/] ..."),
             psycopg.connect(target_uri) as tgt_conn,
             tgt_conn.cursor() as tgt_cursor,
         ):
@@ -539,7 +544,7 @@ def copy_table(
 
         with (
             Timer() as timer,
-            cl.status(f"Creating indices on [blue]{tgt_qual}[/] ..."),
+            rich_status(cl, f"Creating indices on [blue]{tgt_qual}[/] ..."),
             psycopg.connect(target_uri) as tgt_conn,
             tgt_conn.cursor() as tgt_cursor,
         ):
@@ -561,7 +566,7 @@ def copy_table(
                 )
 
                 # We allow failures while creating indices.
-                with cl.status(f"Creating index [blue]{index_name}[/] ..."):
+                with rich_status(cl, f"Creating index [blue]{index_name}[/] ..."):
                     try:
                         tgt_cursor.execute(new_index_def)
                     except Exception:
@@ -604,14 +609,14 @@ def get_row_count(
     table_name: str,
     schema: str = "public",
     approximate=True,
-):
+) -> int:
     """Returns the row count for a table.
 
     Parameters
     ----------
     connection_uri
         The database connection URI.
-    table
+    table_name
         The table name.
     schema
         The schema in which the table lives.
@@ -731,7 +736,7 @@ def download_table_from_db(
 
     with (
         Timer() as timer,
-        cl.status(f"Downloading table [blue]{schema}.{table_name}[/] ..."),
+        rich_status(cl, f"Downloading table [blue]{schema}.{table_name}[/] ..."),
     ):
         if chunk_size is None:
             output_file = output_path / f"{table_name}_0001.parquet"
@@ -773,7 +778,7 @@ def download_table_from_db(
                     "in chunks."
                 )
 
-            with cl.status(f"Downloading chunk {nn} of {n_chunks} ...") as status:
+            with rich_status(cl, f"Downloading chunk {nn} of {n_chunks} ...") as status:
                 while True:
                     status.update(f"Downloading chunk {nn} of {n_chunks} ...")
 
@@ -855,9 +860,24 @@ def _download_table_using_copy(
         )
         return
 
+    approx_nrows = get_row_count(
+        database_uri,
+        table_name=table_name,
+        schema=schema,
+        approximate=True,
+    )
+    n_chunks = approx_nrows // chunk_size + 1 if chunk_size is not None else 1
+
+    console.print(rf"[blue]\[i][/] Number of file chunks expected: {n_chunks}.")
+    i_chunk = 1
+
     with (
         Timer() as timer,
-        console.status(f"COPY-ing table {schema}.{table_name} to CSV files ..."),
+        rich_status(
+            console,
+            f"COPY-ing table {schema}.{table_name} to CSV files. "
+            f"Processing chunk {i_chunk} / {n_chunks} ...",
+        ) as status,
     ):
         if chunk_size is None:
             # Simpler case. We just use psycopg's COPY command
@@ -898,10 +918,22 @@ def _download_table_using_copy(
                 sql.Identifier(schema, table_name),
             )
 
+            last_check = time.time()
+
             with psycopg.connect(database_uri) as conn, conn.cursor() as cursor:
                 with cursor.copy(copy_query) as copy:
                     for data in copy:
                         split_process.stdin.write(data)
+
+                        # At most once a second, check how much progress we've made
+                        # and update the status.
+                        if time.time() - last_check > 1:
+                            last_check = time.time()
+                            i_chunk = len(list(output_path.glob(f"{table_name}_*.csv")))
+                            status.update(
+                                f"COPY-ing table {schema}.{table_name} to CSV files. "
+                                f"Processing chunk {i_chunk} / {n_chunks} ..."
+                            )
 
             split_process.stdin.close()
             split_process.wait()
@@ -1025,3 +1057,14 @@ def get_table_column_types(
         column_types[column_name] = polars_type
 
     return column_types
+
+
+def rich_status(
+    console: Console,
+    message: str,
+    spinner: str = "bouncingBar",
+    spinner_style="blue",
+) -> Status:
+    """Returns a custom status context manager for the console."""
+
+    return console.status(message, spinner=spinner, spinner_style=spinner_style)
