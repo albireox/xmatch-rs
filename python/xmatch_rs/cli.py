@@ -633,15 +633,13 @@ def database_cli():
     "--table",
     type=str,
     required=False,
-    help="Name of the table to load the HATS collection into. "
-    "Defaults to the HATS collection short name.",
+    help="Name of the table to load the HATS collection into.",
 )
 @cloup.option(
     "--schema",
     type=str,
     required=False,
-    help="Name of the schema to load the HATS collection into. "
-    "Defaults to the public schema.",
+    help="Name of the schema to load the HATS collection into.",
 )
 @cloup.option(
     "--create-table/--no-create-table",
@@ -690,12 +688,10 @@ def database_load_hats(
 
     hats = HATS(hats_collection_path)
 
-    table = table or hats.schema.model.short_name.lower()
-
     write_dataset_to_database(
         hats=hats,
         database_uri=database_uri,
-        schema=schema or "public",
+        schema=schema,
         table_name=table,
         create_table=create_table,
         create_primary_key=create_primary_key,
