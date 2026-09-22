@@ -367,6 +367,10 @@ def convert_to_hats_object_catalogue(
             add_after=phase.name,
         )
 
+    # Clear the conversion model write lockfile.
+    if (convert_model.object_path / "_convert.yaml.lock").exists():
+        (convert_model.object_path / "_convert.yaml.lock").unlink()
+
     return convert_model
 
 
