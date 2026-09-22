@@ -657,28 +657,25 @@ class HATS:
 
     def write_to_database(
         self,
-        dbname: str,
-        username: str,
-        host: str | None = None,
+        database_uri: str,
         show_progress: bool = True,
         n_workers: int | None = 4,
+        **kwargs,
     ) -> None:
         """Loads the HATS dataset into a database.
 
         Parameters
         ----------
-        dbname
-            The name of the database to load into.
-        username
-            The username to use to connect to the database. The password will be read
-            from ``.pgpass``.
-        host
-            The host to connect to the database. If None, it will connect to localhost.
+        database_uri
+            The URI of the database to load into.
         show_progress
             Whether to show a progress bar while loading the data.
         n_workers
             The number of workers to use for loading the data. If None, uses all
             available CPU cores.
+        kwargs
+            Additional keyword arguments to pass to the
+            :obj:`~xmatch_rs.database.load.write_dataset_to_database` function.
 
         """
 
@@ -686,11 +683,10 @@ class HATS:
 
         write_dataset_to_database(
             self,
-            dbname=dbname,
-            username=username,
-            host=host,
+            database_uri=database_uri,
             show_progress=show_progress,
             n_workers=n_workers,
+            **kwargs,
         )
 
     def read_partition_info(self, product: str = "object") -> polars.DataFrame:
