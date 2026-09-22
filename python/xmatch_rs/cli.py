@@ -792,7 +792,7 @@ def copy_table(
     )
 
 
-@cloup.command("download-table")
+@database_cli.command("download-table")
 @cloup.argument(
     "DATABASE_URI",
     type=str,
