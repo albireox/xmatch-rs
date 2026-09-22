@@ -11,6 +11,7 @@ from __future__ import annotations
 import datetime
 import pathlib
 import re
+import subprocess
 
 from typing import Literal, NamedTuple
 
@@ -654,8 +655,24 @@ def download_table_from_db(
     quiet: bool = False,
     overwrite: bool = False,
     skip_existing: bool = True,
+    use_copy: bool = False,
 ):
     """Downloads a table from the database and writes it to disk as Parquet files.
+
+    This function provides two very different methods for downloading a table from
+    a PostgreSQL database to disk as Parquet files. With ``use_copy=False`` the
+    function performs a series of SQL SELECT queries, sorting by the primary key
+    and paginating the results to produces files with as many as ``chunk_size`` rows
+    each. With ``use_copy=True``, the function uses the PostgreSQL COPY command and the
+    results are piped to the ``split`` command, which divides the output into multiple
+    CSV files of at most ``chunk_size`` rows each. The intermediate CSV files are then
+    converted to Parquet files and the CSV files are deleted.
+
+    ``use_copy=True`` should be preferred for large tables as it is significantly
+    faster than the standard SQL SELECT method and has very low memory overhead.
+    The main downside is that it requires significant disk space for the intermediate
+    CSV files, which are not compressed. For small-ish tables the different may be
+    negligible, and using the standard SQL SELECT method might be more convenient.
 
     Parameters
     ----------
@@ -674,13 +691,16 @@ def download_table_from_db(
     quiet
         If True, suppresses progress messages. Otherwise, prints progress messages
         to the console.
+    use_copy
+        If True, uses the PostgreSQL COPY command for faster downloads. Otherwise,
+        falls back to standard SQL SELECT queries.
     overwrite
         If True, overwrites existing Parquet files. Otherwise, raises an error if
-        the output files already exist.
+        the output files already exist. Not supported for ``use_copy=True``.
     skip_existing
         If True, skips downloading chunks that already exist as Parquet files.
         This is useful for resuming interrupted downloads without re-downloading
-        existing data. Ignored if ``overwrite`` is True.
+        Ignored if ``overwrite`` is True or ``use_copy`` is True.
 
     """
 
@@ -697,6 +717,17 @@ def download_table_from_db(
 
     dt = datetime.datetime.now(tz=datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     cl.print(rf"[blue]\[i][/] Starting download process on {dt} UTC.")
+
+    if use_copy:
+        _download_table_using_copy(
+            console=cl,
+            database_uri=database_uri,
+            table_name=table_name,
+            schema=schema,
+            output_path=output_path,
+            chunk_size=chunk_size,
+        )
+        return
 
     with (
         Timer() as timer,
@@ -787,3 +818,200 @@ def download_table_from_db(
     cl.print(rf"[blue]\[i][/] Table saved to [blue]{output_path.absolute()}[/].")
 
     return
+
+
+def _download_table_using_copy(
+    console: Console,
+    database_uri: str,
+    table_name: str,
+    schema: str,
+    output_path: pathlib.Path,
+    chunk_size: int | None,
+) -> None:
+    """Download a table using the PostgreSQL COPY command.
+
+    This method should be preferred for very large tables where the combination
+    of SELECT and OFFSET is inefficient. Instead, we stream the entire table using
+    COPY and use the ``split`` command to divide the data into manageable chunks.
+    This produces intermediate CSV files which we then convert to Parquet.
+
+    """
+
+    df_schema = get_table_column_types(
+        database_uri=database_uri,
+        table_name=table_name,
+        schema=schema,
+    )
+    console.print("[green][✔][/] Retrieved table schema.")
+
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    csv_files = list(output_path.glob(f"{table_name}_*.csv"))
+    parquet_files = list(output_path.glob(f"{table_name}_*.parquet"))
+    if csv_files or parquet_files:
+        console.print(
+            f"[red][✖][/] CSV or Parquet files found in {output_path.absolute()}. "
+            "Delete them or provide a clean path."
+        )
+        return
+
+    with (
+        Timer() as timer,
+        console.status(f"COPY-ing table {schema}.{table_name} to CSV files ..."),
+    ):
+        if chunk_size is None:
+            # Simpler case. We just use psycopg's COPY command
+            # to download the entire table to a single CSV file.
+            with (
+                open(output_path / f"{table_name}.csv", "wb") as file_,
+                psycopg.connect(database_uri) as conn,
+                conn.cursor() as cursor,
+                cursor.copy(
+                    sql.SQL("COPY {} TO STDOUT WITH (FORMAT CSV, HEADER FALSE)").format(
+                        sql.Identifier(schema, table_name)
+                    )
+                ) as copy,
+            ):
+                for data in copy:
+                    file_.write(data)
+
+        else:
+            # We pipe the results of the COPY command into the split command
+            # to create chunked CSV files.
+            split_command = (
+                "split --numeric-suffixes=1 -a 4 "
+                f"-l {chunk_size} --additional-suffix=.csv - "
+                f"{output_path / f'{table_name}_'}"
+            )
+
+            split_process = subprocess.Popen(
+                split_command,
+                shell=True,
+                stdin=subprocess.PIPE,
+            )
+            assert split_process.stdin is not None
+
+            copy_query = sql.SQL(
+                "COPY (SELECT {} from {}) TO STDOUT WITH (FORMAT CSV, HEADER FALSE);"
+            ).format(
+                sql.SQL(", ").join([sql.Identifier(col) for col in df_schema.keys()]),
+                sql.Identifier(schema, table_name),
+            )
+
+            with psycopg.connect(database_uri) as conn, conn.cursor() as cursor:
+                with cursor.copy(copy_query) as copy:
+                    for data in copy:
+                        split_process.stdin.write(data)
+
+            split_process.stdin.close()
+            split_process.wait()
+
+    console.print(
+        f"[green][✔][/] Created CSV files for table [blue]{schema}.{table_name}[/] "
+        f"in {timer.elapsed:,.1f} seconds."
+    )
+
+    # Now we convert each CSV file to a Parquet file.
+    with Timer() as timer, console.status("Converting CSV files to Parquet..."):
+        for csv_file in output_path.glob(f"{table_name}_*.csv"):
+            parquet_file = csv_file.with_suffix(".parquet")
+
+            (
+                polars.scan_csv(csv_file, schema=df_schema)
+                .cast(df_schema)  # type: ignore
+                .sink_parquet(parquet_file, engine="streaming")
+            )
+
+    console.print(
+        f"[green][✔][/] Converted CSV files to Parquet in {timer.elapsed:,.1f} seconds."
+    )
+
+    # Delete intermediate CSV files.
+    for csv_file in output_path.glob(f"{table_name}_*.csv"):
+        csv_file.unlink()
+
+    console.print("[green][✔][/] Deleted intermediate CSV files.")
+
+
+PG_TO_POLARS_TYPES: dict[str, polars.DataType | type[polars.DataType]] = {
+    "smallint": polars.Int16,
+    "integer": polars.Int32,
+    "bigint": polars.Int64,
+    "smallserial": polars.Int16,
+    "serial": polars.Int32,
+    "bigserial": polars.Int64,
+    "real": polars.Float32,
+    "double precision": polars.Float64,
+    "numeric": polars.Float64,
+    "decimal": polars.Float64,
+    "boolean": polars.Boolean,
+    "character varying": polars.Utf8,
+    "character": polars.Utf8,
+    "varchar": polars.Utf8,
+    "text": polars.Utf8,
+    "citext": polars.Utf8,
+    "uuid": polars.Utf8,
+    "json": polars.Utf8,
+    "jsonb": polars.Utf8,
+    "date": polars.Date,
+    "time": polars.Time,
+    "time without time zone": polars.Time,
+    "time with time zone": polars.Time,
+    "timestamp": polars.Datetime,
+    "timestamp without time zone": polars.Datetime,
+    "timestamp with time zone": polars.Datetime,
+    "interval": polars.Duration,
+    "bytea": polars.Binary,
+}
+
+
+def get_table_column_types(
+    database_uri: str,
+    table_name: str,
+    schema: str = "public",
+) -> dict[str, polars.DataType | type[polars.DataType]]:
+    """Return a dictionary of column name to polars type for a database table.
+
+    The column types are read from the ``information_schema.columns`` metadata
+    table. Any PostgreSQL type that does not have a known mapping to a polars
+    type is mapped to ``polars.Utf8``.
+
+    Parameters
+    ----------
+    database_uri
+        The URI of the database to connect to.
+    table_name
+        The name of the table to introspect.
+    schema
+        The schema in which the table is located.
+
+    Returns
+    -------
+    A mapping of column name to the corresponding polars data type.
+
+    """
+
+    with psycopg.connect(database_uri) as conn, conn.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT column_name, data_type
+            FROM information_schema.columns
+            WHERE table_name = %s
+            AND table_schema = %s
+            ORDER BY ordinal_position;
+            """,
+            (table_name, schema),
+        )
+
+        rows = cursor.fetchall()
+
+    if not rows:
+        raise ValueError(f"Table {schema}.{table_name} not found or has no columns.")
+
+    column_types: dict[str, polars.DataType | type[polars.DataType]] = {}
+
+    for column_name, data_type in rows:
+        polars_type = PG_TO_POLARS_TYPES.get(data_type.lower(), polars.Utf8)
+        column_types[column_name] = polars_type
+
+    return column_types
