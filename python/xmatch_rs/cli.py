@@ -830,6 +830,12 @@ def copy_table(
     help="Suppress logging output.",
 )
 @cloup.option(
+    "--overwrite",
+    is_flag=True,
+    default=False,
+    help="Whether to overwrite existing files.",
+)
+@cloup.option(
     "--skip-existing/--no-skip-existing",
     default=True,
     help="Whether to skip downloading if the output file already exists.",
@@ -841,6 +847,7 @@ def download_table(
     schema: str | None = None,
     chunk_size: int = 10_000_000,
     quiet: bool = False,
+    overwrite: bool = False,
     skip_existing: bool = True,
 ) -> None:
     """Downloads a table from the specified database."""
@@ -854,5 +861,6 @@ def download_table(
         schema=schema or "public",
         chunk_size=chunk_size,
         quiet=quiet,
+        overwrite=overwrite,
         skip_existing=skip_existing,
     )

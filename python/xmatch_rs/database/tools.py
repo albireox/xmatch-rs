@@ -751,8 +751,11 @@ def download_table_from_db(
                     if not overwrite and skip_existing and output_file.exists():
                         cl.print(f"[yellow][!][/] Found existing file {output_file!s}.")
 
+                        lf = polars.scan_parquet(output_file)
+                        n_rows: int = lf.select(polars.len()).collect().item()
+
                         nn += 1
-                        offset += chunk_size
+                        offset += n_rows
                         continue
 
                     if not overwrite and output_file.exists():
