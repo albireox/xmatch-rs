@@ -164,7 +164,7 @@ def write_dataset_to_database(
             )
 
     pbar = Progress(
-        SpinnerColumn(),
+        SpinnerColumn("bouncingBar", style="blue"),
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         MofNCompleteColumn(),
