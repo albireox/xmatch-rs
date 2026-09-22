@@ -653,6 +653,7 @@ def download_table_from_db(
     chunk_size: int | None = 10_000_000,
     quiet: bool = False,
     overwrite: bool = False,
+    skip_existing: bool = True,
 ):
     """Downloads a table from the database and writes it to disk as Parquet files.
 
@@ -676,6 +677,10 @@ def download_table_from_db(
     overwrite
         If True, overwrites existing Parquet files. Otherwise, raises an error if
         the output files already exist.
+    skip_existing
+        If True, skips downloading chunks that already exist as Parquet files.
+        This is useful for resuming interrupted downloads without re-downloading
+        existing data. Ignored if ``overwrite`` is True.
 
     """
 
@@ -699,6 +704,11 @@ def download_table_from_db(
     ):
         if chunk_size is None:
             output_file = output_path / f"{table_name}_0001.parquet"
+
+            if not overwrite and skip_existing and output_file.exists():
+                cl.print(f"[yellow][!][/] Found existing file {output_file!s}.")
+                return
+
             if not overwrite and output_file.exists():
                 raise FileExistsError(f"Output file {output_file} already exists.")
 
@@ -734,6 +744,20 @@ def download_table_from_db(
 
             with cl.status(f"Downloading chunk {nn} of {n_chunks} ...") as status:
                 while True:
+                    status.update(f"Downloading chunk {nn} of {n_chunks} ...")
+
+                    output_file = output_path / f"{table_name}_{nn:04d}.parquet"
+
+                    if not overwrite and skip_existing and output_file.exists():
+                        cl.print(f"[yellow][!][/] Found existing file {output_file!s}.")
+
+                        nn += 1
+                        offset += chunk_size
+                        continue
+
+                    if not overwrite and output_file.exists():
+                        raise FileExistsError(f"File {output_file} already exists.")
+
                     query = (
                         f'SELECT * FROM "{schema}"."{table_name}" '
                         f"ORDER BY {pk[0]} LIMIT {chunk_size} OFFSET {offset}"
@@ -744,10 +768,6 @@ def download_table_from_db(
                         engine="adbc",
                     )
 
-                    output_file = output_path / f"{table_name}_{nn:04d}.parquet"
-                    if not overwrite and output_file.exists():
-                        raise FileExistsError(f"File {output_file} already exists.")
-
                     df.write_parquet(output_file)
 
                     if df.is_empty() or df.height < chunk_size:
@@ -755,8 +775,6 @@ def download_table_from_db(
 
                     offset += chunk_size
                     nn += 1
-
-                    status.update(f"Downloading chunk {nn} of {n_chunks} ...")
 
     cl.print(
         f"[green][✔][/] Downloaded table [blue]{schema}.{table_name}[/] "
