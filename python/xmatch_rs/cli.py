@@ -829,6 +829,11 @@ def copy_table(
     default=False,
     help="Suppress logging output.",
 )
+@cloup.option(
+    "--skip-existing/--no-skip-existing",
+    default=True,
+    help="Whether to skip downloading if the output file already exists.",
+)
 def download_table(
     database_uri: str,
     table_name: str,
@@ -836,6 +841,7 @@ def download_table(
     schema: str | None = None,
     chunk_size: int = 10_000_000,
     quiet: bool = False,
+    skip_existing: bool = True,
 ) -> None:
     """Downloads a table from the specified database."""
 
@@ -848,4 +854,5 @@ def download_table(
         schema=schema or "public",
         chunk_size=chunk_size,
         quiet=quiet,
+        skip_existing=skip_existing,
     )
