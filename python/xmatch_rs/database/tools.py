@@ -912,15 +912,25 @@ def _download_table_using_copy(
     )
 
     # Now we convert each CSV file to a Parquet file.
-    with Timer() as timer, console.status("Converting CSV files to Parquet..."):
-        for csv_file in output_path.glob(f"{table_name}_*.csv"):
-            parquet_file = csv_file.with_suffix(".parquet")
-
-            (
-                polars.scan_csv(csv_file, schema=df_schema)
-                .cast(df_schema)  # type: ignore
-                .sink_parquet(parquet_file, engine="streaming")
+    with Timer() as timer, rich_status(console, "Converting CSV files to Parquet..."):
+        (
+            polars.scan_csv(
+                output_path / f"{table_name}_*.csv",
+                schema=df_schema,
+                has_header=False,
             )
+            .cast(df_schema)  # type: ignore
+            .sink_parquet(
+                polars.PartitionBy(
+                    output_path,
+                    file_path_provider=lambda part: (
+                        f"{table_name}_{part.index_in_partition + 1:04d}.parquet"
+                    ),
+                    max_rows_per_file=chunk_size,
+                ),
+                engine="streaming",
+            )
+        )
 
     console.print(
         f"[green][✔][/] Converted CSV files to Parquet in {timer.elapsed:,.1f} seconds."
