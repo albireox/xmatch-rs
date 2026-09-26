@@ -533,10 +533,25 @@ def _run_hats_min_order_phase(
             if isinstance(data_path, (str, pathlib.Path)):
                 data_path = [data_path]
 
-            lf = polars.scan_parquet(
-                [pathlib.Path(p) for p in data_path],
-                cast_options=polars.ScanCastOptions(integer_cast="allow-float"),
-            )
+            # Ensure we expand all the directories into parquet files.
+            # Otherwise Polars can treat an entire directory of Parquet files
+            # as a single lazy frame, which can cause high memory usage.
+            data_files: list[pathlib.Path] = []
+            for p in data_path:
+                if isinstance(p, str):
+                    p = pathlib.Path(p)
+                if p.is_file():
+                    data_files.append(p)
+                else:
+                    data_files.extend(list(p.glob("**/*.parquet")))
+
+            lf = [
+                polars.scan_parquet(
+                    pathlib.Path(p),
+                    cast_options=polars.ScanCastOptions(integer_cast="allow-float"),
+                )
+                for p in data_files
+            ]
 
             convert_to_parquet(
                 lf,
