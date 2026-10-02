@@ -221,7 +221,10 @@ def write_dataset_to_database(
         if primary_key:
             with (
                 Timer() as timer,
-                rich_status(cl, f"Creating PK on [blue]{tbl_qual}[/] ..."),
+                rich_status(
+                    cl,
+                    f"Creating PK on [blue]{tbl_qual} ({primary_key})[/] ...",
+                ),
                 psycopg.connect(database_uri) as conn,
                 conn.cursor() as cursor,
             ):
