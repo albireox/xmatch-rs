@@ -256,9 +256,8 @@ class XMatch:
 
     def add_catalogue(
         self,
-        name: str,
         hats_path: str | pathlib.Path,
-        plan: str | None = None,
+        name: str | None = None,
         run_id: int | None = None,
         skip_phases: list[int] | None = None,
         join_paths: list[tuple[str, str]] = [],
@@ -269,12 +268,11 @@ class XMatch:
 
         Parameters
         ----------
-        name
-            The name of the catalogue.
         hats_path
             The path to the HATS collection.
-        plan
-            The plan used to cross-match this catalogue.
+        name
+            The name of the catalogue. If `None`, the name will be inferred from the
+            catalogue model.
         run_id
             The run ID of the cross-match for this catalogue. Must be specified
             if this is the first catalogue being cross-matched. Otherwise uses
@@ -314,7 +312,6 @@ class XMatch:
         cat_model = self.catalogue_model_from_hats(
             name=name,
             hats_path=pathlib.Path(hats_path),
-            plan=plan,
             run_id=run_id,
             phases=phases,
         )
@@ -324,9 +321,8 @@ class XMatch:
 
     def catalogue_model_from_hats(
         self,
-        name: str,
         hats_path: pathlib.Path,
-        plan: str | None = None,
+        name: str | None = None,
         run_id: int | None = None,
         phases: list[PhaseModel] = [],
     ) -> CatalogueModel:
@@ -348,6 +344,7 @@ class XMatch:
 
         primary_key = hats.schema.model.primary_key
 
+        name = name or hats.schema.model.short_name
         ra_column = hats.schema.model.ra_column
         dec_column = hats.schema.model.dec_column
         ra_column_unit = hats.schema.model.ra_column_unit
@@ -364,7 +361,6 @@ class XMatch:
 
         cat_model = CatalogueModel(
             name=name,
-            plan=plan,
             run_id=run_id,
             hats_path=hats_path,
             primary_key=primary_key,
