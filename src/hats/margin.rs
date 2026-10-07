@@ -16,7 +16,6 @@ use cdshealpix::nested::bmoc::BMOC;
 use cdshealpix::nested::bmoc::Status;
 use cdshealpix::nested::{center, get};
 use polars::prelude::*;
-use polars_rows_iter::df_rows_iter;
 use serde::{Deserialize, Serialize};
 
 use crate::hats::path_providers::{file_path_provider_fn, path_provider_part};
@@ -102,8 +101,7 @@ pub fn create_margin_cache(
     let partition_info = hats_tools::PartitionInfo::from_dataset(&object_dataset, true)?;
 
     // Create an iterator over the rows of the partition (i.e., the pixels to process).
-    let pixels = partition_info.get();
-    let pixels_iter = df_rows_iter!(&pixels, "Norder" => u8, "Npix" => u64)?;
+    let pixels_iter = partition_info.clone().into_iter();
 
     // If there is a progress file configured, write the initial progress information
     // with the list of pixels to process.
@@ -117,6 +115,8 @@ pub fn create_margin_cache(
                 .open(progress_file)
                 .unwrap(),
         ));
+
+        let pixels = partition_info.get();
 
         let progress = HATSRepartitionProgress {
             n_pixels_to_process: pixels.height(),
@@ -139,7 +139,7 @@ pub fn create_margin_cache(
         use rayon::prelude::*;
 
         pixels_iter.par_bridge().for_each(|row| {
-            let (norder, npix) = row.unwrap();
+            let (norder, npix) = row;
             let progress_file_clone = progress_file.clone();
 
             create_margin_cache_pixel(

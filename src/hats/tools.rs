@@ -10,7 +10,6 @@ use std::{fs::File, path::PathBuf};
 use anyhow::{Result, anyhow, bail};
 use cdshealpix::nested;
 use polars::prelude::*;
-use polars_rows_iter::df_rows_iter;
 
 use crate::{healpix::healpix_convert_order, tools::to_pl_path};
 
@@ -268,17 +267,30 @@ impl IntoIterator for PartitionInfo {
     type IntoIter = PartitionInfoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        let pixels = self.get().lazy().collect().unwrap();
-        let data: Vec<(u8, u64)> = df_rows_iter!(&pixels, "Norder" => u8, "Npix" => u64)
+        let pixels = self.get().clone();
+        let norder = pixels
+            .column("Norder")
             .unwrap()
-            .map(|row| row.unwrap())
-            .collect();
+            .u8()
+            .unwrap()
+            .into_no_null_iter()
+            .collect::<Vec<u8>>();
+        let npix = pixels
+            .column("Npix")
+            .unwrap()
+            .u64()
+            .unwrap()
+            .into_no_null_iter()
+            .collect::<Vec<u64>>();
+
+        let data: Vec<(u8, u64)> = norder.into_iter().zip(npix).collect();
 
         PartitionInfoIter {
             data: data.into_iter(),
         }
     }
 }
+
 /// Returns a list of HATS neighbours for a given order-pixel.
 ///
 /// Given a dataset and a pixel in a certain order, finds its neighbours in any order within the
