@@ -216,8 +216,8 @@ fn _xmatch_phase2_pixel(
     // Get the catalogue lazyframe for the pixel to process.
     let primary_key = cat_data.primary_key.clone();
     let hats_dataset_path =
-        xmatch::tools::get_hats_path_root(cat_data.hats_path.clone())?.join("object/dataset");
-    let cat_lf = xmatch::tools::scan_pixel_from_hats_dataset(
+        hats::tools::get_hats_path_root(cat_data.hats_path.clone())?.join("object/dataset");
+    let cat_lf = hats::tools::scan_pixel_from_hats_dataset(
         hats_dataset_path,
         xmatch_order,
         xmatch_pixel,

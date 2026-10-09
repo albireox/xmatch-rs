@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::thread::available_parallelism;
 
-use crate::hats::tools::PartitionInfo;
+use crate::hats::tools::{PartitionInfo, get_hats_path_root, scan_pixel_from_hats_dataset};
 use crate::tools::{
     IsEmpty, PartitionedParquetSinkOptions, lf_row_count, sink_lf_to_partitioned_parquet,
     to_pl_path,
@@ -24,9 +24,8 @@ use crate::xmatch::models::{
 };
 use crate::xmatch::tools::{
     ProgressTracker, add_catalogid, add_healpix_xmatch_column, delete_dir_if_empty,
-    get_hats_path_root, get_temp_dir_path, get_unix_timestamp_ms, get_xmatch_path_root,
-    get_xmatch_pixels, move_temp_files, propagate_coordinates, scan_pixel_from_hats_dataset,
-    scan_pixels_from_xmatch_dataset,
+    get_temp_dir_path, get_unix_timestamp_ms, get_xmatch_path_root, get_xmatch_pixels,
+    move_temp_files, propagate_coordinates, scan_pixels_from_xmatch_dataset,
 };
 
 static LOG_PREFIX: OnceLock<String> = OnceLock::new();

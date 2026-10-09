@@ -21,7 +21,7 @@ use std::{
 };
 
 use crate::{
-    hats::tools::PartitionInfo,
+    hats::tools::get_root_path,
     tools::IsEmpty,
     tools::{get_parquet_hive_schema, lf_row_count, sink_lf_to_partitioned_parquet, to_pl_path},
     xmatch::models::{
@@ -47,76 +47,6 @@ pub fn get_temp_dir_path(
     }
 
     Ok(temp_dir_path)
-}
-
-/// Returns a `LazyFrame` for pixel in a HATS dataset.
-///
-/// Given a HATS dataset and a `pixel` of a given `order``, scans all the pixels in the dataset
-/// that contain the input pixel. Optionally, the dataset can be filtered to includel *only*
-/// the targets for the input pixel by using the `strict` parameter; otherwise the returned
-/// `LazyFrame` is a superset. If there are no pixels in the dataset that contain the input pixel,
-/// returns `None`.
-///
-pub fn scan_pixel_from_hats_dataset(
-    hats_path: PathBuf,
-    order: u8,
-    pixel: u64,
-    strict: bool,
-) -> Result<Option<LazyFrame>> {
-    let hats_path = get_hats_path_root(hats_path).unwrap();
-    let dataset_path = hats_path.join("object/dataset");
-
-    if !dataset_path.exists() {
-        panic!("Dataset file not found in HATS path: {:?}", dataset_path);
-    }
-
-    // Get the partition info for the dataset. Iterate over the partition info to find all pixels
-    // that contain or are contained by the input pixel.
-    let partition_info = PartitionInfo::from_dataset(&dataset_path, true).unwrap();
-
-    let mut pixels_to_scan: Vec<(u8, u64)> = Vec::new();
-
-    for (pix_order, pix) in partition_info.into_iter() {
-        if pix_order == order && pix == pixel {
-            pixels_to_scan.push((pix_order, pix));
-        } else if pix_order > order && (pix / 4_u64.pow((pix_order - order) as u32) == pixel) {
-            pixels_to_scan.push((pix_order, pix));
-        } else if pix_order < order && (pixel / 4_u64.pow((order - pix_order) as u32) == pix) {
-            pixels_to_scan.push((pix_order, pix));
-        }
-    }
-
-    // If there are no pixels to scan, return None.
-    if pixels_to_scan.is_empty() {
-        return Ok(None);
-    }
-
-    // Create a filter expression in which we OR together the conditions for each (order, pixel)
-    // to collect.
-    // NOTE: an alternative would be to create a list of LazyFrames by scanning each pixel
-    // directory and then concatenate them, adding columns for Noder, Dir, and Npix as literals.
-    // I think this is not more efficient than filtering the entire dataset because Polars seems
-    // to use the hive partitioning to only ready the necessary directories.
-    let first = pixels_to_scan.first().unwrap();
-
-    let mut or_expr = col("Norder").eq(first.0).and(col("Npix").eq(first.1));
-    for (pix_order, pix) in pixels_to_scan.iter().skip(1) {
-        or_expr = or_expr.or(col("Norder").eq(*pix_order).and(col("Npix").eq(*pix)));
-    }
-
-    // Scan the dataset and filter it.
-    let lf =
-        LazyFrame::scan_parquet(to_pl_path(dataset_path).unwrap(), Default::default()).unwrap();
-    let lf = lf.filter(or_expr);
-
-    if !strict {
-        return Ok(Some(lf));
-    }
-
-    // If strict is True, we need to filter the LazyFrame to only targets that exactly match
-    // the (order, pixel) of the input. We use the _healpix_29 column for this.
-    let lf = lf.filter((col("_healpix_29") / lit(4u64.pow((29 - order) as u32))).eq(pixel));
-    Ok(Some(lf))
 }
 
 /// Gets the xmatch lazyframe that contains the input pixel at the xmatch order.
@@ -184,33 +114,9 @@ pub fn scan_pixels_from_xmatch_dataset(
     Ok(lf)
 }
 
-/// Helper function to find the root of a path by looking for a specific file in the directory or its parents.
-fn get_root_path(base_path: PathBuf, check_file: &str) -> Result<PathBuf> {
-    let mut current_path = base_path.clone();
-
-    loop {
-        if current_path.join(check_file).exists() {
-            return Ok(current_path);
-        }
-
-        if !current_path.pop() {
-            bail!(
-                "Could not find {} in any parent directory of {:?}",
-                check_file,
-                base_path
-            );
-        }
-    }
-}
-
 /// Find the root of the xmatch path, looking for the `xmatch.yaml` file.
 pub fn get_xmatch_path_root(xmatch_path: PathBuf) -> Result<PathBuf> {
     get_root_path(xmatch_path, "xmatch.yaml")
-}
-
-/// Find the root of the HATS path, looking for the `_schema.yaml` file.
-pub fn get_hats_path_root(hats_path: PathBuf) -> Result<PathBuf> {
-    get_root_path(hats_path, "_schema.yaml")
 }
 
 static RUN_ID_BIT_SHIFT: usize = 64 - 11;

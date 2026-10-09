@@ -263,7 +263,7 @@ fn _xmatch_phase1_join_pk(
     );
 
     let from_hats_path =
-        xmatch::tools::get_hats_path_root(from_cat_data.hats_path.clone())?.join("object/dataset");
+        hats::tools::get_hats_path_root(from_cat_data.hats_path.clone())?.join("object/dataset");
 
     // Get the list of pixels in the from catalogue.
     let partition_info = hats::tools::PartitionInfo::from_dataset(&from_hats_path, true).unwrap();
@@ -356,10 +356,10 @@ fn _xmatch_phase1_join_pk_pixel(
 
     // Scan the original data.
     let cat_dataset_path =
-        xmatch::tools::get_hats_path_root(from_cat_data.hats_path.clone())?.join("object/dataset");
+        hats::tools::get_hats_path_root(from_cat_data.hats_path.clone())?.join("object/dataset");
 
     // Scan the original data for the from pixel.
-    let from_lf = if let Some(lf) = xmatch::tools::scan_pixel_from_hats_dataset(
+    let from_lf = if let Some(lf) = hats::tools::scan_pixel_from_hats_dataset(
         cat_dataset_path,
         from_order,
         from_pixel,

@@ -45,18 +45,18 @@ def get_max_catalogid(xmatch_path: str | pathlib.Path, run_id: int | None) -> in
     """
     ...
 
-def scan_pixel_from_dataset(
+def pixel_from_dataset(
     hats_path: str | pathlib.Path,
     order: int,
     pixel: int,
     strict: bool,
-) -> polars.LazyFrame | None:
+) -> polars.DataFrame | None:
     """Scans a HEALPix pixel from a HATS dataset.
 
     Given a HATS dataset and a ``pixel`` of a given ``order``, scans all the pixels in
     the dataset that contain the input pixel. Optionally, the dataset can be filtered
     to includel only the targets for the input pixel by using the ``strict`` parameter;
-    otherwise the returned ``LazyFrame`` is a superset. If there are no pixels in the
+    otherwise the returned ``DataFrame`` is a superset. If there are no pixels in the
     dataset that contain the input pixel, returns ``None``.
 
 

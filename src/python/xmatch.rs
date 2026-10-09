@@ -12,7 +12,6 @@ pub(crate) mod py_xmatch {
     use log::LevelFilter;
     use pyo3::prelude::*;
     use pyo3_log::{Caching, Logger};
-    use pyo3_polars::PyLazyFrame;
     use std::sync::{LazyLock, OnceLock};
     use std::{path::PathBuf, sync::Mutex};
 
@@ -72,22 +71,6 @@ pub(crate) mod py_xmatch {
     pub fn py_get_max_catalogid(xmatch_path: PathBuf, run_id: Option<usize>) -> Result<u64> {
         let max_catalogid = xmatch::tools::get_max_catalogid(Some(xmatch_path), run_id, true)?;
         Ok(max_catalogid)
-    }
-
-    #[pyfunction(name = "scan_pixel_from_dataset")]
-    pub fn py_scan_pixel_from_dataset(
-        hats_path: PathBuf,
-        order: u8,
-        pixel: u64,
-        strict: bool,
-    ) -> Option<PyLazyFrame> {
-        if let Some(lf) =
-            xmatch::tools::scan_pixel_from_hats_dataset(hats_path, order, pixel, strict).unwrap()
-        {
-            Some(PyLazyFrame(lf))
-        } else {
-            None
-        }
     }
 
     #[pyfunction(name = "delete_catalogue_from_dataset")]

@@ -11,6 +11,7 @@ pub(crate) mod py_hats {
 
     use anyhow::{Result, bail};
     use pyo3::prelude::*;
+    use pyo3_polars::PyDataFrame;
 
     use crate::hats::{
         self,
@@ -146,6 +147,22 @@ pub(crate) mod py_hats {
             PointsStrategy::Dynamic,
             true,
         ))
+    }
+
+    #[pyfunction(name = "pixel_from_dataset")]
+    pub fn py_pixel_from_dataset(
+        hats_path: PathBuf,
+        order: u8,
+        pixel: u64,
+        strict: bool,
+    ) -> Option<PyDataFrame> {
+        if let Some(df) =
+            hats::tools::pixel_from_hats_dataset(hats_path, order, pixel, strict).unwrap()
+        {
+            Some(PyDataFrame(df))
+        } else {
+            None
+        }
     }
 
     #[pymodule_init]
