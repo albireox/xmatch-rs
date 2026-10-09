@@ -359,12 +359,16 @@ pub fn get_unix_timestamp_ms() -> i64 {
     now.timestamp_millis()
 }
 
-/// Propagates RA/Dec coordinates from pmra/pmdec.
+/// Propagates RA/Dec coordinates from pmra/pmdec. Does nothing if the columns are not present.
 pub fn propagate_coordinates(
     cat_lf: LazyFrame,
     cat_model: &CatalogueModel,
     to_epoch: f32,
 ) -> Result<LazyFrame> {
+    if cat_model.pmra_column.is_none() || cat_model.pmdec_column.is_none() {
+        return Ok(cat_lf);
+    }
+
     // If the ref_epoch values are in JD, convert them to Julian year.
     // 2451545 is the JD for 2000.0 and a Julian year is 365.25 days.
     let cat_lf = if cat_model.epoch_format.is_some()
