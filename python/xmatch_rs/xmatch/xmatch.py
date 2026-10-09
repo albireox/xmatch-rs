@@ -55,7 +55,10 @@ __all__ = ["XMatch"]
 # Add trace logging level.
 logging.addLevelName(5, "TRACE")
 logging.Logger.TRACE = lambda self, message, *args, **kws: self._log(  # type: ignore
-    5, message, *args, **kws
+    5,
+    message,
+    *args,
+    **kws,
 )
 
 
@@ -71,12 +74,18 @@ class PrefixAdapter(logging.LoggerAdapter):
 
         self.prefix = prefix
 
-    def set_catalogue_prefix(self, catalogue_name: str):
+    def set_catalogue_prefix(self, prefix: str | None):
         """Sets the prefix to the catalogue name."""
 
-        self.prefix = f"[{catalogue_name.upper()}]"
+        if prefix is None:
+            self.prefix = None
+            return
+
+        self.prefix = f"[{prefix.upper()}]"
 
     def process(self, msg, kwargs):
+        """Processes the log message by adding the prefix if set."""
+
         if self.prefix is None or self.prefix == "":
             return msg, kwargs
 
@@ -104,6 +113,9 @@ class XMatch:
         epoch: float | None = None,
         pixelation_order: int | None = None,
         overwrite: bool = False,
+        verbose: bool = False,
+        quiet: bool = False,
+        logfile: pathlib.Path | str | None = None,
     ):
         """Initializes the XMatch product.
 
@@ -122,6 +134,13 @@ class XMatch:
             will be read from the ``xmatch.yaml`` file.
         overwrite
             If `True`, ignores the existing ``xmatch.yaml`` file.
+        verbose
+            If `True`, enables verbose logging.
+        quiet
+            If `True`, disables all logging.
+        logfile
+            The path to the log file. If not provided, logs will be printed
+            to the console.
 
         """
 
@@ -133,6 +152,7 @@ class XMatch:
             get_xmatch_rs_logger("xmatch_rs", log_level=logging.INFO),
             prefix=None,
         )
+        self.init_logger(verbose=verbose, quiet=quiet, logfile=logfile)
 
         if (self.path / "xmatch.yaml").exists() and not overwrite:
             self.model = XMatchModel.read(self.path / "xmatch.yaml")
@@ -326,6 +346,27 @@ class XMatch:
         run_id: int | None = None,
         phases: list[PhaseModel] = [],
     ) -> CatalogueModel:
+        """Creates a catalogue model from a HATS collection.
+
+        Parameters
+        ----------
+        hats_path
+            The path to the HATS collection.
+        name
+            The name of the catalogue. If `None`, the short name from the HATS
+            schema will be used.
+        run_id
+            The run ID for the catalogue. If `None`, the run ID of the
+            last catalogue in the model will be used.
+        phases : list[PhaseModel], optional
+            A list of phase models for the catalogue. Defaults to an empty list.
+
+        Returns
+        -------
+        CatalogueModel
+            The created catalogue model.
+
+        """
 
         hats_path = pathlib.Path(hats_path)
 
@@ -384,8 +425,6 @@ class XMatch:
 
         Parameters
         ----------
-        cat_model
-            The catalogue model to process.
         delete_temporary
             If `True`, deletes any existing temporary files before starting the
             catalogue processing.
@@ -400,7 +439,9 @@ class XMatch:
                 self.log.debug(f"Skipping complete catalogue {cat_model.name!r}.")
                 continue
 
+            self.log.set_catalogue_prefix(None)
             self.log.info(f"Processing catalogue {cat_model.name!r}.")
+
             self._process_catalogue(
                 cat_model,
                 delete_temporary=delete_temporary,
@@ -521,7 +562,7 @@ class XMatch:
     def _run_phase_1(self, cat_model: CatalogueModel):
         """Runs phase 1 of the cross-matching process for a catalogue."""
 
-        with ProgressTracker(log=self.log) as progress:
+        with ProgressTracker(log=self.log, label="Phase 1") as progress:
             xmatch_lib.run_phase_1(
                 xmatch_path=str(self.path),
                 xmatch_model_data=self.model.model_dump_json(),
@@ -533,7 +574,7 @@ class XMatch:
     def _run_phase_2(self, cat_model: CatalogueModel):
         """Runs phase 2 of the cross-matching process for a catalogue."""
 
-        with ProgressTracker(log=self.log) as progress:
+        with ProgressTracker(log=self.log, label="Phase 2") as progress:
             xmatch_lib.run_phase_2(
                 xmatch_path=str(self.path),
                 xmatch_model_data=self.model.model_dump_json(),
@@ -545,7 +586,7 @@ class XMatch:
     def _run_phase_3(self, cat_model: CatalogueModel):
         """Runs phase 3 of the cross-matching process for a catalogue."""
 
-        with ProgressTracker(log=self.log) as progress:
+        with ProgressTracker(log=self.log, label="Phase 3") as progress:
             xmatch_lib.run_phase_3(
                 xmatch_path=str(self.path),
                 xmatch_model_data=self.model.model_dump_json(),
