@@ -11,9 +11,12 @@ from __future__ import annotations
 import pathlib
 import shutil
 
-from typing import TYPE_CHECKING, Iterator, Literal
+from typing import TYPE_CHECKING, Iterator, Literal, Sequence
 
+import numpy
 import polars
+from healpy.newvisufunc import projview
+from matplotlib import pyplot as plt
 from rich.live import Live
 
 import sdsstools.logger
@@ -29,6 +32,8 @@ from xmatch_rs.tools import get_xmatch_rs_logger
 
 
 if TYPE_CHECKING:
+    from numpy.typing import ArrayLike
+
     from xmatch_rs.types import APPLY_CALLBACK_T
 
 
@@ -198,6 +203,9 @@ class HATS:
         extra_index_columns: list[str] = [],
         check_index_duplicates: bool = False,
         sort_index: bool = False,
+        create_density_map: bool = True,
+        density_map_order: int = 11,
+        density_map_kwargs: dict | None = None,
         n_workers: int | None = None,
         dynamic_planning: bool = True,
         apply_callback: APPLY_CALLBACK_T | list[APPLY_CALLBACK_T] | None = None,
@@ -275,6 +283,12 @@ class HATS:
         sort_index
             If ``True``, sorts the index by the index column. Sorting can cause OOM
             errors for large datasets, so it is disabled by default.
+        create_density_map
+            If ``True``, a density map will be created for the dataset.
+        density_map_order
+            The order of the density map.
+        density_map_kwargs
+            Additional keyword arguments to pass to the density map creation function.
         n_workers
             The number of worker processes to use for the conversion. If not provided,
             uses recommended defaults based on the system's resources. ``n_workers=1``
@@ -400,6 +414,14 @@ class HATS:
                 max_rows_per_file=max_rows_per_file,
                 max_kilobytes_per_file=max_kilobytes_per_file,
                 sort=sort_index,
+            )
+
+        if create_density_map:
+            log.info("Creating density map.")
+            obj.create_density_map(
+                order=density_map_order,
+                coord="galactic",
+                **(density_map_kwargs or {}),
             )
 
         return obj
@@ -695,6 +717,88 @@ class HATS:
         coll_properties.write(self.path / "collection.properties")
 
         log.info("Updated margin cache in collection properties.")
+
+    def create_density_map(
+        self,
+        map_order: int,
+        coord: Literal["equatorial", "galactic"] = "equatorial",
+        norm: str | None = None,
+        m: Sequence[int] | None = None,
+        output_path: str | pathlib.Path | None = None,
+        **map_kwargs,
+    ) -> ArrayLike:
+        """Creates a density map for the HATS dataset.
+
+        Parameters
+        ----------
+        map_order
+            The order of the HEALPix map to generate.
+        coord
+            The coordinate system to use for the density map. Can be ``'equatorial'``
+            or ``'galactic'``.
+        norm
+            The normalization to use for the density map.
+        m
+            The map to use for the density map (must be in the RING schema).
+            If not provided it will be calculated from the HATS dataset.
+        output_path
+            The path to save the generated density map. If not provided, the map
+            will be saved to the default location in the HATS object directory.
+        map_kwargs
+            Additional keyword arguments to pass to the ``healpy.newvisufunc.projview``
+            function.
+
+        Returns
+        -------
+
+        """
+
+        if m is None:
+            healpix_map = numpy.array(
+                _rs_hats.get_healpix_map(
+                    str(self.path / "object"),
+                    map_order,
+                )
+            )
+        else:
+            healpix_map = numpy.array(m)
+
+        if output_path is None:
+            output_path = self.path / "object" / f"density_map_order_{map_order}.pdf"
+        else:
+            output_path = pathlib.Path(output_path)
+
+        projview_kwargs = {
+            "coord": "C",
+            "cb_orientation": "vertical",
+            "graticule": True,
+            "graticule_labels": True,
+            "projection_type": "mollweide",
+            "unit": "Target count",
+            "xlabel": "RA",
+            "ylabel": "Dec",
+            "norm": norm,
+            "title": self.properties.obs_collection,
+        }
+
+        if coord == "galactic":
+            projview_kwargs["coord"] = ["C", "G"]
+            projview_kwargs["xlabel"] = "Galactic Longitude"
+            projview_kwargs["ylabel"] = "Galactic Latitude"
+        elif coord == "equatorial":
+            pass
+        else:
+            raise ValueError(f"Unsupported coordinate system: {coord!r}")
+
+        projview_kwargs.update(map_kwargs)
+
+        with plt.ioff():
+            quad = projview(m=healpix_map, **projview_kwargs)
+            quad.figure.set_size_inches((16, 9))
+            quad.figure.savefig(output_path)
+            plt.close(quad.figure)
+
+        return healpix_map
 
     def write_to_database(
         self,

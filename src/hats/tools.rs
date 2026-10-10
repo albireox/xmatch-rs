@@ -5,13 +5,18 @@
  *  @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
  */
 
-use std::{fs::File, path::PathBuf};
+use std::{fs::File, path::PathBuf, sync::Mutex};
 
 use anyhow::{Result, anyhow, bail};
 use cdshealpix::nested;
+use itertools::multizip;
 use polars::prelude::*;
+use rayon::iter::{ParallelBridge, ParallelIterator};
 
-use crate::{healpix::healpix_convert_order, tools::to_pl_path};
+use crate::{
+    healpix::healpix_convert_order,
+    tools::{lf_row_count, to_pl_path},
+};
 
 /// Helper function to find the root of a path by looking for a specific file in the directory or its parents.
 pub fn get_root_path(base_path: PathBuf, check_file: &str) -> Result<PathBuf> {
@@ -228,6 +233,26 @@ impl PartitionInfo {
     /// Gets the data as a `DataFrame`.
     pub fn get(&self) -> DataFrame {
         self._df.clone()
+    }
+
+    /// Returns a `LazyFrame` with the HATS data for a pixel, if it exists in the partition.
+    pub fn get_pixel(&self, dataset_path: PathBuf, order: u8, npix: u64) -> Result<LazyFrame> {
+        if !self.contains(order, npix)? {
+            return Err(anyhow!("Pixel not found in the partition"));
+        }
+
+        let pixel_path = get_pixel_path(&dataset_path, order, npix);
+        let pl_path = to_pl_path(&pixel_path)?;
+        let lf = LazyFrame::scan_parquet(pl_path, Default::default())?;
+
+        Ok(lf)
+    }
+
+    /// Returns the list of orders in the partition info.
+    pub fn orders(&self) -> Result<Vec<u8>> {
+        let orders = self.get().lazy().select([col("Norder")]).collect()?;
+        let orders_col = orders.column("Norder")?.u8()?;
+        Ok(orders_col.into_no_null_iter().collect())
     }
 
     /// Number of pixels in the partition info.
@@ -470,4 +495,97 @@ pub fn pixel_from_hats_dataset(
             .collect_with_engine(Engine::Streaming)?
             .unwrap_single(),
     ))
+}
+
+/// Returns a HEALPix map from a HATS dataset.
+///
+/// For a given HATS dataset and order, returns a list with the number of targets in
+/// each pixel at the specified order. The list follows the RING scheme.
+pub fn get_healpix_map(hats_path: PathBuf, map_order: u8) -> Result<Vec<u32>> {
+    // Get dataset paths.
+    let hats_path = get_hats_path_root(hats_path).unwrap();
+    let dataset_path = hats_path.join("object/dataset");
+
+    if !dataset_path.exists() {
+        panic!("Dataset file not found in HATS path: {:?}", dataset_path);
+    }
+
+    // Get the partition info for the dataset.
+    let partition_info = PartitionInfo::from_dataset(&dataset_path, true).unwrap();
+
+    // Create the HEALPix map as a list of zeroes.
+    let npix = 12u32 * ((2u32).pow(map_order as u32)).pow(2);
+    let map = Arc::new(Mutex::new(vec![0u32; npix as usize]));
+
+    // We need an Arc-wrapped version of the partition info for parallel processing.
+    let partition_info_arc = Arc::new(PartitionInfo::from_dataset(&dataset_path, true).unwrap());
+
+    // Iterate over each pixel in the dataset and update the HEALPix map accordingly.
+    partition_info
+        .into_iter()
+        .par_bridge()
+        .try_for_each(|(pix_order, pixel)| {
+            let lf = partition_info_arc
+                .get_pixel(dataset_path.clone(), pix_order, pixel)
+                .unwrap();
+
+            if pix_order == map_order {
+                map.lock().unwrap()[pixel as usize] += lf_row_count(&lf).unwrap() as u32;
+            } else if pix_order > map_order {
+                // If the pixel order is greater than the target order, we need to aggregate the counts
+                // into the target, lower-order pixel.
+                let lower_order_pixel = pixel / 4u64.pow((pix_order - map_order) as u32);
+                map.lock().unwrap()[lower_order_pixel as usize] +=
+                    lf_row_count(&lf).unwrap() as u32;
+            } else {
+                // This is the hard case (and the most likely since the HEALPix map is likely to
+                // be finer than the HATS dataset). For each HATS pixel we need to calculate the
+                // number of targets in the map pixels that fall within this HATS pixel.
+
+                // Add a column to the lf with the map pixel indices. We take advantage of the
+                // _healpix_29 column to do this much faster.
+                let mut lf = lf;
+                let factor = 4u64.pow((29 - map_order) as u32);
+
+                lf = lf.with_columns(vec![
+                    col("_healpix_29")
+                        .true_div(lit(factor))
+                        .cast(DataType::UInt64)
+                        .alias("map_pixel"),
+                ]);
+
+                // Group by the map pixel and aggregate the row counts.
+                let grouped = lf
+                    .group_by(["map_pixel"])
+                    .agg(vec![col("_healpix_29").count().alias("row_count")])
+                    .collect()
+                    .unwrap();
+
+                // Update the HEALPix map with the aggregated row counts.
+                let map_pixels = grouped.column("map_pixel").unwrap().u64().unwrap().iter();
+                let row_counts = grouped.column("row_count").unwrap().u32().unwrap().iter();
+                for (map_pixel_opt, row_count_opt) in multizip((map_pixels, row_counts)) {
+                    if let (Some(map_pixel), Some(row_count)) = (map_pixel_opt, row_count_opt) {
+                        map.lock().unwrap()[map_pixel as usize] += row_count;
+                    }
+                }
+            }
+
+            Ok::<(), anyhow::Error>(())
+        })
+        .unwrap();
+
+    // Get the map in the NESTED scheme.
+    let nested_map = map.lock().unwrap().clone();
+
+    let layer_nested = nested::get(map_order);
+
+    // Convert the map from the RING scheme to the NESTED scheme.
+    let mut ring_map = vec![0u32; nested_map.len()];
+    for (nested_pixel, &count) in nested_map.iter().enumerate() {
+        let ring_pixel = layer_nested.to_ring(nested_pixel as u64);
+        ring_map[ring_pixel as usize] = count;
+    }
+
+    Ok(ring_map)
 }

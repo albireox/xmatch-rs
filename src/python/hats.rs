@@ -165,6 +165,11 @@ pub(crate) mod py_hats {
         }
     }
 
+    #[pyfunction(name = "get_healpix_map")]
+    pub fn py_get_healpix_map(hats_path: PathBuf, map_order: u8) -> Result<Vec<u32>> {
+        hats::tools::get_healpix_map(hats_path, map_order)
+    }
+
     #[pymodule_init]
     fn init(m: &Bound<'_, PyModule>) -> Result<()> {
         // Add the submodule to the sys.path.
