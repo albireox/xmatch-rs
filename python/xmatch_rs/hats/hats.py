@@ -205,6 +205,7 @@ class HATS:
         sort_index: bool = False,
         create_density_map: bool = True,
         density_map_order: int = 11,
+        density_map_norm: str = "symlog",
         density_map_kwargs: dict | None = None,
         n_workers: int | None = None,
         dynamic_planning: bool = True,
@@ -287,6 +288,8 @@ class HATS:
             If ``True``, a density map will be created for the dataset.
         density_map_order
             The order of the density map.
+        density_map_norm
+            The normalization to use for the density map. Defaults to "symlog".
         density_map_kwargs
             Additional keyword arguments to pass to the density map creation function.
         n_workers
@@ -419,8 +422,9 @@ class HATS:
         if create_density_map:
             log.info("Creating density map.")
             obj.create_density_map(
-                order=density_map_order,
+                density_map_order,
                 coord="galactic",
+                norm=density_map_norm,
                 **(density_map_kwargs or {}),
             )
 
