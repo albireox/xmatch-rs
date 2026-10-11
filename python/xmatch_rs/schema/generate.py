@@ -290,8 +290,11 @@ def generate_schema(
 
                 pl_schema = df.schema
                 for column, dtype in pl_schema.items():
+                    dtype, inner, size = get_polars_dtype(dtype)
                     source_columns[column] = {
                         "dtype": str(dtype),
+                        "inner": str(inner) if inner is not None else None,
+                        "size": size,
                         "unit": None,
                         "description": None,
                     }
@@ -300,8 +303,9 @@ def generate_schema(
                 qt = Table.read(data_path, format=f"ascii.{format}")
 
                 for cname in qt.columns:
+                    dtype, _, _ = get_polars_dtype(qt[cname].dtype)
                     source_columns[cname] = {
-                        "dtype": get_polars_dtype(qt[cname].dtype).__name__,
+                        "dtype": str(dtype),
                         "unit": str(qt[cname].unit.to_string(format="fits"))
                         if qt[cname].unit is not None
                         else None,

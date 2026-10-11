@@ -80,11 +80,8 @@ class Dtype(str, enum.Enum):
     FLOAT64 = "Float64"
     BOOLEAN = "Boolean"
     DATE = "Date"
-
-    def to_polars_dtype(self) -> Type[polars.DataType]:
-        """Converts the Dtype to a Polars data type."""
-
-        return get_polars_dtype(self.value)
+    ARRAY = "Array"
+    LIST = "List"
 
 
 TableColumn = Annotated[
@@ -311,6 +308,18 @@ class ColumnModel(BaseModel):
         ),
     ]
 
+    inner: Annotated[
+        Dtype | None,
+        Field(
+            description="The inner data type if the column is an array or list type."
+        ),
+    ] = None
+
+    shape: Annotated[
+        tuple[int, ...] | None,
+        Field(description="The shape of the column if it is an array or list type."),
+    ] = None
+
     unit: Annotated[
         str | None,
         Field(description="The unit of the column."),
@@ -353,6 +362,27 @@ class ColumnModel(BaseModel):
             default_factory=list,
         ),
     ]
+
+    def get_polars_dtype(self) -> polars.DataType:
+        """Returns the Polars data type corresponding to the column's dtype."""
+
+        if self.inner is not None:
+            inner = get_polars_dtype(self.inner)[0]
+        else:
+            inner = None
+
+        dtype_class, inner, shape = get_polars_dtype(
+            self.dtype,
+            inner=inner,
+            shape=self.shape,
+        )
+
+        if dtype_class == polars.Array and inner is not None and shape is not None:
+            return polars.Array(inner=inner, shape=shape)
+        elif dtype_class == polars.List and inner is not None:
+            return polars.List(inner=inner)
+        else:
+            return dtype_class()
 
 
 class DatabaseModel(BaseModel):

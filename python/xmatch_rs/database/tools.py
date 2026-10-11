@@ -9,10 +9,12 @@
 from __future__ import annotations
 
 import datetime
+import multiprocessing
 import pathlib
 import re
 import subprocess
 import time
+from functools import partial
 
 from typing import Literal, NamedTuple
 
@@ -960,23 +962,24 @@ def _download_table_using_copy(
     )
 
     # Now we convert each CSV file to a Parquet file.
-    csv_files = list(csv_files)
+    csv_files = list(output_path.glob(f"{table_name}_*.csv"))
     n_csv = len(csv_files)
+
+    _convert_csv_to_parquet_partial = partial(
+        _convert_csv_to_parquet,
+        df_schema=df_schema,
+    )
+
     with (
         Timer() as timer,
         rich_status(
             console,
             f"Converting CSV files to Parquet (0 / {n_csv}) ...",
         ) as status,
+        multiprocessing.Pool() as pool,
     ):
-        for n_file_, file_ in enumerate(csv_files):
-            parquet_file = file_.with_suffix(".parquet")
-            (
-                polars.scan_csv(file_, schema=df_schema, has_header=False)
-                .cast(df_schema)  # type: ignore
-                .sink_parquet(parquet_file, engine="streaming")
-            )
-
+        n_file_ = 0
+        for _ in pool.imap_unordered(_convert_csv_to_parquet_partial, csv_files):
             n_file_ += 1
             status.update(f"Converting CSV files to Parquet ({n_file_} / {n_csv}) ...")
 
@@ -989,6 +992,23 @@ def _download_table_using_copy(
         csv_file.unlink()
 
     console.print("[green][✔][/] Deleted intermediate CSV files.")
+
+
+def _convert_csv_to_parquet(
+    csv_file: pathlib.Path,
+    df_schema: dict[str, polars.DataType | type[polars.DataType]],
+    output_path: pathlib.Path | None = None,
+):
+    """Convert a CSV file to a Parquet file using the specified schema."""
+
+    if output_path is None:
+        output_path = csv_file.with_suffix(".parquet")
+
+    (
+        polars.scan_csv(csv_file, schema=df_schema, has_header=False)
+        .cast(df_schema)  # type: ignore
+        .sink_parquet(output_path, engine="streaming")
+    )
 
 
 PG_TO_POLARS_TYPES: dict[str, polars.DataType | type[polars.DataType]] = {

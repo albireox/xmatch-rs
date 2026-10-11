@@ -17,6 +17,7 @@ from typing import Type
 
 import numpy
 import polars
+import polars._typing
 
 import sdsstools.logger
 
@@ -39,7 +40,15 @@ def lazy_frame_row_count(lf: polars.LazyFrame) -> int:
     return lf.select(polars.len()).collect(engine="streaming").item()
 
 
-def get_polars_dtype(dtype: str | numpy.dtype) -> Type[polars.DataType]:
+def get_polars_dtype(
+    dtype: polars.DataType | str | numpy.dtype,
+    inner: Type[polars.DataType] | None = None,
+    shape: tuple[int, ...] | None = None,
+) -> tuple[
+    Type[polars.DataType],
+    Type[polars.DataType] | Type[polars._typing.DataTypeClass] | None,
+    tuple[int, ...] | None,
+]:
     """Retrieves a Polars DataType object.
 
     Parameters
@@ -55,42 +64,51 @@ def get_polars_dtype(dtype: str | numpy.dtype) -> Type[polars.DataType]:
 
     """
 
+    if isinstance(dtype, polars.DataType):
+        if isinstance(dtype, polars.Array):
+            return (polars.Array, type(inner or dtype.inner), shape or dtype.shape)
+        elif isinstance(dtype, polars.List):
+            return (polars.List, type(inner or dtype.inner), None)
+        else:
+            return (type(dtype), inner, shape)
+
+    if isinstance(dtype, str):
+        try:
+            return (getattr(polars, dtype), inner, shape)
+        except AttributeError:
+            pass
+
     if isinstance(dtype, numpy.dtype):
         dtype = dtype.name
 
     dtype_str = str(dtype).lower()
 
-    try:
-        return getattr(polars, dtype_str)
-    except AttributeError:
-        pass
-
     if dtype_str in ["int8", "i1"]:
-        return polars.Int8
+        return (polars.Int8, None, None)
     elif dtype_str in ["int16", "i2"]:
-        return polars.Int16
+        return (polars.Int16, None, None)
     elif dtype_str in ["int32", "i4"]:
-        return polars.Int32
+        return (polars.Int32, None, None)
     elif dtype_str in ["int64", "i8"]:
-        return polars.Int64
+        return (polars.Int64, None, None)
     elif dtype_str in ["uint8", "u1"]:
-        return polars.UInt8
+        return (polars.UInt8, None, None)
     elif dtype_str in ["uint16", "u2"]:
-        return polars.UInt16
+        return (polars.UInt16, None, None)
     elif dtype_str in ["uint32", "u4"]:
-        return polars.UInt32
+        return (polars.UInt32, None, None)
     elif dtype_str in ["uint64", "u8"]:
-        return polars.UInt64
+        return (polars.UInt64, None, None)
     elif dtype_str in ["float32", "f4"]:
-        return polars.Float32
+        return (polars.Float32, None, None)
     elif dtype_str in ["float64", "f8"]:
-        return polars.Float64
+        return (polars.Float64, None, None)
     elif dtype_str == "bool":
-        return polars.Boolean
+        return (polars.Boolean, None, None)
     elif dtype_str.startswith("str") or dtype_str.startswith("u"):
-        return polars.String
+        return (polars.String, None, None)
     elif dtype_str.startswith("bytes") or dtype_str.startswith("s"):
-        return polars.Binary
+        return (polars.Binary, None, None)
 
     raise ValueError(f"'{dtype_str}' is not a valid Polars data type")
 

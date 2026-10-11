@@ -419,10 +419,10 @@ def _process_lazy_frame(
             continue
 
         if col_model.cast_to:
-            cast_to_dtype = get_polars_dtype(col_model.cast_to)
+            cast_to_dtype, _, _ = get_polars_dtype(col_model.cast_to)
             lf = lf.with_columns(polars.col(lf_col).cast(cast_to_dtype))
         elif col_model.dtype:
-            cast_to_dtype = col_model.dtype.to_polars_dtype()
+            cast_to_dtype = col_model.get_polars_dtype()
             lf = lf.with_columns(polars.col(lf_col).cast(cast_to_dtype))
 
         apply_functions = col_model.apply_functions or []

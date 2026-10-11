@@ -8,7 +8,11 @@
 
 from __future__ import annotations
 
+import pathlib
+
 from typing import TYPE_CHECKING
+
+import polars
 
 
 if TYPE_CHECKING:
@@ -35,13 +39,21 @@ DTYPE_TO_SQL = {
 }
 
 
-def create_table_sql(hats: HATS) -> str:
+def create_table_sql(
+    hats: HATS | None = None,
+    frame: polars.DataFrame | polars.LazyFrame | str | pathlib.Path | None = None,
+    table_name: str | None = None,
+    schema: str | None = None,
+) -> str:
     """Generates a SQL statement to create a table.
 
     Parameters
     ----------
     hats
         The HATS dataset for which to create the table.
+    frame
+        The Polars DataFrame or LazyFrame to use for generating the table schema.
+        Can also be a path to a Parquet file.
 
     Returns
     -------
@@ -50,15 +62,50 @@ def create_table_sql(hats: HATS) -> str:
 
     """
 
-    columns = hats.schema.get_columns(use_database_name=True)
+    if hats is None and frame is None:
+        raise ValueError("Either hats or frame must be provided.")
 
-    schema = hats.schema.model.database.schema_
-    table_name = hats.schema.model.database.table_name
+    if hats is not None:
+        columns = hats.schema.get_columns(use_database_name=True)
+        columns = {name: col.dtype for name, col in columns.items()}
+
+        schema = hats.schema.model.database.schema_
+        table_name = hats.schema.model.database.table_name
+    else:
+        if schema is None or table_name is None:
+            raise ValueError("'schema' and 'table_name' must be provided with 'frame'.")
+
+        if isinstance(frame, (str, pathlib.Path)):
+            frame = polars.scan_parquet(frame)
+
+        if isinstance(frame, polars.DataFrame):
+            columns = dict(frame.schema)
+        elif isinstance(frame, polars.LazyFrame):
+            columns = dict(frame.collect_schema())
+        else:
+            raise ValueError("Unsupported frame type.")
 
     sql = f"CREATE TABLE {schema}.{table_name} (\n"
 
-    for column_name, column in columns.items():
-        sql += f"  {column_name} {DTYPE_TO_SQL.get(column.dtype, column.dtype)},\n"
+    for column_name, column_dtype in columns.items():
+        if (column_dtype_str := str(column_dtype)) in DTYPE_TO_SQL:
+            sql += f"  {column_name} {DTYPE_TO_SQL[column_dtype_str]},\n"
+        elif isinstance(column_dtype, polars.DataType):
+            if isinstance(column_dtype, (polars.Array, polars.List)):
+                inner = column_dtype.inner
+                if (inner_dtype_str := str(inner)) in DTYPE_TO_SQL:
+                    sql_type = DTYPE_TO_SQL[inner_dtype_str]
+                    if isinstance(column_dtype, polars.Array):
+                        size = column_dtype.size
+                        sql += f"  {column_name} {sql_type}[{size}],\n"
+                    elif isinstance(column_dtype, polars.List):
+                        sql += f"  {column_name} {sql_type}[],\n"
+                else:
+                    raise ValueError(f"Unsupported array column {column_name!r}.")
+            else:
+                raise ValueError(f"Unsupported column dtype: {column_dtype}")
+        else:
+            raise ValueError(f"Unsupported column dtype: {column_dtype}")
 
     sql = sql.rstrip(",\n") + "\n);"
 
