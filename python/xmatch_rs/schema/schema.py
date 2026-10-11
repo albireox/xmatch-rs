@@ -613,14 +613,14 @@ class Schema:
         schema: dict[str, Type[polars.DataType]] = {}
 
         for column_name, column in columns.items():
-            dtype_str = column.dtype.value
+            dtype = type(column.get_polars_dtype())
 
             if not source_catalogue:
                 if column.cast_to is not None:
-                    dtype_str = column.cast_to.value
+                    dtype = get_polars_dtype(column.cast_to.value)[0]
                 if column.rename_to is not None:
                     column_name = column.rename_to
 
-            schema[column_name] = get_polars_dtype(dtype_str)
+            schema[column_name] = dtype
 
         return polars.Schema(schema)
