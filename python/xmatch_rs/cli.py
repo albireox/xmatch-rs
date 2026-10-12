@@ -683,12 +683,12 @@ def database_load_hats(
 ):
     """Load a HATS collection into the database."""
 
-    from xmatch_rs.database.load import write_dataset_to_database
+    from xmatch_rs.database.load import write_hats_dataset_to_database
     from xmatch_rs.hats.hats import HATS
 
     hats = HATS(hats_collection_path)
 
-    write_dataset_to_database(
+    write_hats_dataset_to_database(
         hats=hats,
         database_uri=database_uri,
         schema=schema,
@@ -867,4 +867,89 @@ def download_table(
         overwrite=overwrite,
         skip_existing=skip_existing,
         use_copy=use_copy,
+    )
+
+
+@database_cli.command("load-table")
+@cloup.argument(
+    "DATABASE_URI",
+    type=str,
+    help="URI of the database containing the table to download.",
+)
+@cloup.argument(
+    "TABLE_NAME",
+    type=str,
+    help="Name of the table to download.",
+)
+@cloup.argument(
+    "DATA_PATH",
+    type=cloup.Path(exists=True, file_okay=False, path_type=pathlib.Path),
+    help="Path to the directory containing the data to load, in Parquet format.",
+)
+@cloup.option(
+    "--schema",
+    type=str,
+    required=False,
+    help="Name of the schema containing the table to download. "
+    "Defaults to the public schema.",
+)
+@cloup.option(
+    "--chunk-size",
+    type=int,
+    required=False,
+    default=1_000_000,
+    help="Number of rows to load at a time. Defaults to 1_000_000 rows.",
+)
+@cloup.option(
+    "--create-table/--no-create-table",
+    default=True,
+    help="Whether to create the table if it does not exist.",
+)
+@cloup.option(
+    "--primary-key",
+    type=str,
+    help="Name of the primary key column for the table.",
+)
+@cloup.option(
+    "--index",
+    type=str,
+    multiple=True,
+    help="Create an index on this column. Can be specified multiple times.",
+)
+@cloup.option(
+    "--quiet",
+    "-q",
+    is_flag=True,
+    default=False,
+    help="Suppress logging output.",
+)
+def load_table(
+    database_uri: str,
+    table_name: str,
+    data_path: pathlib.Path,
+    schema: str | None = None,
+    chunk_size: int = 10_000_000,
+    create_table: bool = True,
+    quiet: bool = False,
+    primary_key: str | None = None,
+    index: tuple[str, ...] = (),
+) -> None:
+    """Loads a table into the specified database from a directory of Parquet files."""
+
+    import polars
+
+    from xmatch_rs.database.load import write_parquet_to_database
+
+    frame = polars.scan_parquet(data_path)
+
+    write_parquet_to_database(
+        frame=frame,
+        database_uri=database_uri,
+        table_name=table_name,
+        schema=schema or "public",
+        chunk_size=chunk_size,
+        quiet=quiet,
+        create_table=create_table,
+        primary_key=primary_key,
+        indices=list(index),
     )

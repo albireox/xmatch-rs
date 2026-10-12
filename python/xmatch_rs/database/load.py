@@ -33,13 +33,18 @@ from sdsstools.utils import Timer
 from xmatch_rs.database import create_table_sql
 from xmatch_rs.database.tools import function_to_composed, rich_status
 from xmatch_rs.hats.tools import get_pixel_path
+from xmatch_rs.tools import lazy_frame_row_count
 
 
 if TYPE_CHECKING:
     from xmatch_rs import HATS
 
 
-__all__ = ["write_dataset_to_database", "get_database_uri"]
+__all__ = [
+    "write_hats_dataset_to_database",
+    "get_database_uri",
+    "write_parquet_to_database",
+]
 
 
 def get_database_uri(
@@ -63,7 +68,7 @@ def get_database_uri(
     return f"postgresql://{auth}{host_port}/{dbname}"
 
 
-def write_dataset_to_database(
+def write_hats_dataset_to_database(
     hats: HATS,
     database_uri: str,
     show_progress: bool = True,
@@ -310,3 +315,200 @@ def _write_pixel_to_database(
         if_table_exists="append",
         engine="adbc",
     )
+
+
+def write_parquet_to_database(
+    frame: polars.DataFrame | polars.LazyFrame | str | pathlib.Path,
+    database_uri: str,
+    table_name: str,
+    schema: str | None = None,
+    show_progress: bool = True,
+    chunk_size: int = 1_000_000,
+    create_table: bool = True,
+    primary_key: str | None = None,
+    indices: list[str] | None = None,
+    quiet: bool = False,
+) -> None:
+    """Loads a HATS dataset into a database.
+
+    Parameters
+    ----------
+    frame
+        The Polars DataFrame or LazyFrame to load into the database. If the input is
+        a string, the path will be loaded as a LazyFrame.
+    database_uri
+        The URI of the database to load into.
+    table_name
+        The name of the table to load the data into.
+    schema
+        The name of the schema to load the data into. Defaults to the public schema.
+    show_progress
+        Whether to show a progress bar while loading the data.
+    chunk_size
+        The number of rows to write to the database in each chunk.
+    create_table
+        Whether to create the table defined in the HATS schema if it does not exist.
+    primary_key
+        The name of the primary key column for the table.
+    indices
+        A list of column names to create indices for after the data has been loaded.
+    quiet
+        Whether to suppress logging output while loading the data.
+
+    """
+
+    if isinstance(frame, (str, pathlib.Path)):
+        frame = polars.scan_parquet(frame)
+
+    cl = Console(quiet=quiet)
+
+    dt = datetime.datetime.now(tz=datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    cl.print(rf"[blue]\[i][/] Starting DB write process on {dt} UTC.")
+
+    schema = schema or "public"
+    tbl_qual = f"{schema}.{table_name}"
+
+    try:
+        with psycopg.connect(database_uri) as conn, conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.tables
+                    WHERE table_schema = %s AND table_name = %s
+                )
+                """,
+                (schema, table_name),
+            )
+            table_exists = cursor.fetchone()
+    except psycopg.Error as exc:
+        raise ConnectionError("Could not connect to the database.") from exc
+
+    if table_exists is None or not table_exists[0]:
+        if not create_table:
+            raise ValueError(
+                f"Table {schema}.{table_name} does not exist in the database."
+            )
+        else:
+            with psycopg.connect(database_uri) as conn, conn.cursor() as cursor:
+                # This is SQL injection of the worst kind but we are generating it
+                # and we trust the code so let's just do it.
+                cursor.execute(
+                    create_table_sql(
+                        frame=frame,
+                        table_name=table_name,
+                        schema=schema,
+                    )
+                )  # INJECTION! # type: ignore
+
+            cl.print(
+                f"[green][✔][/] Created table [blue]{schema}.{table_name}[/] "
+                f"in the database."
+            )
+
+    pbar = Progress(
+        SpinnerColumn("bouncingBar", style="blue"),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        console=cl if not quiet else Console(),
+        transient=True,
+    )
+
+    n_rows = (
+        frame.height
+        if isinstance(frame, polars.DataFrame)
+        else lazy_frame_row_count(frame)
+    )
+
+    pbar_task: int | None = None
+    if show_progress:
+        pbar_task = pbar.add_task(
+            "Loading dataset into database...",
+            total=n_rows // chunk_size + 1,
+        )
+        pbar.start()
+
+    try:
+        with Timer() as timer:
+            for df in frame.lazy().collect_batches(chunk_size=chunk_size):
+                df.write_database(
+                    table_name=tbl_qual,
+                    connection=database_uri,
+                    if_table_exists="append",
+                    engine="adbc",
+                )
+
+                if pbar_task is not None:
+                    pbar.update(pbar_task, advance=1)
+
+    except Exception:
+        if pbar_task is not None:
+            pbar.stop()
+        raise
+
+    if pbar_task is not None:
+        pbar.stop()
+
+    cl.print(
+        f"[green][✔][/] Loaded dataset into database [blue]{tbl_qual}[/] "
+        f"in {timer.elapsed:,.1f} seconds."
+    )
+
+    if primary_key is not None:
+        if primary_key not in frame.lazy().collect_schema().names():
+            raise ValueError(f"Primary key {primary_key} not found in the dataset.")
+
+        with (
+            Timer() as timer,
+            rich_status(
+                cl,
+                f"Creating PK on [blue]{tbl_qual} ({primary_key})[/] ...",
+            ),
+            psycopg.connect(database_uri) as conn,
+            conn.cursor() as cursor,
+        ):
+            cursor.execute(
+                sql.SQL("ALTER TABLE {} ADD PRIMARY KEY ({})").format(
+                    sql.Identifier(schema, table_name),
+                    sql.Identifier(primary_key),
+                )
+            )
+
+        cl.print(
+            f"[green][✔][/] Created PK on [blue]{tbl_qual}[/] "
+            f"in {timer.elapsed:,.1f} seconds."
+        )
+
+    if indices is not None:
+        with (
+            Timer() as timer,
+            rich_status(cl, f"Creating indices on [blue]{tbl_qual}[/] ..."),
+            psycopg.connect(database_uri) as conn,
+            conn.cursor() as cursor,
+        ):
+            for index in indices:
+                # Depending on the type of index (list of columns, single column, or
+                # function), we need to create the appropriate SQL object.
+                if isinstance(index, list):
+                    columns = sql.SQL(", ").join(sql.Identifier(col) for col in index)
+                else:
+                    if "(" in index:
+                        columns = function_to_composed(index)
+                    else:
+                        columns = sql.Identifier(index)
+
+                # Runs the CREATE INDEX statement.
+                with rich_status(cl, f"Creating index [blue]{index}[/] ..."):
+                    cursor.execute(
+                        sql.SQL("CREATE INDEX ON {} ({})").format(
+                            sql.Identifier(schema, table_name),
+                            columns,
+                        )
+                    )
+
+        cl.print(
+            f"[green][✔][/] Created indices on [blue]{schema}.{table_name}[/] "
+            f"in {timer.elapsed:,.1f} seconds."
+        )

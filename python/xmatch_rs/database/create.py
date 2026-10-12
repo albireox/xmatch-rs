@@ -66,9 +66,7 @@ def create_table_sql(
         raise ValueError("Either hats or frame must be provided.")
 
     if hats is not None:
-        columns = hats.schema.get_columns(use_database_name=True)
-        columns = {name: col.dtype for name, col in columns.items()}
-
+        columns = hats.schema.get_polars_schema(use_database_name=True)
         schema = hats.schema.model.database.schema_
         table_name = hats.schema.model.database.table_name
     else:
@@ -88,24 +86,20 @@ def create_table_sql(
     sql = f"CREATE TABLE {schema}.{table_name} (\n"
 
     for column_name, column_dtype in columns.items():
-        if (column_dtype_str := str(column_dtype)) in DTYPE_TO_SQL:
-            sql += f"  {column_name} {DTYPE_TO_SQL[column_dtype_str]},\n"
-        elif isinstance(column_dtype, polars.DataType):
-            if isinstance(column_dtype, (polars.Array, polars.List)):
-                inner = column_dtype.inner
-                if (inner_dtype_str := str(inner)) in DTYPE_TO_SQL:
-                    sql_type = DTYPE_TO_SQL[inner_dtype_str]
-                    if isinstance(column_dtype, polars.Array):
-                        size = column_dtype.size
-                        sql += f"  {column_name} {sql_type}[{size}],\n"
-                    elif isinstance(column_dtype, polars.List):
-                        sql += f"  {column_name} {sql_type}[],\n"
-                else:
-                    raise ValueError(f"Unsupported array column {column_name!r}.")
+        if isinstance(column_dtype, (polars.Array, polars.List)):
+            inner = column_dtype.inner
+            if (inner_dtype_str := str(inner)) in DTYPE_TO_SQL:
+                sql_type = DTYPE_TO_SQL[inner_dtype_str]
+                if isinstance(column_dtype, polars.Array):
+                    size = column_dtype.size
+                    sql += f"  {column_name} {sql_type}[{size}],\n"
+                elif isinstance(column_dtype, polars.List):
+                    sql += f"  {column_name} {sql_type}[],\n"
             else:
-                raise ValueError(f"Unsupported column dtype: {column_dtype}")
+                raise ValueError(f"Unsupported array/list column {column_name!r}.")
         else:
-            raise ValueError(f"Unsupported column dtype: {column_dtype}")
+            sql_type = DTYPE_TO_SQL[str(column_dtype)]
+            sql += f"  {column_name} {sql_type},\n"
 
     sql = sql.rstrip(",\n") + "\n);"
 

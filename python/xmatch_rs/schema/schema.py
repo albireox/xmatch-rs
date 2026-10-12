@@ -11,7 +11,7 @@ from __future__ import annotations
 import enum
 import pathlib
 
-from typing import Annotated, Any, Type
+from typing import Annotated, Any
 
 import polars
 import yaml
@@ -596,7 +596,11 @@ class Schema:
 
         return self.model.primary_key
 
-    def get_polars_schema(self, source_catalogue: bool = False) -> polars.Schema:
+    def get_polars_schema(
+        self,
+        source_catalogue: bool = False,
+        use_database_name: bool = False,
+    ) -> polars.Schema:
         """Returns the schema as a Polars Schema.
 
         Parameters
@@ -605,19 +609,24 @@ class Schema:
             If ``True``, only returns the columns that are part of the source
             catalogue. The data types of these columns are taken from the
             ``source_catalogue.columns.dtype`` fields ignoring any subsequent casting.
+        use_database_name
+            If ``True``, the column names will include the database name.
 
         """
 
-        columns = self.get_columns(only_source_columns=source_catalogue)
+        columns = self.get_columns(
+            only_source_columns=source_catalogue,
+            use_database_name=use_database_name,
+        )
 
-        schema: dict[str, Type[polars.DataType]] = {}
+        schema: dict[str, polars.DataType] = {}
 
         for column_name, column in columns.items():
-            dtype = type(column.get_polars_dtype())
+            dtype = column.get_polars_dtype()
 
             if not source_catalogue:
                 if column.cast_to is not None:
-                    dtype = get_polars_dtype(column.cast_to.value)[0]
+                    dtype = get_polars_dtype(column.cast_to.value)[0]()
                 if column.rename_to is not None:
                     column_name = column.rename_to
 

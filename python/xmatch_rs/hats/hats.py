@@ -828,9 +828,9 @@ class HATS:
 
         """
 
-        from xmatch_rs.database.load import write_dataset_to_database
+        from xmatch_rs.database.load import write_hats_dataset_to_database
 
-        write_dataset_to_database(
+        write_hats_dataset_to_database(
             self,
             database_uri=database_uri,
             show_progress=show_progress,
