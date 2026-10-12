@@ -377,9 +377,13 @@ class ColumnModel(BaseModel):
             shape=self.shape,
         )
 
-        if dtype_class == polars.Array and inner is not None and shape is not None:
+        if dtype_class == polars.Array:
+            if inner is None or shape is None:
+                raise ValueError("Arrays require inner and shape to be specified.")
             return polars.Array(inner=inner, shape=shape)
-        elif dtype_class == polars.List and inner is not None:
+        elif dtype_class == polars.List:
+            if inner is None:
+                raise ValueError("Lists require inner to be specified.")
             return polars.List(inner=inner)
         else:
             return dtype_class()

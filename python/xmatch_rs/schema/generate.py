@@ -290,11 +290,11 @@ def generate_schema(
 
                 pl_schema = df.schema
                 for column, dtype in pl_schema.items():
-                    dtype, inner, size = get_polars_dtype(dtype)
+                    dtype, inner, shape = get_polars_dtype(dtype)
                     source_columns[column] = {
                         "dtype": str(dtype),
                         "inner": str(inner) if inner is not None else None,
-                        "size": size,
+                        "shape": shape,
                         "unit": None,
                         "description": None,
                     }
