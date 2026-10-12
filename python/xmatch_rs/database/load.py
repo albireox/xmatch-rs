@@ -358,7 +358,8 @@ def write_parquet_to_database(
     """
 
     if isinstance(frame, (str, pathlib.Path)):
-        frame = polars.scan_parquet(frame)
+        frame = pathlib.Path(frame)
+        frame = polars.scan_parquet(list(frame.glob("**/*.parquet")))
 
     cl = Console(quiet=quiet)
 

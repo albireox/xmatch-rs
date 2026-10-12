@@ -940,7 +940,8 @@ def load_table(
 
     from xmatch_rs.database.load import write_parquet_to_database
 
-    frame = polars.scan_parquet(data_path)
+    data_path = pathlib.Path(data_path)
+    frame = polars.scan_parquet(list(data_path.glob("**/*.parquet")))
 
     write_parquet_to_database(
         frame=frame,
