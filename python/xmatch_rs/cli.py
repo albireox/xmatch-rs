@@ -14,10 +14,6 @@ from typing import Literal
 
 import click
 import cloup
-import yaml
-from pydantic import ValidationError
-
-from xmatch_rs import console
 
 
 class NaturalOrderGroup(cloup.Group):
@@ -492,6 +488,9 @@ def schema_cli():
 def validate_schema(schema_path: pathlib.Path, verbose: bool = False):
     """Validates a catalogue schema YAML file."""
 
+    from pydantic import ValidationError
+
+    from xmatch_rs import console
     from xmatch_rs.schema import Schema
 
     try:
@@ -567,6 +566,9 @@ def generate_schema(
 ):
     """Generates a catalogue schema YAML file from a sample dataset."""
 
+    import yaml
+
+    from xmatch_rs import console
     from xmatch_rs.schema import generate_schema
 
     schema_model = generate_schema(
