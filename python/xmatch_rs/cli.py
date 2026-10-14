@@ -883,7 +883,8 @@ def download_table(
 )
 @cloup.argument(
     "DATA_PATH",
-    type=cloup.Path(exists=True, file_okay=False, path_type=pathlib.Path),
+    type=cloup.Path(exists=True, path_type=pathlib.Path),
+    nargs=-1,
     help="Path to the directory containing the data to load, in Parquet format.",
 )
 @cloup.option(
@@ -926,7 +927,7 @@ def download_table(
 def load_table(
     database_uri: str,
     table_name: str,
-    data_path: pathlib.Path,
+    data_path: tuple[pathlib.Path, ...],
     schema: str | None = None,
     chunk_size: int = 10_000_000,
     create_table: bool = True,
@@ -936,15 +937,10 @@ def load_table(
 ) -> None:
     """Loads a table into the specified database from a directory of Parquet files."""
 
-    import polars
-
     from xmatch_rs.database.load import write_parquet_to_database
 
-    data_path = pathlib.Path(data_path)
-    frame = polars.scan_parquet(list(data_path.glob("**/*.parquet")))
-
     write_parquet_to_database(
-        frame=frame,
+        frame=list(data_path),
         database_uri=database_uri,
         table_name=table_name,
         schema=schema or "public",

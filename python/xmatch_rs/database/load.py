@@ -318,7 +318,11 @@ def _write_pixel_to_database(
 
 
 def write_parquet_to_database(
-    frame: polars.DataFrame | polars.LazyFrame | str | pathlib.Path,
+    frame: polars.DataFrame
+    | polars.LazyFrame
+    | str
+    | pathlib.Path
+    | list[str | pathlib.Path],
     database_uri: str,
     table_name: str,
     schema: str | None = None,
@@ -359,7 +363,23 @@ def write_parquet_to_database(
 
     if isinstance(frame, (str, pathlib.Path)):
         frame = pathlib.Path(frame)
-        frame = polars.scan_parquet(list(frame.glob("**/*.parquet")))
+        if not frame.exists():
+            raise FileNotFoundError(f"Path {frame!r} does not exist.")
+        if frame.is_dir():
+            frame = polars.scan_parquet(list(frame.glob("**/*.parquet")))
+        else:
+            frame = polars.scan_parquet(frame)
+    elif isinstance(frame, (list, tuple)):
+        paths = []
+        for p in frame:
+            p = pathlib.Path(p)
+            if not p.exists():
+                raise FileNotFoundError(f"Path {p!r} does not exist.")
+            if p.is_dir():
+                paths.extend(list(p.glob("**/*.parquet")))
+            else:
+                paths.append(p)
+        frame = polars.scan_parquet(paths)
 
     cl = Console(quiet=quiet)
 
