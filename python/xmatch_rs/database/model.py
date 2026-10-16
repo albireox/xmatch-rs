@@ -81,7 +81,7 @@ def sqlalchemy_type_to_python_type(sqlalchemy_type: Any) -> type:
         raise ValueError(f"Unsupported SQLAlchemy type: {sqlalchemy_type}")
 
 
-def get_model_from_database(
+def get_sqlmodel_from_database(
     database_uri: str,
     schema: str,
     table_name: str,
