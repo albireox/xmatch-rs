@@ -56,6 +56,7 @@ def sqlalchemy_type_to_python_type(sqlalchemy_type: Any) -> type:
     -------
     type
         The corresponding Python type.
+
     """
 
     if sqlalchemy_type.__class__.__name__ == "INTEGER":
@@ -105,6 +106,7 @@ def get_model_from_database(
     -------
     Type[SQLModel]
         A SQLModel model class for the given table.
+
     """
 
     engine = create_engine(database_uri)
@@ -211,10 +213,7 @@ def print_model(model: type[SQLModel]):
     print(f"class {model.__name__}(SQLModelWithMetadata, table=True):")
     print(f"    __tablename__ = '{model.__tablename__}'")
     if table_args is not None:
-        table_args_filtered = {
-            k: v for k, v in table_args.items() if k != "extend_existing"
-        }
-        print(f"    __table_args__ = {table_args_filtered}")
+        print(f"    __table_args__ = {table_args}")
 
     print()
 
