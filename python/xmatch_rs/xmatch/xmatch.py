@@ -279,6 +279,7 @@ class XMatch:
         hats_path: str | pathlib.Path,
         name: str | None = None,
         run_id: int | None = None,
+        schema_path: str | pathlib.Path | None = None,
         skip_phases: list[int] | None = None,
         join_paths: list[tuple[str, str]] = [],
         query_radius: float = 1.0,
@@ -297,6 +298,9 @@ class XMatch:
             The run ID of the cross-match for this catalogue. Must be specified
             if this is the first catalogue being cross-matched. Otherwise uses
             the run ID of the last catalogue cross-matched.
+        schema_path
+            The path to the schema file for the catalogue. If `None`, the schema
+            will be inferred from the HATS collection.
         skip_phases
             A list of phases to skip. If `None`, all phases will be executed.
         join_paths
@@ -334,6 +338,7 @@ class XMatch:
             hats_path=pathlib.Path(hats_path),
             run_id=run_id,
             phases=phases,
+            schema_path=schema_path,
         )
 
         self.model.catalogues.append(cat_model)
@@ -345,6 +350,7 @@ class XMatch:
         name: str | None = None,
         run_id: int | None = None,
         phases: list[PhaseModel] = [],
+        schema_path: str | pathlib.Path | None = None,
     ) -> CatalogueModel:
         """Creates a catalogue model from a HATS collection.
 
@@ -358,8 +364,11 @@ class XMatch:
         run_id
             The run ID for the catalogue. If `None`, the run ID of the
             last catalogue in the model will be used.
-        phases : list[PhaseModel], optional
+        phases
             A list of phase models for the catalogue. Defaults to an empty list.
+        schema_path
+            The path to the schema file for the catalogue. If `None`, the schema
+            will be inferred from the HATS collection.
 
         Returns
         -------
@@ -376,7 +385,7 @@ class XMatch:
             run_id = self.model.catalogues[-1].run_id
 
         try:
-            hats = HATS(hats_path)
+            hats = HATS(hats_path, schema=schema_path)
             hats.validate()
         except Exception as err:
             raise RuntimeError(

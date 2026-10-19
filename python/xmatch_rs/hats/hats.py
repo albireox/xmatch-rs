@@ -43,17 +43,27 @@ __all__ = ["HATS", "HATSProduct", "HATSStore"]
 class HATS:
     """A representation of a HATS collection."""
 
-    def __init__(self, path: str | pathlib.Path):
+    def __init__(
+        self,
+        path: str | pathlib.Path,
+        schema: str | pathlib.Path | Schema | None = None,
+    ):
         """A representation of a HATS collection.
 
         Parameters
         ----------
         path
             The path to a HATS collection.
+        schema
+            The schema of the HATS collection. Can be a Schema object, a path to a
+            schema file, or None. If None, the function will look for the
+            ``_schema.yaml`` file in the collection directory and, if it exists,
+            will read the schema from there.
 
         """
 
         self.path = pathlib.Path(path)
+        self._schema = schema
 
         if not self.path.exists():
             raise FileNotFoundError(f"The path {self.path!r} does not exist.")
@@ -67,7 +77,13 @@ class HATS:
     def schema(self) -> Schema:
         """Returns the schema of the HATS collection."""
 
-        schema_path = self.path / "_schema.yaml"
+        if self._schema is not None:
+            if isinstance(self._schema, Schema):
+                return self._schema
+            else:
+                schema_path = pathlib.Path(self._schema)
+        else:
+            schema_path = self.path / "_schema.yaml"
 
         if not schema_path.exists():
             raise FileNotFoundError(f"No schema file found at {schema_path!s}.")
