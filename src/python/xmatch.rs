@@ -12,7 +12,7 @@ pub(crate) mod py_xmatch {
     use log::LevelFilter;
     use pyo3::prelude::*;
     use pyo3_log::{Caching, Logger};
-    use std::sync::{LazyLock, OnceLock};
+    use std::sync::LazyLock;
     use std::{path::PathBuf, sync::Mutex};
 
     use crate::xmatch;
@@ -21,9 +21,6 @@ pub(crate) mod py_xmatch {
 
     // Prevent setting the pyo3_log logger more than once as that fails.
     static LOGGER_SET: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
-
-    // Global variable to determine if the logger is propagating trace messages.
-    static LOGGER_USE_TRACE: OnceLock<bool> = OnceLock::new();
 
     #[pyfunction(name = "init_logger")]
     pub fn py_init_logger(py: Python, name: String, use_trace: bool) -> Result<()> {
@@ -55,8 +52,6 @@ pub(crate) mod py_xmatch {
         } else {
             LevelFilter::Debug
         });
-
-        LOGGER_USE_TRACE.set(use_trace).unwrap();
 
         log::info!(
             "Logger initialized for target '{}', use_trace={}.",

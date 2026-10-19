@@ -19,9 +19,8 @@ import threading
 import time
 from logging.handlers import MemoryHandler
 from tempfile import NamedTemporaryFile
-from uuid import uuid4
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import polars
 from rich.progress import (
@@ -115,7 +114,7 @@ class XMatch:
         overwrite: bool = False,
         verbose: bool = False,
         quiet: bool = False,
-        logfile: pathlib.Path | str | None = None,
+        logfile: pathlib.Path | str | bool | None = None,
     ):
         """Initializes the XMatch product.
 
@@ -140,25 +139,19 @@ class XMatch:
             If `True`, disables all logging.
         logfile
             The path to the log file. If not provided, logs will be printed
-            to the console.
+            to the console and saved to ``~/.local/share/xmatch_rs/logs/``.
+            If the path is not absolute, it will be relative to the XMatch product
+            path.
 
         """
 
         self.path = pathlib.Path(path)
 
-        # It's important that the target of the logger is xmatch_rs to ensure
-        # that the Rust code can also log to it.
-        self.log = PrefixAdapter(
-            get_xmatch_rs_logger("xmatch_rs", log_level=logging.INFO),
-            prefix=None,
-        )
-        self.init_logger(verbose=verbose, quiet=quiet, logfile=logfile)
-
         if (self.path / "xmatch.yaml").exists() and not overwrite:
             self.model = XMatchModel.read(self.path / "xmatch.yaml")
 
             if version is not None and self.model.version != version:
-                self.log.warning(
+                raise RuntimeError(
                     f"Version mismatch: provided version {version!r} does not "
                     f"match version in xmatch.yaml {self.model.version!r}."
                 )
@@ -167,21 +160,21 @@ class XMatch:
                 pixelation_order is not None
                 and self.model.pixelation_order != pixelation_order
             ):
-                self.log.warning(
+                raise RuntimeError(
                     f"Pixelation order mismatch: provided pixelation order "
                     f"{pixelation_order} does not match pixelation order in "
                     f"xmatch.yaml {self.model.pixelation_order}."
                 )
 
             if epoch is not None and self.model.epoch != epoch:
-                self.log.warning(
+                raise RuntimeError(
                     f"Epoch mismatch: provided epoch {epoch} does not match epoch "
                     f"in xmatch.yaml {self.model.epoch}."
                 )
 
         else:
             if version is None or pixelation_order is None or epoch is None:
-                raise ValueError(
+                raise RuntimeError(
                     "Version, pixelation order, and epoch must be provided "
                     "if xmatch.yaml does not exist or overwrite is True."
                 )
@@ -204,10 +197,33 @@ class XMatch:
         # Cache to track the maximum catalogid for a run_id.
         self._max_catalogid: dict[int, int] = {}
 
+        # Start logging.
+        # It's important that the target of the logger is xmatch_rs to ensure
+        # that the Rust code can also log to it.
+        self.log = PrefixAdapter(
+            get_xmatch_rs_logger("xmatch_rs", log_level=logging.INFO),
+            prefix=None,
+        )
+
+        if logfile is True:
+            logfile = self.path / "xmatch.log"
+        elif logfile is False:
+            pass
+        elif logfile is not None:
+            logfile = pathlib.Path(logfile)
+            if not logfile.is_absolute():
+                logfile = self.path / logfile
+
+        self.init_logger(
+            verbose=verbose,
+            quiet=quiet,
+            logfile=logfile,
+        )
+
     def init_logger(
         self,
         log: SDSSLogger | None = None,
-        logfile: str | pathlib.Path | None = None,
+        logfile: str | pathlib.Path | Literal[False] | None = None,
         quiet: bool = False,
         verbose: bool = False,
         trace: bool = False,
@@ -252,7 +268,15 @@ class XMatch:
             self.log.logger.sh.setLevel(logging.CRITICAL)
 
         if logfile is None:
-            logfile = self._get_logfile(prefix=f"xmatch_{self.version}")
+            logfile = self._get_logfile(file_name=f"xmatch_{self.version}.log")
+        elif isinstance(logfile, (str, pathlib.Path)):
+            logfile = pathlib.Path(logfile)
+            if not logfile.is_absolute():
+                logfile = self.path / logfile
+        elif logfile is False:
+            pass
+        else:
+            raise ValueError("logfile must be a string, pathlib.Path, None, or False.")
 
         # Drop any previous file loggers.
         fh_handlers: list[logging.FileHandler] = []
@@ -264,12 +288,13 @@ class XMatch:
             self.log.logger.removeHandler(handler)
 
         # Start a new file logger.
-        self.log.logger.start_file_logger(
-            str(logfile),
-            rotating=False,
-            log_level=5,
-        )
-        self.log.debug(f"Logging to file {logfile!s}.")
+        if logfile is not False:
+            self.log.logger.start_file_logger(
+                str(logfile),
+                rotating=False,
+                log_level=5,
+            )
+            self.log.debug(f"Logging to file {logfile!s}.")
 
         # Initialise the logger in Rust.
         xmatch_lib.init_logger(self.log.name, use_trace=trace)
@@ -627,16 +652,13 @@ class XMatch:
         if len(os.listdir(self.path / "tmp")) == 0:
             shutil.rmtree(self.path / "tmp")
 
-    def _get_logfile(self, prefix: str = "xmatch") -> pathlib.Path:
+    def _get_logfile(self, file_name: str = "xmatch.log") -> pathlib.Path:
         """Returns a path to a temporary log file."""
 
         path = pathlib.Path("~/.local/share/xmatch_rs/logs").expanduser()
         path.mkdir(parents=True, exist_ok=True)
 
-        uuid = uuid4().hex[:8]
-        file_ = f"{prefix}_{uuid}.log"
-
-        return path / file_
+        return path / file_name
 
     def _raise_with_logfile(
         self,
