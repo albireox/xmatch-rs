@@ -12,9 +12,8 @@ use polars::lazy::dsl::file_provider as pl_fp;
 pub(crate) fn path_provider_uuid_pixel(
     args: pl_fp::FileProviderArgs,
 ) -> Result<pl_fp::FileProviderReturn, polars::error::PolarsError> {
-    // Get the index and partition keys from the arguments. args.partition_keys is a dataframe
-    // with one row and (in this case) one column with the pixel index.
-    let index = args.index_in_partition;
+    // args.partition_keys is a dataframe with one row and (in this case)
+    // one column with the pixel index.
     let partition_keys = &*args.partition_keys;
     let pixel = partition_keys
         .get(0)
@@ -30,7 +29,7 @@ pub(crate) fn path_provider_uuid_pixel(
     let mut uuid_part = uuid::Uuid::new_v4().to_string();
     uuid_part = uuid_part.replace("-", "");
 
-    let file = format!("{}-{:02}.parquet", uuid_part, index);
+    let file = format!("{}.parquet", uuid_part);
     let path = format!("Dir={}/Npix={}/{}", dir, pixel, file);
 
     return Ok(pl_fp::FileProviderReturn::Path(path));
