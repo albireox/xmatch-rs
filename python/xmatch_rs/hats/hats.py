@@ -11,7 +11,7 @@ from __future__ import annotations
 import pathlib
 import shutil
 
-from typing import TYPE_CHECKING, Iterator, Literal, Sequence
+from typing import TYPE_CHECKING, Any, Iterator, Literal, Sequence
 
 import numpy
 import polars
@@ -813,7 +813,7 @@ class HATS:
         projview_kwargs.update(map_kwargs)
 
         with plt.ioff():
-            quad = projview(m=healpix_map, **projview_kwargs)
+            quad: Any = projview(m=healpix_map, **projview_kwargs)
             quad.figure.set_size_inches((16, 9))
             quad.figure.savefig(output_path)
             plt.close(quad.figure)
