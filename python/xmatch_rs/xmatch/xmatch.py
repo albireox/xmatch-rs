@@ -711,11 +711,7 @@ class XMatch:
             extra_columns="ignore",
         )
 
-    def delete_catalogue(
-        self,
-        catalogue_name: str,
-        phase: int | None = None,
-    ):
+    def delete_catalogue(self, catalogue_name: str, phase: int | None = None):
         """Deletes a catalogue from the cross-match dataset.
 
         Parameters
@@ -727,12 +723,25 @@ class XMatch:
             from all phases.
 
         """
+
         xmatch_lib.delete_catalogue_from_dataset(
             str(self.path),
             catalogue_name,
             self.version,
             phase,
         )
+
+        # Update the XMatch model to remove the catalogue.
+        if phase is None:
+            self.model.catalogues = [
+                cat for cat in self.model.catalogues if cat.name != catalogue_name
+            ]
+        else:
+            for cat in self.model.catalogues:
+                if cat.name == catalogue_name:
+                    cat.phases = [p for p in cat.phases if p.phase != phase]
+
+        self.model.write()
 
     def _test_progress_tracker(self, log_messages: bool = True):
         """Tests the progress tracker."""

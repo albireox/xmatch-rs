@@ -31,6 +31,7 @@ __all__: list[str] = [
     "get_xmatch_rs_logger",
     "list_files",
     "get_current_time",
+    "sink_to_file",
 ]
 
 
@@ -231,3 +232,34 @@ def get_current_time(format: str = "isot", timezone: str = "UTC") -> str:
     now = datetime.datetime.now(datetime.timezone.utc)
 
     return now.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def sink_to_file(
+    lf: polars.LazyFrame,
+    file_path: str | pathlib.Path,
+    overwrite: bool = False,
+) -> None:
+    """Writes content to a file, optionally overwriting it.
+
+    If the file exists, writes the lazy frame to a temporary file and then renames
+    it to the target file path.
+
+    """
+
+    file_path = pathlib.Path(file_path)
+
+    if file_path.exists() and not overwrite:
+        raise FileExistsError("File already exists. Use overwrite to replace it.")
+
+    tmp_file = file_path.with_suffix(file_path.suffix + ".tmp")
+    if tmp_file.exists():
+        raise FileExistsError("Temporary file already exists. Cannot sink.")
+
+    if file_path.suffix == ".parquet":
+        lf.sink_parquet(tmp_file)
+    elif file_path.suffix == ".csv":
+        lf.sink_csv(tmp_file)
+    else:
+        raise ValueError(f"Unsupported file extension: {file_path.suffix}")
+
+    tmp_file.rename(file_path)

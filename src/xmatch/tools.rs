@@ -441,15 +441,19 @@ pub fn delete_catalogue_from_dataset(
                         continue;
                     }
 
+                    // Save to a temporary file to prevent issues sinking to the source.
+                    // Then rename the temporary file to the original path.
+                    let tmp_path = path.with_extension(".parquet.tmp");
                     filtered_lf
                         .sink(
                             SinkDestination::File {
-                                target: SinkTarget::Path(to_pl_path(path)?),
+                                target: SinkTarget::Path(to_pl_path(tmp_path.clone())?),
                             },
                             FileWriteFormat::Parquet(Arc::new(ParquetWriteOptions::default())),
                             UnifiedSinkArgs::default(),
                         )?
                         .collect_with_engine(Engine::Streaming)?;
+                    std::fs::rename(tmp_path, path)?;
                 }
             }
         }
@@ -485,15 +489,17 @@ pub fn delete_catalogue_from_dataset(
                     continue;
                 }
 
+                let tmp_path = path.with_extension(".parquet.tmp");
                 filtered_lf
                     .sink(
                         SinkDestination::File {
-                            target: SinkTarget::Path(to_pl_path(path)?),
+                            target: SinkTarget::Path(to_pl_path(tmp_path.clone())?),
                         },
                         FileWriteFormat::Parquet(Arc::new(ParquetWriteOptions::default())),
                         UnifiedSinkArgs::default(),
                     )?
                     .collect_with_engine(Engine::Streaming)?;
+                std::fs::rename(tmp_path, path)?;
             }
         }
     }
