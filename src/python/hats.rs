@@ -170,6 +170,14 @@ pub(crate) mod py_hats {
         hats::tools::get_healpix_map(hats_path, map_order)
     }
 
+    #[pyfunction(name = "create_partition_info")]
+    pub fn py_create_partition_info(dataset_path: PathBuf, dst_path: PathBuf) -> Result<()> {
+        let partition_map = hats::tools::PartitionInfo::from_dataset(&dataset_path, false)?;
+        partition_map.to_csv(&dst_path)?;
+
+        Ok(())
+    }
+
     #[pymodule_init]
     fn init(m: &Bound<'_, PyModule>) -> Result<()> {
         // Add the submodule to the sys.path.

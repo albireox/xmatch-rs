@@ -194,3 +194,23 @@ def get_healpix_map(
         specified order. The list follows the RING scheme.
 
     """
+
+def create_partition_info(
+    dataset_path: str | pathlib.Path,
+    dst_path: str | pathlib.Path,
+) -> None:
+    """Creates a partition info file for a HATS dataset.
+
+    Parameters
+    ----------
+    dataset_path
+        The path to the HATS dataset.
+    dst_path
+        The path where the partition info file will be saved.
+
+    Returns
+    -------
+    None
+
+    """
+    ...

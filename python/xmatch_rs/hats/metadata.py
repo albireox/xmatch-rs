@@ -261,10 +261,13 @@ def create_partition_info(
     """
 
     dataset_path = pathlib.Path(dataset_path)
+    if (dataset_path / "dataset").exists():
+        dataset_path = dataset_path / "dataset"
+
     if not dataset_path.exists():
         raise ValueError(f"The dataset path {dataset_path!r} does not exist.")
 
-    partition_info_path = dataset_path / "partition_info.csv"
+    partition_info_path = dataset_path.parent / "partition_info.csv"
     if partition_info_path.exists() and not overwrite and write_csv:
         raise ValueError(f"The file {partition_info_path!r} already exists.")
 
