@@ -11,8 +11,9 @@ from __future__ import annotations
 import datetime
 import pathlib
 import re
+import warnings
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 import yaml
 from pydantic import (
@@ -20,8 +21,10 @@ from pydantic import (
     Field,
     PlainSerializer,
     SerializerFunctionWrapHandler,
+    ValidationInfo,
     field_validator,
     model_serializer,
+    model_validator,
 )
 
 from xmatch_rs import __version__
@@ -283,10 +286,9 @@ class PhaseModel(BaseModel):
     ] = None
 
     join_paths: Annotated[
-        list[tuple[str, str]],
+        list[JoinPathModel],
         Field(
-            description="List of join paths used in phase 1. Each join path is a "
-            "tuple of (this_catalogue_column, other_catalogue.other_column).",
+            description="List of join paths used in phase 1.",
             default_factory=list,
         ),
     ]
@@ -301,36 +303,28 @@ class PhaseModel(BaseModel):
 
     @field_validator("join_paths", mode="before")
     @classmethod
-    def validate_join_paths(cls, v, info):
+    def validate_join_paths(cls, v, info: ValidationInfo):
         """Validator for the ``join_paths`` field."""
 
-        if v != [] and info.data.get("phase") != 1:
-            raise ValueError("join_paths should only be provided for phase 1.")
+        phase = info.data.get("phase")
 
-        for join_path in v:
-            if not isinstance(join_path, (list, tuple)) or len(join_path) != 2:
-                raise ValueError("Each join path should be a tuple.")
+        if not isinstance(v, list):
+            raise ValueError("join_paths must be a list.")
 
-            if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", join_path[0]):
-                raise ValueError(f"Invalid column: {join_path[0]}")
-
-            if not re.match(
-                r"^[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*$",
-                join_path[1],
-            ):
-                raise ValueError(f"Invalid destination column: {join_path[1]}")
+        if phase != 1 and len(v) > 0:
+            raise ValueError("join_paths is only allowed for phase 1.")
 
         return v
 
     @field_validator("query_radius", mode="before")
     @classmethod
-    def validate_query_radius(cls, v, info):
+    def validate_query_radius(cls, v, info: ValidationInfo):
         """Validator for the ``query_radius`` field."""
 
         phase = info.data.get("phase")
 
         if v is not None and phase != 2:
-            raise ValueError("query_radius should only be provided for phase 2.")
+            raise ValueError("query_radius is only allowed for phase 2.")
 
         if phase == 2 and v is None:
             raise ValueError("query_radius is required for phase 2.")
@@ -361,3 +355,134 @@ class PhaseModel(BaseModel):
             del data["query_radius"]
 
         return data
+
+
+class JoinPathModel(BaseModel):
+    """Pydantic model for a join path used in phase 1."""
+
+    join_type: Annotated[
+        Literal["column", "join_table"],
+        Field(
+            description="The type of join used. Can be 'column' to use an existing "
+            "column in the catalogue being cross-matched, or 'join_table' to use an "
+            "external relational table."
+        ),
+    ] = "column"
+
+    left_on: Annotated[
+        str,
+        Field(
+            description="The name of the column in the catalogue being "
+            "cross-matched to use for the join."
+        ),
+    ]
+
+    right_catalogue: Annotated[
+        str,
+        Field(
+            description="The name of the catalogue to join with. Must be a "
+            "catalogue that has already been cross-matched."
+        ),
+    ]
+
+    right_on: Annotated[
+        str,
+        Field(description="The name of the column in the catalogue to join with."),
+    ]
+
+    join_table: Annotated[
+        str | None,
+        Field(
+            description="The path to the join table to use for the join. Only required "
+            "if join_type is 'join_table'."
+        ),
+    ] = None
+
+    join_table_left_on: Annotated[
+        str | None,
+        Field(
+            description="The name of the column in the join table to join "
+            "with the 'left_on' column. Only required if join_type is 'join_table'."
+        ),
+    ] = None
+
+    join_table_right_on: Annotated[
+        str | None,
+        Field(
+            description="The name of the column in the join table to join "
+            "with the 'right_on' column. Only required if join_type is 'join_table'."
+        ),
+    ] = None
+
+    join_table_type: Annotated[
+        Literal["gaia_neighbourhood", "gaia_best_neighbour"] | None,
+        Field(
+            description="The type of join table. Only required if join_type is "
+            "'join_table'. Accepted values are null for a normal join table, "
+            "'gaia_neighbourhood', or 'gaia_best_neighbour'. The details of the join "
+            "may change depending on the type of join table used."
+        ),
+    ] = None
+
+    @field_validator(
+        "left_on",
+        "right_on",
+        "join_table_left_on",
+        "join_table_right_on",
+        mode="before",
+    )
+    @classmethod
+    def validate_column(cls, v: str | None, info: ValidationInfo):
+        """Validator for the ``join_paths`` field."""
+
+        if v is None:
+            if info.field_name in ["left_on", "right_on"]:
+                raise ValueError(f"{info.field_name} is required.")
+            else:
+                return v
+
+        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", v):
+            raise ValueError(f"Invalid column: {v!r}.")
+
+        return v
+
+    @model_validator(mode="after")
+    def validate_join_path_model(self):
+        """Validator the join path model."""
+
+        if self.join_type == "join_table":
+            if not self.join_table:
+                raise ValueError(
+                    "join_table is required when join_type is 'join_table'."
+                )
+
+            if not self.join_table_left_on:
+                raise ValueError(
+                    "join_table_left_on is required when join_type is 'join_table'."
+                )
+
+            if not self.join_table_right_on:
+                raise ValueError(
+                    "join_table_right_on is required when join_type is 'join_table'."
+                )
+
+        else:
+            if self.join_table:
+                warnings.warn(
+                    "join_table is ignored when join_type is 'column'.",
+                    UserWarning,
+                )
+
+            if self.join_table_left_on:
+                warnings.warn(
+                    "join_table_left_on is ignored when join_type is 'column'.",
+                    UserWarning,
+                )
+
+            if self.join_table_right_on:
+                warnings.warn(
+                    "join_table_right_on is ignored when join_type is 'column'.",
+                    UserWarning,
+                )
+
+        return self

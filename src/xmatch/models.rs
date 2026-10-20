@@ -147,7 +147,7 @@ pub struct PhaseModel {
     pub complete: bool,
     pub n_matched: Option<i64>,
     #[serde(default)]
-    pub join_paths: Vec<(String, String)>,
+    pub join_paths: Vec<JoinPathModel>,
     pub query_radius: Option<f64>,
     pub n_workers: Option<usize>,
 }
@@ -158,24 +158,75 @@ impl PhaseModel {
             bail!("join_paths should only be provided for phase 1.");
         }
 
-        let source_col_re = Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_]*$")?;
-        let destination_col_re = Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_]*\.[a-zA-Z_][a-zA-Z0-9_]*$")?;
-
-        for (source, destination) in &self.join_paths {
-            if !source_col_re.is_match(source) {
-                bail!("Invalid column: {source}");
-            }
-            if !destination_col_re.is_match(destination) {
-                bail!("Invalid destination column: {destination}");
-            }
-        }
-
         if self.query_radius.is_some() && self.phase != 2 {
             bail!("query_radius should only be provided for phase 2.");
         }
 
         if self.phase == 2 && self.query_radius.is_none() {
             bail!("query_radius is required for phase 2.");
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum JoinPathType {
+    Column,
+    #[serde(rename = "join_table")]
+    JoinTable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum JoinPathTableType {
+    #[serde(rename = "gaia_neighbourhood")]
+    GaiaNeighbourhood,
+    #[serde(rename = "gaia_best_neighbour")]
+    GaiaBestNeighbour,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JoinPathModel {
+    pub join_type: JoinPathType,
+    pub left_on: String,
+    pub right_on: String,
+    pub right_catalogue: String,
+    pub join_table: Option<String>,
+    pub join_table_left_on: Option<String>,
+    pub join_table_right_on: Option<String>,
+    pub join_table_type: Option<JoinPathTableType>,
+}
+
+impl JoinPathModel {
+    pub fn validate(&self) -> Result<()> {
+        if self.join_type == JoinPathType::JoinTable {
+            if self.join_table.is_none() {
+                bail!("join_table is required for join_type 'join_table'.");
+            }
+            if self.join_table_left_on.is_none() {
+                bail!("join_table_left_on is required for join_type 'join_table'.");
+            }
+            if self.join_table_right_on.is_none() {
+                bail!("join_table_right_on is required for join_type 'join_table'.");
+            }
+        }
+
+        let col_re = Regex::new(r"^[a-zA-Z_][a-zA-Z0-9_]*$")?;
+
+        for col in [&self.left_on, &self.right_on] {
+            if !col_re.is_match(col) {
+                bail!("Invalid column: {col}");
+            }
+        }
+
+        for col in [&self.join_table_left_on, &self.join_table_right_on] {
+            if let Some(col) = col {
+                if !col_re.is_match(col) {
+                    bail!("Invalid column: {col}");
+                }
+            }
         }
 
         Ok(())

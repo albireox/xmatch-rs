@@ -306,7 +306,7 @@ class XMatch:
         run_id: int | None = None,
         schema_path: str | pathlib.Path | None = None,
         skip_phases: list[int] | None = None,
-        join_paths: list[tuple[str, str]] = [],
+        join_paths: list[tuple[str, dict]] = [],
         query_radius: float = 1.0,
         n_workers: int | None = None,
     ):
@@ -329,9 +329,9 @@ class XMatch:
         skip_phases
             A list of phases to skip. If `None`, all phases will be executed.
         join_paths
-            A list of tuples with the paths to the catalogues to join and the names of
-            the columns to join on. Each tuple should be of the form
-            ``(this_catalogue_column, other_catalogue.other_column)``.
+            A list of dicts with the paths to the catalogues to join and the names of
+            the columns to join on. Each dictionary must follow the format of a
+            `.JoinPathModel` model.
         query_radius
             The query radius used in phase 2, in arcseconds.
         n_workers

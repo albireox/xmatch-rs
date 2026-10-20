@@ -16,7 +16,7 @@ use std::{collections::HashMap, path::PathBuf, thread::available_parallelism};
 use crate::hats;
 use crate::tools;
 use crate::xmatch;
-use xmatch::models::{CatalogueModel, XMatchModel, XMatchOptions};
+use xmatch::models::{CatalogueModel, JoinPathType, XMatchModel, XMatchOptions};
 
 static LOG_PREFIX: OnceLock<String> = OnceLock::new();
 
@@ -56,31 +56,38 @@ pub fn run_phase_1(
 
     let mut join_path_map = HashMap::<String, (String, String)>::new();
 
-    let re_from_path = Regex::new(r"^([a-zA-Z0-9_]+)$").unwrap();
-    let re_to_path = Regex::new(r"^([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)$").unwrap();
+    let re_column = Regex::new(r"^([a-zA-Z0-9_]+)$").unwrap();
 
     // Reformat join paths to a hash map of from_column -> (to_table, to_column).
     for join_path in join_paths {
-        let from_join_column = join_path.0.clone();
-        let to_table_column = join_path.1.clone();
+        let left_on_column = join_path.left_on.clone();
 
-        if let None = re_from_path.captures(&from_join_column) {
+        let right_catalogue = join_path.right_catalogue.clone();
+        let right_on_column = join_path.right_on.clone();
+
+        if let None = re_column.captures(&left_on_column) {
             bail!(
-                "{} Invalid from column format for phase 1: {}.'",
+                "{} Invalid left_on column format for phase 1: {}.'",
                 LOG_PREFIX.get().unwrap(),
-                from_join_column
+                left_on_column
             );
         }
 
-        if let Some(caps) = re_to_path.captures(&to_table_column) {
-            let to_table = caps.get(1).unwrap().as_str().to_string();
-            let to_join_column = caps.get(2).unwrap().as_str().to_string();
-            join_path_map.insert(from_join_column, (to_table, to_join_column));
+        if let None = re_column.captures(&right_on_column) {
+            bail!(
+                "{} Invalid right_on column format for phase 1: {}.'",
+                LOG_PREFIX.get().unwrap(),
+                right_on_column
+            );
+        }
+
+        if join_path.join_type == JoinPathType::Column {
+            join_path_map.insert(left_on_column, (right_catalogue, right_on_column));
         } else {
             bail!(
-                "{} Invalid join path format for phase 1: {}.'",
+                "{} Join path type {:?} not supported for phase 1.",
                 LOG_PREFIX.get().unwrap(),
-                to_table_column
+                join_path.join_type
             );
         }
     }
