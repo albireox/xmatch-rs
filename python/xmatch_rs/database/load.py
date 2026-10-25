@@ -161,7 +161,13 @@ def write_hats_dataset_to_database(
             with psycopg.connect(database_uri) as conn, conn.cursor() as cursor:
                 # This is SQL injection of the worst kind but we are generating it
                 # and we trust the code so let's just do it.
-                cursor.execute(create_table_sql(hats))  # INJECTION! # type: ignore
+                cursor.execute(
+                    create_table_sql(
+                        hats,
+                        table_name=table_name,
+                        schema=schema,
+                    )
+                )  # INJECTION! # type: ignore
 
             cl.print(
                 f"[green][✔][/] Created table [blue]{schema}.{table_name}[/] "

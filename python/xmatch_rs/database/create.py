@@ -67,8 +67,8 @@ def create_table_sql(
 
     if hats is not None:
         columns = hats.schema.get_polars_schema(use_database_name=True)
-        schema = hats.schema.model.database.schema_
-        table_name = hats.schema.model.database.table_name
+        schema = schema or hats.schema.model.database.schema_
+        table_name = table_name or hats.schema.model.database.table_name
     else:
         if schema is None or table_name is None:
             raise ValueError("'schema' and 'table_name' must be provided with 'frame'.")
@@ -92,14 +92,14 @@ def create_table_sql(
                 sql_type = DTYPE_TO_SQL[inner_dtype_str]
                 if isinstance(column_dtype, polars.Array):
                     size = column_dtype.size
-                    sql += f"  {column_name} {sql_type}[{size}],\n"
+                    sql += f'  "{column_name}" {sql_type}[{size}],\n'
                 elif isinstance(column_dtype, polars.List):
-                    sql += f"  {column_name} {sql_type}[],\n"
+                    sql += f'  "{column_name}" {sql_type}[],\n'
             else:
                 raise ValueError(f"Unsupported array/list column {column_name!r}.")
         else:
             sql_type = DTYPE_TO_SQL[str(column_dtype)]
-            sql += f"  {column_name} {sql_type},\n"
+            sql += f'  "{column_name}" {sql_type},\n'
 
     sql = sql.rstrip(",\n") + "\n);"
 
