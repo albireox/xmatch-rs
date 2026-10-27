@@ -193,7 +193,7 @@ pub struct JoinPathModel {
     pub left_on: String,
     pub right_on: String,
     pub right_catalogue: String,
-    pub join_table: Option<String>,
+    pub join_table_path: Option<PathBuf>,
     pub join_table_left_on: Option<String>,
     pub join_table_right_on: Option<String>,
     pub join_table_type: Option<JoinPathTableType>,
@@ -202,8 +202,8 @@ pub struct JoinPathModel {
 impl JoinPathModel {
     pub fn validate(&self) -> Result<()> {
         if self.join_type == JoinPathType::JoinTable {
-            if self.join_table.is_none() {
-                bail!("join_table is required for join_type 'join_table'.");
+            if self.join_table_path.is_none() {
+                bail!("join_table_path is required for join_type 'join_table'.");
             }
             if self.join_table_left_on.is_none() {
                 bail!("join_table_left_on is required for join_type 'join_table'.");
