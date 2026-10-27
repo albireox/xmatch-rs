@@ -390,11 +390,12 @@ class JoinPathModel(BaseModel):
         Field(description="The name of the column in the catalogue to join with."),
     ]
 
-    join_table: Annotated[
-        str | None,
+    join_table_path: Annotated[
+        str | pathlib.Path | None,
         Field(
-            description="The path to the join table to use for the join. Only required "
-            "if join_type is 'join_table'."
+            description="The path on disk to the join table to use for the join. "
+            "Must be readable using polars.scan_parquet. Only required if "
+            "join_type is 'join_table'."
         ),
     ] = None
 
@@ -451,9 +452,9 @@ class JoinPathModel(BaseModel):
         """Validator the join path model."""
 
         if self.join_type == "join_table":
-            if not self.join_table:
+            if not self.join_table_path:
                 raise ValueError(
-                    "join_table is required when join_type is 'join_table'."
+                    "join_table_path is required when join_type is 'join_table'."
                 )
 
             if not self.join_table_left_on:
@@ -467,9 +468,9 @@ class JoinPathModel(BaseModel):
                 )
 
         else:
-            if self.join_table:
+            if self.join_table_path:
                 warnings.warn(
-                    "join_table is ignored when join_type is 'column'.",
+                    "join_table_path is ignored when join_type is 'column'.",
                     UserWarning,
                 )
 
@@ -486,3 +487,21 @@ class JoinPathModel(BaseModel):
                 )
 
         return self
+
+    @field_validator("join_table_path")
+    @classmethod
+    def validate_join_table_path(
+        cls,
+        v: str | pathlib.Path | None,
+    ) -> pathlib.Path | None:
+        """Validator for the ``join_table_path`` field."""
+
+        if v is None:
+            return v
+
+        path = pathlib.Path(v)
+
+        if not path.exists():
+            raise ValueError(f"join_table_path does not exist: {path}")
+
+        return path
