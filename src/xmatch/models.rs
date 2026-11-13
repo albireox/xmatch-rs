@@ -180,6 +180,15 @@ pub enum JoinPathType {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+pub enum JoinDirection {
+    #[serde(rename = "left_to_right")]
+    LeftToRight,
+    #[serde(rename = "right_to_left")]
+    RightToLeft,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
 pub enum JoinPathTableType {
     #[serde(rename = "gaia_neighbourhood")]
     GaiaNeighbourhood,
@@ -190,9 +199,10 @@ pub enum JoinPathTableType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JoinPathModel {
     pub join_type: JoinPathType,
+    pub join_direction: JoinDirection,
+    pub left_catalogue: String,
     pub left_on: String,
     pub right_on: String,
-    pub right_catalogue: String,
     pub join_table_path: Option<PathBuf>,
     pub join_table_left_on: Option<String>,
     pub join_table_right_on: Option<String>,
@@ -248,11 +258,11 @@ fn default_xmatch_rs_version() -> String {
 pub static CATALOG_SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
     Schema::from_iter(vec![
         Field::new("catalogid".into(), DataType::UInt64),
-        Field::new("healpix_29".into(), DataType::UInt64),
+        Field::new("_healpix_29".into(), DataType::UInt64),
         Field::new("ra".into(), DataType::Float64),
         Field::new("dec".into(), DataType::Float64),
-        Field::new("pmra".into(), DataType::Float64),
-        Field::new("pmdec".into(), DataType::Float64),
+        Field::new("pmra".into(), DataType::Float32),
+        Field::new("pmdec".into(), DataType::Float32),
         Field::new("epoch".into(), DataType::Float32),
         Field::new("added_by".into(), DataType::String),
         Field::new(
@@ -266,7 +276,7 @@ pub static CATALOG_SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
 pub static CATALOG_TO_TABLE_SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
     Schema::from_iter(vec![
         Field::new("catalogid".into(), DataType::UInt64),
-        Field::new("healpix_29".into(), DataType::UInt64),
+        Field::new("_healpix_29".into(), DataType::UInt64),
         Field::new("version".into(), DataType::String),
         Field::new("distance".into(), DataType::Float64),
         Field::new("best".into(), DataType::Boolean),
@@ -333,5 +343,20 @@ pub fn get_column_dtype(lf: &LazyFrame, column_name: &str) -> Result<DataType> {
         Ok(dtype.clone())
     } else {
         bail!("Column {column_name} not found in the LazyFrame.")
+    }
+}
+
+/// A structure to encapsulate the data needed to run an xmatch.
+#[derive(Clone)]
+pub(crate) struct XMatchData {
+    pub path: PathBuf,
+    pub model: XMatchModel,
+    pub catalogue_name: String,
+    pub options: XMatchOptions,
+}
+
+impl XMatchData {
+    pub fn get_catalogue_model(&self, catalogue: &str) -> Option<CatalogueModel> {
+        self.model.get_catalogue(catalogue).cloned()
     }
 }

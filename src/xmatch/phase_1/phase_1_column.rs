@@ -6,82 +6,62 @@
  */
 
 use anyhow::{Result, bail};
-use polars::{chunked_array::cast::CastOptions, prelude::*};
+use polars::prelude::*;
 use std::sync::{Mutex, OnceLock};
-use std::{path::PathBuf, thread::available_parallelism};
+use std::thread::available_parallelism;
 
-use crate::hats;
-use crate::tools;
+use crate::hats::dataset::{AsDataset, Dataset};
+use crate::tools::{self, IsEmpty};
 use crate::xmatch;
-use crate::xmatch::models::JoinPathModel;
-use xmatch::models::{CatalogueModel, XMatchModel, XMatchOptions};
+use crate::xmatch::models::{JoinPathModel, XMatchData};
 
 static LOG_PREFIX: OnceLock<String> = OnceLock::new();
 
 // Process one join path on the primary key.
-// Here "from" is the catalogue being processed and "to" is the catalogue being joined with,
-// which must have been previously cross-matched.
+// Here "left" is the catalogue already cross-matched and "right" is the catalogue being processed.
 pub(crate) fn xmatch_phase1_join_type_column(
-    xmatch_path: &PathBuf,
-    xmatch_data: &XMatchModel,
-    from_cat_data: &CatalogueModel,
+    xmatch_data: &XMatchData,
     join_path_model: &JoinPathModel,
-    xmatch_options: &XMatchOptions,
 ) -> Result<()> {
-    LOG_PREFIX.get_or_init(|| format!("[{}] - Phase 1 -", from_cat_data.name.to_uppercase()));
+    LOG_PREFIX.get_or_init(|| {
+        format!(
+            "[{}] - Phase 1 -",
+            xmatch_data.catalogue_name.to_uppercase()
+        )
+    });
 
-    let from_join_column = join_path_model.left_on.clone();
-    let to_table = join_path_model.right_catalogue.clone();
-    let to_join_column = join_path_model.right_on.clone();
+    // "Left" tablename and column for the join.
+    let left_table = join_path_model.left_catalogue.clone();
+    let left_join_column = join_path_model.left_on.clone();
 
     log::info!(
-        "{} Processing join path of type 'column': {} -> {}.{}",
+        "{} Processing join path of type 'column': {}.{} -> {}.{}",
         LOG_PREFIX.get().unwrap(),
-        from_join_column,
-        to_table,
-        to_join_column
+        left_table,
+        left_join_column,
+        xmatch_data.catalogue_name,
+        join_path_model.right_on
     );
 
-    // Confirm that the catalogue to join with has been previously cross-matched.
-    let to_cat_data = if let Some(cat) = xmatch_data.get_catalogue(to_table.as_str()) {
-        cat
-    } else {
-        bail!(
-            "{} Catalogue {} has not been previously cross-matched.",
-            LOG_PREFIX.get().unwrap(),
-            to_table
-        );
-    };
-
-    let from_cat_name = &from_cat_data.name.clone();
-    let to_cat_name = &to_cat_data.name.clone();
-    let to_primary_key = &to_cat_data.primary_key.clone();
-
-    let phase = from_cat_data.get_phase(1).unwrap();
-
-    // Use half of the CPUs if n_workers is not specified.
-    let n_workers = phase
+    // Determine the number of workers. Use half of the CPUs if n_workers is not specified.
+    let right_cat_model = xmatch_data
+        .get_catalogue_model(xmatch_data.catalogue_name.as_str())
+        .unwrap();
+    let phase_model = right_cat_model.get_phase(1).unwrap();
+    let n_workers = phase_model
         .n_workers
         .unwrap_or_else(|| available_parallelism().unwrap().get() / 2);
 
-    log::info!(
-        "{} Joining {}.{} with {}.{} on primary key.",
-        LOG_PREFIX.get().unwrap(),
-        from_cat_name,
-        from_join_column,
-        to_cat_name,
-        to_primary_key
+    // We are going to parallelise based on the pixels in the xmatch dataset.
+    let xmatch_dataset = Dataset::new(
+        xmatch::tools::get_xmatch_path(xmatch_data.path.clone(), None)?,
+        false,
     );
-
-    let from_hats_path =
-        hats::tools::get_hats_path_root(from_cat_data.hats_path.clone())?.join("object/dataset");
-
-    // Get the list of pixels in the from catalogue.
-    let partition_info = hats::tools::PartitionInfo::from_dataset(&from_hats_path, true).unwrap();
-    let n_pixels = partition_info.len() as u64;
+    let xmatch_partition_info = xmatch_dataset.partition();
+    let n_pixels = xmatch_partition_info.len() as u64;
 
     // Prepare a progress tracker.
-    let progress_tracker = if let Some(progress_file) = &xmatch_options.progress_file {
+    let progress_tracker = if let Some(progress_file) = &xmatch_data.options.progress_file {
         Some(xmatch::tools::ProgressTracker::new(
             progress_file.clone(),
             n_pixels as i32,
@@ -99,19 +79,15 @@ pub(crate) fn xmatch_phase1_join_type_column(
         use rayon::iter::ParallelIterator;
         use rayon::prelude::*;
 
-        partition_info
+        xmatch_partition_info
             .into_iter()
             .par_bridge()
-            .try_for_each(|(order, pixel)| {
-                _xmatch_phase1_join_type_column_pixel(
-                    order,
-                    pixel,
-                    xmatch_path,
+            .try_for_each(|(xmatch_order, xmatch_pixel)| {
+                xmatch_phase1_join_type_column_pixel(
+                    xmatch_order,
+                    xmatch_pixel,
                     xmatch_data,
-                    from_cat_data,
-                    from_join_column.as_str(),
-                    to_join_column.as_str(),
-                    to_cat_data,
+                    join_path_model,
                 )
                 .unwrap();
 
@@ -132,126 +108,100 @@ pub(crate) fn xmatch_phase1_join_type_column(
     Ok(())
 }
 
-// Process one pixel of the from catalogue.
-fn _xmatch_phase1_join_type_column_pixel(
-    from_order: u8,
-    from_pixel: u64,
-    xmatch_path: &PathBuf,
-    xmatch_data: &XMatchModel,
-    from_cat_data: &CatalogueModel,
-    from_join_column: &str,
-    to_join_column: &str,
-    to_cat_data: &CatalogueModel,
+// Process one pixel of the new catalogue.
+fn xmatch_phase1_join_type_column_pixel(
+    xmatch_order: u8,
+    xmatch_pixel: u64,
+    xmatch_data: &XMatchData,
+    join_path_model: &JoinPathModel,
 ) -> Result<()> {
     log::trace!(
-        "{} Processing pixel {} of order {}.",
+        "{} Processing xmatch pixel {} (order {}).",
         LOG_PREFIX.get().unwrap(),
-        from_pixel,
-        from_order
+        xmatch_pixel,
+        xmatch_order
     );
 
-    let xmatch_order = xmatch_data.pixelation_order;
+    let right_cat_model = xmatch_data
+        .get_catalogue_model(xmatch_data.catalogue_name.as_str())
+        .unwrap();
+    let left_cat_model = xmatch_data
+        .get_catalogue_model(&join_path_model.left_catalogue)
+        .unwrap();
 
-    // Get the list of pixels in the xmatch dataset that correspond to the from pixel.
-    // Include neighbouring pixels to account for small differences in on-sky position.
-    let xmatch_pixels =
-        xmatch::tools::get_xmatch_pixels(xmatch_order, from_order, from_pixel, true)?;
+    // Get columns for the left and right catalogues.
+    let right_primary_key = right_cat_model.primary_key.clone();
+    let right_join_column = join_path_model.left_on.clone();
 
-    log::trace!(
-        "{} ({}, {}): matched {} pixels in xmatch dataset (order {}): {:?}.",
-        LOG_PREFIX.get().unwrap(),
-        from_order,
-        from_pixel,
-        xmatch_pixels.len(),
-        xmatch_order,
-        xmatch_pixels
-    );
+    let left_primary_key = left_cat_model.primary_key.clone();
+    let left_join_column = join_path_model.right_on.clone();
 
-    // Scan the original data.
-    let cat_dataset_path =
-        hats::tools::get_hats_path_root(from_cat_data.hats_path.clone())?.join("object/dataset");
+    // Scan the right catalogue data. We get the matching pixels for the xmatch-pixels and
+    // their neighbours to ensure we include all matching rows.
+    let right_cat_dataset = Dataset::new(right_cat_model.hats_path.clone(), true);
 
-    // Scan the original data for the from pixel.
-    let from_lf = if let Some(lf) = hats::tools::scan_pixel_from_hats_dataset(
-        cat_dataset_path,
-        from_order,
-        from_pixel,
-        false, // Don't need strict because this is a native order-pixel in this HATS dataset.
-    )? {
-        lf
-    } else {
-        return Ok(());
-    };
+    let xmatch_right_neighbours =
+        right_cat_dataset.get_neighbours(xmatch_order, xmatch_pixel, true)?;
 
-    // We only need the join column and the "from" primary key column.
-    let from_primary_key = from_cat_data.primary_key.clone();
-    let from_join_column = from_join_column.to_string();
-    let to_join_column = to_join_column.to_string();
-    let to_primary_key = to_cat_data.primary_key.clone();
+    let right_lf = right_cat_dataset.scan_pixels(xmatch_right_neighbours)?;
 
-    // Filter the from_lf dataset. Remove any rows with null values in the join column.
-    let from_lf = from_lf
-        .select([col(&from_primary_key), col(&from_join_column)])
-        .filter(col(&from_join_column).is_not_null());
+    // Filter the right_lf dataset. Remove any rows with null values in the join column.
+    let right_lf = right_lf
+        .select([col(&right_primary_key), col(&right_join_column)])
+        .filter(col(&right_join_column).is_not_null());
 
     // Exit early if there are no rows with non-null values in the join column.
-    let from_lf_nrows = tools::lf_row_count(&from_lf)?;
-    if from_lf_nrows == 0 {
+    if right_lf.is_empty() {
         log::trace!(
             "{} ({}, {}): no rows with non-null join column, skipping.",
             LOG_PREFIX.get().unwrap(),
-            from_order,
-            from_pixel,
+            xmatch_order,
+            xmatch_pixel,
         );
         return Ok(());
     }
 
-    // Get the catalog_to lazy frame.
-    let catalog_to_table = format!("catalog_to_{}", to_cat_data.name);
-    let catalog_to_path =
-        xmatch::tools::get_xmatch_path_root(xmatch_path.clone())?.join(&catalog_to_table);
+    // Get the lazy frame for the catalog_to table for the "left" catalogue.
+    let catalog_to_dataset = Dataset::new(
+        xmatch::tools::get_xmatch_path(
+            xmatch_data.path.clone(),
+            Some(left_cat_model.name.clone()),
+        )?,
+        false,
+    );
 
-    // Convert the xmatch_pixels to a Series of Int64.
-    let xmatch_pixels_series: Series = xmatch_pixels
-        .into_iter()
-        .collect::<Series>()
-        .cast_with_options(&DataType::Int64, CastOptions::NonStrict)?;
-
-    // Filter the catalog_to table to only include rows with the valid pixelation order and pixels.
-    let catalog_to_lf =
-        LazyFrame::scan_parquet(tools::to_pl_path(catalog_to_path)?, Default::default())?
-            .filter(col("Norder").eq(lit(xmatch_data.pixelation_order as u32)))
-            .filter(col("Npix").is_in(lit(xmatch_pixels_series).implode(false), false))
-            .filter(col("best").eq(lit(true)));
+    let catalog_to_lf = catalog_to_dataset
+        .scan_pixel(xmatch_order, xmatch_pixel, false)?
+        .filter(col("best").eq(lit(true)));
 
     // If the join column is the primary key, that will be present in the catalog_to table.
     // Otherwise, we need to join with the actual catalogue.
-    let catalog_to_lf = if to_join_column != to_primary_key {
-        let to_cat_dataset_path =
-            hats::tools::get_hats_path_root(to_cat_data.hats_path.clone())?.join("object/dataset");
+    let catalog_to_lf = if left_join_column != left_primary_key {
+        let left_cat_dataset = Dataset::new(left_cat_model.hats_path.clone(), true);
 
-        let mut to_cat_lf =
-            LazyFrame::scan_parquet(tools::to_pl_path(to_cat_dataset_path)?, Default::default())?;
+        let left_cat_neighbours =
+            left_cat_dataset.get_neighbours(xmatch_order, xmatch_pixel, true)?;
+        let mut left_cat_lf = left_cat_dataset.scan_pixels(left_cat_neighbours)?;
 
-        let to_cat_schema = to_cat_lf.collect_schema()?;
-        if !to_cat_schema.contains(&to_join_column) {
+        let left_cat_schema = left_cat_lf.collect_schema()?;
+        if !left_cat_schema.contains(&left_join_column) {
             bail!(
                 "{} ({}, {}): join column {} not found in catalogue {}.",
                 LOG_PREFIX.get().unwrap(),
-                from_order,
-                from_pixel,
-                to_join_column,
-                to_cat_data.name
+                xmatch_order,
+                xmatch_pixel,
+                left_join_column,
+                left_cat_model.name
             );
         }
 
-        let to_cat_lf = to_cat_lf.select([col(&to_primary_key), col(&to_join_column)]);
+        let left_cat_lf = left_cat_lf.select([col(&left_primary_key), col(&left_join_column)]);
 
         // Join the catalog_to table with the to catalogue to get the join column.
         catalog_to_lf.join(
-            to_cat_lf,
-            [col(&to_primary_key)],
-            [col(&to_primary_key)],
+            left_cat_lf,
+            [col(&left_primary_key)],
+            [col(&left_primary_key)],
             JoinArgs {
                 how: JoinType::Inner,
                 ..Default::default()
@@ -261,14 +211,17 @@ fn _xmatch_phase1_join_type_column_pixel(
         catalog_to_lf
     };
 
+    // Keep only the catalogid and join columns.
+    let catalog_to_lf = catalog_to_lf.select([col("catalogid"), col(&left_join_column)]);
+
     // Get the data type of the join column.
-    let from_join_dtype = xmatch::models::get_column_dtype(&from_lf, &from_join_column)?;
+    let right_join_dtype = xmatch::models::get_column_dtype(&right_lf, &right_join_column)?;
 
     // Perform the join.
-    let join_lf = from_lf.join(
-        catalog_to_lf,
-        [col(&from_join_column)],
-        [col(&to_join_column).cast(from_join_dtype)],
+    let join_lf = catalog_to_lf.join(
+        right_lf,
+        [col(&left_join_column)],
+        [col(&right_join_column).cast(right_join_dtype)],
         JoinArgs {
             how: JoinType::Inner,
             ..Default::default()
@@ -277,11 +230,11 @@ fn _xmatch_phase1_join_type_column_pixel(
 
     // Create the catalog_to_table frame.
     let added_on = chrono::Utc::now().timestamp_millis();
-    let lf = join_lf.with_columns([
+    let lf = join_lf.select([
         col("catalogid"),
-        col(&from_primary_key),
-        col("healpix_29"),
-        lit(xmatch_data.version.clone())
+        col("_healpix_29"),
+        col(&right_primary_key).alias("pk"),
+        lit(xmatch_data.model.version.clone())
             .cast(DataType::String)
             .alias("version"),
         lit(Null {}).cast(DataType::Float64).alias("distance"),
@@ -291,36 +244,96 @@ fn _xmatch_phase1_join_type_column_pixel(
     ]);
 
     // If the resulting lazy frame has no rows, exit early.
-    let lf_nrows = tools::lf_row_count(&lf)?;
-    if lf_nrows == 0 {
+    if lf.is_empty() {
         log::trace!(
             "{} ({}, {}): no rows after join, skipping.",
             LOG_PREFIX.get().unwrap(),
-            from_order,
-            from_pixel,
+            xmatch_order,
+            xmatch_pixel,
+        );
+        return Ok(());
+    }
+
+    // This lazy frame may include rows with catalogids that are already in catalog_to_<right>
+    // from a different join path. We remove those if they exist.
+    // TODO: Better than removing them, it would be good to check that they are the same
+    // associations and if they are not, do something nuanced.
+    let lf = remove_already_xmatched(lf, xmatch_order, xmatch_pixel, xmatch_data)?;
+
+    let lf_nrows = tools::lf_row_count(&lf)?;
+
+    if lf_nrows == 0 {
+        log::trace!(
+            "{} ({}, {}): no rows after removing duplicates, skipping.",
+            LOG_PREFIX.get().unwrap(),
+            xmatch_order,
+            xmatch_pixel,
         );
         return Ok(());
     }
 
     log::trace!(
-        "{} ({}, {}): {} rows successful joined.",
+        "{} ({}, {}): {} rows successfully joined.",
         LOG_PREFIX.get().unwrap(),
-        from_order,
-        from_pixel,
+        xmatch_order,
+        xmatch_pixel,
         lf_nrows
     );
 
     // Write the joined data to the catalog_to_table.
     xmatch::tools::write_catalog_to_table(
-        from_cat_data.name.clone(),
-        xmatch_path,
+        right_cat_model.name.clone(),
+        &xmatch_data.path,
         lf,
-        from_primary_key.clone(),
+        right_primary_key.clone(),
         xmatch_order,
-        xmatch_data.version.clone(),
-        from_cat_data.run_id,
+        xmatch_data.model.version.clone(),
+        right_cat_model.run_id,
         true,
     )?;
 
     Ok(())
+}
+
+pub(crate) fn remove_already_xmatched(
+    lf: LazyFrame,
+    xmatch_order: u8,
+    xmatch_pixel: u64,
+    xmatch_data: &XMatchData,
+) -> Result<LazyFrame> {
+    let right_cat_model = xmatch_data
+        .get_catalogue_model(xmatch_data.catalogue_name.as_str())
+        .unwrap();
+
+    let catalog_to_right_table = format!("catalog_to_{}", right_cat_model.name);
+
+    let catalog_to_right_path = xmatch::tools::get_temp_dir_path(
+        xmatch_data.path.clone(),
+        &catalog_to_right_table,
+        &xmatch_data.model.version,
+        right_cat_model.run_id as usize,
+        false,
+    )?;
+
+    if catalog_to_right_path.exists() {
+        let catalog_to_right_dataset = Dataset::new(catalog_to_right_path.join("dataset"), false);
+        let catalog_to_right_lf =
+            catalog_to_right_dataset.scan_pixel(xmatch_order, xmatch_pixel, false)?;
+
+        // Anti-join the match lazy frame with the catalog_dest_right_lf to remove any rows
+        // with catalogids that are already present.
+        let lf = lf.clone().join(
+            catalog_to_right_lf.select([col("catalogid")]),
+            [col("catalogid")],
+            [col("catalogid")],
+            JoinArgs {
+                how: JoinType::Anti,
+                ..Default::default()
+            },
+        );
+
+        return Ok(lf);
+    };
+
+    return Ok(lf);
 }

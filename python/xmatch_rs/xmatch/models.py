@@ -4,7 +4,7 @@
 # @Author: José Sánchez-Gallego (gallegoj@uw.edu)
 # @Date: 2026-06-11
 # @Filename: models.py
-# @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
+# @License: BSD 3-clause (http://www.openleft.org/licenses/BSD-3-Clause)
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import datetime
 import pathlib
 import re
 import warnings
+from enum import Enum
 
 from typing import Annotated, Literal
 
@@ -282,7 +283,7 @@ class PhaseModel(BaseModel):
 
     n_matched: Annotated[
         int | None,
-        Field(description="The number of sources matched in this phase."),
+        Field(description="The number of lefts matched in this phase."),
     ] = None
 
     join_paths: Annotated[
@@ -357,37 +358,55 @@ class PhaseModel(BaseModel):
         return data
 
 
+class JoinType(str, Enum):
+    COLUMN = "column"
+    JOIN_TABLE = "join_table"
+
+
+class JoinDirection(str, Enum):
+    LEFT_TO_RIGHT = "left_to_right"
+    RIGHT_TO_LEFT = "right_to_left"
+
+
 class JoinPathModel(BaseModel):
     """Pydantic model for a join path used in phase 1."""
 
     join_type: Annotated[
-        Literal["column", "join_table"],
+        JoinType,
         Field(
             description="The type of join used. Can be 'column' to use an existing "
             "column in the catalogue being cross-matched, or 'join_table' to use an "
             "external relational table."
         ),
-    ] = "column"
+    ] = JoinType.COLUMN
+
+    join_direction: Annotated[
+        JoinDirection,
+        Field(
+            description="The direction of the join. Can be 'left_to_right' or "
+            "'right_to_left'."
+        ),
+    ] = JoinDirection.LEFT_TO_RIGHT
+
+    left_catalogue: Annotated[
+        str,
+        Field(
+            description="The name of the original, source catalogue. Must be a "
+            "catalogue that has already been cross-matched."
+        ),
+    ]
 
     left_on: Annotated[
         str,
         Field(
-            description="The name of the column in the catalogue being "
-            "cross-matched to use for the join."
-        ),
-    ]
-
-    right_catalogue: Annotated[
-        str,
-        Field(
-            description="The name of the catalogue to join with. Must be a "
-            "catalogue that has already been cross-matched."
+            description="The name of the column in the left catalogue "
+            "to use for the join."
         ),
     ]
 
     right_on: Annotated[
         str,
-        Field(description="The name of the column in the catalogue to join with."),
+        Field(description="The name of the column in the catalogue being processed."),
     ]
 
     join_table_path: Annotated[

@@ -5,79 +5,79 @@
  *  @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
  */
 
-use anyhow::{Result, bail};
-use log;
-use num_format::{Locale, ToFormattedString};
-use polars::prelude::*;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::thread::available_parallelism;
 
-use crate::hats::tools::{PartitionInfo, get_hats_path_root, scan_pixel_from_hats_dataset};
+use anyhow::{Result, bail};
+use log;
+use num_format::{Locale, ToFormattedString};
+use polars::prelude::*;
+
+use crate::hats::dataset::{AsDataset, Dataset};
 use crate::tools::{
     IsEmpty, PartitionedParquetSinkOptions, lf_row_count, sink_lf_to_partitioned_parquet,
     to_pl_path,
 };
 use crate::xmatch::models::{
-    CATALOG_SCHEMA, CATALOG_TO_TABLE_SCHEMA, CatalogueModel, XMatchModel, XMatchOptions,
-    cast_and_reorder,
+    CATALOG_SCHEMA, CATALOG_TO_TABLE_SCHEMA, CatalogueModel, XMatchData, cast_and_reorder,
 };
 use crate::xmatch::tools::{
     ProgressTracker, add_catalogid, add_healpix_xmatch_column, delete_dir_if_empty,
     get_temp_dir_path, get_unix_timestamp_ms, get_xmatch_path_root, get_xmatch_pixels,
-    move_temp_files, propagate_coordinates, scan_pixels_from_xmatch_dataset,
+    move_temp_files, propagate_coordinates,
 };
 
 static LOG_PREFIX: OnceLock<String> = OnceLock::new();
 
-pub fn run_phase_3(
-    xmatch_path: PathBuf,
-    xmatch_data: XMatchModel,
-    cat_data: CatalogueModel,
-    xmatch_options: XMatchOptions,
-) -> Result<()> {
-    LOG_PREFIX.get_or_init(|| format!("[{}] - Phase 3 -", cat_data.name.to_uppercase()));
+pub(crate) fn run_phase_3(xmatch_data: XMatchData) -> Result<()> {
+    let cat_model = xmatch_data
+        .get_catalogue_model(&xmatch_data.catalogue_name)
+        .unwrap();
+
+    LOG_PREFIX.get_or_init(|| format!("[{}] - Phase 3 -", cat_model.name.to_uppercase()));
 
     log::info!(
         "{} Running phase 3 for catalogue {}.",
         LOG_PREFIX.get().unwrap(),
-        cat_data.name
+        cat_model.name
     );
 
-    // Get dataset paths.
-    let catalog_dataset_path = get_xmatch_path_root(xmatch_path.clone())?.join("catalog/dataset");
-    let hats_dataset_path = get_hats_path_root(cat_data.hats_path.clone())?.join("object/dataset");
+    // Get new catalogue dataset.
+    let new_cat_dataset = Dataset::new(cat_model.hats_path.clone(), true);
 
     // Check that the HATS dataset exists.
-    if !hats_dataset_path.exists() {
+    if !new_cat_dataset.path().exists() {
         bail!(
             "{} HATS dataset not found at {}.",
             LOG_PREFIX.get().unwrap(),
-            hats_dataset_path.display()
+            new_cat_dataset.path().display()
         );
     }
 
     // Create directories if they don't exist.
+    let catalog_dataset_path =
+        get_xmatch_path_root(xmatch_data.path.clone())?.join("catalog/dataset");
     std::fs::create_dir_all(&catalog_dataset_path)?;
 
     let tmp_path = get_temp_dir_path(
-        xmatch_path.clone(),
-        &cat_data.name,
-        &xmatch_data.version.clone(),
-        cat_data.run_id as usize,
+        xmatch_data.path.clone(),
+        &cat_model.name,
+        &xmatch_data.model.version.clone(),
+        cat_model.run_id as usize,
         true,
     )?;
 
-    // Ensure that the max catalogid cache is update for this run_id.
+    // Ensure that the max catalogid cache is updated for this run_id.
     log::debug!(
-        "{} Updating max catalogid cache for run_id {}.",
+        "{} Updating max. catalogid cache for run_id {}.",
         LOG_PREFIX.get().unwrap(),
-        cat_data.run_id
+        cat_model.run_id
     );
 
     crate::xmatch::tools::get_max_catalogid(
         Some(catalog_dataset_path.clone()),
-        Some(cat_data.run_id as usize),
+        Some(cat_model.run_id as usize),
         true,
     )?;
 
@@ -97,11 +97,12 @@ pub fn run_phase_3(
             LOG_PREFIX.get().unwrap()
         );
 
-        let cat_lf = LazyFrame::scan_parquet(to_pl_path(hats_dataset_path)?, Default::default())?;
-        _xmatch_phase3_process_lf(&cat_lf, None, &xmatch_data, &cat_data, &tmp_path)?;
+        let new_cat_lf = new_cat_dataset.get_frame()?;
+
+        xmatch_phase3_process_lf(&new_cat_lf, None, &xmatch_data, &cat_model, &tmp_path)?;
     } else {
         // Use a quarter of the CPUs if n_workers is not specified.
-        let phase = cat_data.get_phase(3).unwrap();
+        let phase = cat_model.get_phase(3).unwrap();
         let n_workers = phase
             .n_workers
             .unwrap_or_else(|| available_parallelism().unwrap().get() / 4);
@@ -112,16 +113,14 @@ pub fn run_phase_3(
             n_workers
         );
 
-        // Parallelise the processing of each pixel. For each pixel in the catalogue dataset, we
-        // find the associated pixels in the catalog_to_table dataset and reject entries that are
-        // already there (added by phases 1 or 2).
-        let partition_info = PartitionInfo::from_dataset(&hats_dataset_path, true)?;
+        // Parallelise the processing of each pixel in the new catalogue.
+        let new_cat_partition_info = new_cat_dataset.partition();
 
         // Get a progress tracker.
-        let progress_tracker = if let Some(progress_file) = &xmatch_options.progress_file {
+        let progress_tracker = if let Some(progress_file) = &xmatch_data.options.progress_file {
             Some(ProgressTracker::new(
                 progress_file.clone(),
-                partition_info.len() as i32,
+                new_cat_partition_info.len() as i32,
                 true,
             ))
         } else {
@@ -135,65 +134,60 @@ pub fn run_phase_3(
             use rayon::iter::ParallelIterator;
             use rayon::prelude::*;
 
-            partition_info
+            new_cat_partition_info
                 .into_iter()
                 .par_bridge()
                 .try_for_each(|(order, pixel)| {
                     // Get the catalogue pixel from the HATS dataset.
-                    let cat_pixel_lf = scan_pixel_from_hats_dataset(
-                        hats_dataset_path.clone(),
-                        order,
-                        pixel,
-                        true,
-                    )?;
+                    let cat_pixel_lf = new_cat_dataset.scan_pixel(order, pixel, false)?;
 
-                    let cat_pixel = if let Some(cat_pixel_lf) = cat_pixel_lf {
-                        cat_pixel_lf
-                    } else {
+                    // If the pixel is empty (can this happen?) then just return.
+                    if cat_pixel_lf.is_empty() {
                         return Ok(());
-                    };
+                    }
 
                     // Find the associated pixels in the xmatch dataset. We include neighbours because
                     // the match may be outside the nominal pixel due to proper motion propagation.
+                    // We create a vector of tuples with the pixelation order as first element.
                     let xmatch_pixels =
-                        get_xmatch_pixels(xmatch_data.pixelation_order, order, pixel, true)?;
+                        get_xmatch_pixels(xmatch_data.model.pixelation_order, order, pixel, true)?
+                            .iter()
+                            .map(|pp| (xmatch_data.model.pixelation_order, *pp))
+                            .collect::<Vec<_>>();
 
                     // Scan the relevant pixels.
-                    let xmatch_dataset_path = get_xmatch_path_root(xmatch_path.clone())?;
+                    let xmatch_dataset_path = get_xmatch_path_root(xmatch_data.path.clone())?;
 
                     let catalog_to_table_path =
-                        xmatch_dataset_path.join(format!("catalog_to_{}/dataset", cat_data.name));
+                        xmatch_dataset_path.join(format!("catalog_to_{}/dataset", cat_model.name));
 
-                    let catalog_to_table_pixel = if catalog_to_table_path.exists() {
-                        scan_pixels_from_xmatch_dataset(
-                            xmatch_dataset_path.clone(),
-                            Some(cat_data.name.clone()),
-                            xmatch_data.pixelation_order,
-                            &xmatch_pixels,
-                        )?
+                    let catalog_to_table_lf = if catalog_to_table_path.exists() {
+                        let catalog_to_table_dataset =
+                            Dataset::new(catalog_to_table_path.clone(), false);
+                        catalog_to_table_dataset.scan_pixels(xmatch_pixels)?
                     } else {
-                        let pk_dtype = cat_pixel
+                        let pk_dtype = cat_pixel_lf
                             .clone()
                             .collect_schema()
                             .unwrap()
-                            .get(&cat_data.primary_key.clone())
+                            .get(&cat_model.primary_key.clone())
                             .unwrap()
                             .clone();
 
                         let catalog_to_table_df =
                             DataFrame::empty_with_arc_schema(Arc::new(Schema::from_iter(vec![
                                 Field::new("catalogid".into(), DataType::UInt64),
-                                Field::new(cat_data.primary_key.clone().into(), pk_dtype),
+                                Field::new(cat_model.primary_key.clone().into(), pk_dtype),
                             ])));
 
                         catalog_to_table_df.lazy()
                     };
 
-                    _xmatch_phase3_process_lf(
-                        &cat_pixel,
-                        Some(&catalog_to_table_pixel),
+                    xmatch_phase3_process_lf(
+                        &cat_pixel_lf,
+                        Some(&catalog_to_table_lf),
                         &xmatch_data,
-                        &cat_data,
+                        &cat_model,
                         &tmp_path,
                     )?;
 
@@ -222,20 +216,20 @@ pub fn run_phase_3(
     log::info!(
         "{} Phase 3 for catalogue {} completed. Added {} entries to catalog.",
         LOG_PREFIX.get().unwrap(),
-        cat_data.name,
+        cat_model.name,
         n_rows_catalog.to_formatted_string(&Locale::en)
     );
 
     // Copy the data from the temp path to the final xmatch path if requested.
-    if xmatch_options.move_files {
+    if xmatch_data.options.move_files {
         let suffix = format!(
             "{}-{}-{}",
-            cat_data.name, xmatch_data.version, cat_data.run_id
+            cat_model.name, xmatch_data.model.version, cat_model.run_id
         );
 
         // catalog directory
         let catalog_dataset_path =
-            get_xmatch_path_root(xmatch_path.clone())?.join("catalog/dataset");
+            get_xmatch_path_root(xmatch_data.path.clone())?.join("catalog/dataset");
         std::fs::create_dir_all(&catalog_dataset_path)?;
 
         let tmp_catalog_dataset_path = tmp_path.join("catalog/dataset");
@@ -252,9 +246,9 @@ pub fn run_phase_3(
         )?;
 
         // catalog_to_table directory
-        let catalog_to_table_name = format!("catalog_to_{}", cat_data.name);
+        let catalog_to_table_name = format!("catalog_to_{}", cat_model.name);
 
-        let catalog_to_table_path = get_xmatch_path_root(xmatch_path.clone())?
+        let catalog_to_table_path = get_xmatch_path_root(xmatch_data.path.clone())?
             .join(format!("{}/dataset", catalog_to_table_name));
         std::fs::create_dir_all(&catalog_to_table_path)?;
 
@@ -283,21 +277,24 @@ pub fn run_phase_3(
     Ok(())
 }
 
-fn _xmatch_phase3_process_lf(
+// Lock to prevent multiple threads from reading/updating the catalogid cache at the same time.
+static CATID_LOCK: Mutex<()> = Mutex::new(());
+
+fn xmatch_phase3_process_lf(
     cat_lf: &LazyFrame,
     catalog_to_table_lf: Option<&LazyFrame>,
-    xmatch_data: &XMatchModel,
-    cat_data: &CatalogueModel,
+    xmatch_data: &XMatchData,
+    cat_model: &CatalogueModel,
     output_path: &PathBuf,
 ) -> Result<()> {
-    let primary_key = cat_data.primary_key.clone();
+    let primary_key = cat_model.primary_key.clone();
 
     let cat_lf = cat_lf.clone();
 
     // If a catalog_to_table frame is passed, use it to discard sources that are already
     // in the xmatch dataset.
     let cat_lf = if let Some(catalog_to_table_lf) = catalog_to_table_lf {
-        let primary_key = cat_data.primary_key.clone();
+        let primary_key = cat_model.primary_key.clone();
         let catalog_to_table_lf = catalog_to_table_lf.clone().select([col(&primary_key)]);
 
         cat_lf.join(
@@ -313,11 +310,14 @@ fn _xmatch_phase3_process_lf(
         cat_lf
     };
 
-    // Add the catalogid column.
-    let cat_lf = add_catalogid(None, &cat_lf, cat_data.run_id as usize, true)?;
+    // Add the catalogid column. Here we rely on the catalogid cache. To prevent multiple threads
+    // reading/updating the cache at the same time, we use a mutex lock.
+    let _guard = CATID_LOCK.lock().unwrap();
+    let cat_lf = add_catalogid(None, &cat_lf, cat_model.run_id as usize, true)?;
+    drop(_guard);
 
     // Build the catalog lf.
-    let catalog_lf = _get_catalog_lf(cat_lf, &xmatch_data, &cat_data)?;
+    let catalog_lf = get_catalog_lf(cat_lf, &xmatch_data, &cat_model)?;
 
     // Drop the pk from the catalog_lf that we'll sink but keep in the original because
     // we will need it for catalog_to_table.
@@ -329,14 +329,16 @@ fn _xmatch_phase3_process_lf(
     // Cast the catalog_lf to the correct dtypes and reorder columns.
     let catalog_lf_no_pk = cast_and_reorder(catalog_lf_no_pk, &CATALOG_SCHEMA, None)?;
     let catalog_lf_no_pk =
-        add_healpix_xmatch_column(catalog_lf_no_pk, xmatch_data.pixelation_order)?;
+        add_healpix_xmatch_column(catalog_lf_no_pk, xmatch_data.model.pixelation_order)?;
 
     // Sink the catalog lf to partitioned parquet.
     let catalog_path = output_path.join("catalog/dataset");
 
+    // This sink partitions on healpix_xmatch but the file path provider in
+    // PartitionedParquetSinkOptions actually creates the Dir=/Npix= directories.
     sink_lf_to_partitioned_parquet(
         catalog_lf_no_pk,
-        &catalog_path.join(format!("Norder={}", xmatch_data.pixelation_order)),
+        &catalog_path.join(format!("Norder={}", xmatch_data.model.pixelation_order)),
         vec!["healpix_xmatch".into()],
         PartitionedParquetSinkOptions::default(),
     )?;
@@ -345,7 +347,7 @@ fn _xmatch_phase3_process_lf(
     let catalog_to_table_lf = catalog_lf.select([
         col("catalogid"),
         col("pk"),
-        col("healpix_29"),
+        col("_healpix_29"),
         col("version"),
         lit(Null {}).cast(DataType::Float64).alias("distance"),
         lit(true).alias("best"),
@@ -361,15 +363,15 @@ fn _xmatch_phase3_process_lf(
 
     // Add the healpix_xmatch column which will be used for partitioning.
     let catalog_to_table_lf =
-        add_healpix_xmatch_column(catalog_to_table_lf, xmatch_data.pixelation_order)?;
+        add_healpix_xmatch_column(catalog_to_table_lf, xmatch_data.model.pixelation_order)?;
 
     // Sink the catalog_to_table lf to partitioned parquet.
-    let catalog_to_table_name = format!("catalog_to_{}", cat_data.name);
+    let catalog_to_table_name = format!("catalog_to_{}", cat_model.name);
     let catalog_to_table_path = output_path.join(format!("{}/dataset", catalog_to_table_name));
 
     sink_lf_to_partitioned_parquet(
         catalog_to_table_lf,
-        &catalog_to_table_path.join(format!("Norder={}", xmatch_data.pixelation_order)),
+        &catalog_to_table_path.join(format!("Norder={}", xmatch_data.model.pixelation_order)),
         vec!["healpix_xmatch".into()],
         PartitionedParquetSinkOptions::default(),
     )?;
@@ -377,54 +379,54 @@ fn _xmatch_phase3_process_lf(
     Ok(())
 }
 
-fn _get_catalog_lf(
+fn get_catalog_lf(
     cat_lf: LazyFrame,
-    xmatch_data: &XMatchModel,
-    cat_data: &CatalogueModel,
+    xmatch_data: &XMatchData,
+    cat_model: &CatalogueModel,
 ) -> Result<LazyFrame> {
-    // Initial columns for the catalog lf.
-    let mut columns = vec![
-        col("catalogid"),
-        col(&cat_data.primary_key).alias("pk"),
-        col(&cat_data.ra_column).alias("ra"),
-        col(&cat_data.dec_column).alias("dec"),
-        col("_healpix_29").alias("healpix_29"),
-        lit(xmatch_data.version.clone()).alias("version"),
-        lit(xmatch_data.epoch.clone()).alias("epoch"),
-        lit(cat_data.name.clone()).alias("added_by"),
-        lit(get_unix_timestamp_ms()).alias("added_on"), // Will cast to datetime.
-    ];
-
-    // pmra column
-    if let Some(pmra_column) = &cat_data.pmra_column {
-        columns.push(col(pmra_column).alias("pmra"))
+    // Add empty pmra column if the catalogue does not have one.
+    let cat_lf = if let None = &cat_model.pmra_column {
+        cat_lf.with_column(lit(Null {}).cast(DataType::Float64).alias("pmra"))
     } else {
-        columns.push(lit(Null {}).cast(DataType::Float64).alias("pmra"))
+        cat_lf
     };
 
     // pmdec column
-    if let Some(pmdec_column) = &cat_data.pmdec_column {
-        columns.push(col(pmdec_column).alias("pmdec"))
+    let cat_lf = if let None = &cat_model.pmdec_column {
+        cat_lf.with_column(lit(Null {}).cast(DataType::Float64).alias("pmdec"))
     } else {
-        columns.push(lit(Null {}).cast(DataType::Float64).alias("pmdec"))
+        cat_lf
     };
 
-    // Reference epoch column
-    if let Some(ref_epoch) = &cat_data.epoch {
-        columns.push(
-            lit((*ref_epoch).clone())
-                .cast(DataType::Float32)
-                .alias("ref_epoch"),
-        )
+    // Propagate coordinates.
+    let catalog_lf = propagate_coordinates(cat_lf, &cat_model, xmatch_data.model.epoch)?;
+
+    // Select columns from the catalog lf.
+    let mut columns = vec![
+        col("catalogid"),
+        col(&cat_model.primary_key).alias("pk"),
+        col("_healpix_29"),
+        col("ra_epoch").alias("ra"),
+        col("dec_epoch").alias("dec"),
+        lit(xmatch_data.model.version.clone()).alias("version"),
+        lit(xmatch_data.model.epoch.clone()).alias("epoch"),
+        lit(cat_model.name.clone()).alias("added_by"),
+        lit(get_unix_timestamp_ms()).alias("added_on"), // Will cast to datetime.
+    ];
+
+    if let Some(pmra_column) = &cat_model.pmra_column {
+        columns.push(col(pmra_column).alias("pmra"));
     } else {
-        columns.push(lit(Null {}).cast(DataType::Float32).alias("ref_epoch"))
+        columns.push(col("pmra"));
     }
 
-    // Select the columns.
-    let catalog_lf = cat_lf.select(columns);
+    if let Some(pmdec_column) = &cat_model.pmdec_column {
+        columns.push(col(pmdec_column).alias("pmdec"));
+    } else {
+        columns.push(col("pmdec"));
+    }
 
-    // Propagate coordinates.
-    let catalog_lf = propagate_coordinates(catalog_lf, &cat_data, xmatch_data.epoch)?;
+    let catalog_lf = catalog_lf.select(columns);
 
     // Just in case, remove rows without valid RA/Dec.
     let null_selector = Some(Selector::ByName {

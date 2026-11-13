@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import os
 import pathlib
 
 import rich.console
@@ -22,6 +23,10 @@ console = rich.console.Console()
 XMATCH_RS_ROOT = pathlib.Path(__file__).parent
 
 __version__ = get_package_version(package_name=NAME)
+
+
+# Increase the maximum number of blocking threads for Polars.
+os.environ["POLARS_MAX_BLOCKING_THREAD_COUNT"] = "1024"
 
 
 from .hats import HATS

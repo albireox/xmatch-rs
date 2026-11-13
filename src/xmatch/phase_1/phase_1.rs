@@ -10,25 +10,31 @@ use num_format::Locale::en;
 use num_format::ToFormattedString;
 use polars::prelude::*;
 use regex::Regex;
-use std::path::PathBuf;
+
 use std::sync::OnceLock;
 
 use crate::tools;
 use crate::xmatch;
-use crate::xmatch::models::JoinPathModel;
-use crate::xmatch::models::{CatalogueModel, JoinPathType, XMatchModel, XMatchOptions};
+use crate::xmatch::models::{JoinPathModel, JoinPathType, XMatchData};
 
 use super::phase_1_column::xmatch_phase1_join_type_column;
+use super::phase_1_join_table::xmatch_phase1_join_type_table;
 
 static LOG_PREFIX: OnceLock<String> = OnceLock::new();
 
-pub fn run_phase_1(
-    xmatch_path: PathBuf,
-    xmatch_data: XMatchModel,
-    cat_data: CatalogueModel,
-    xmatch_options: XMatchOptions,
-) -> Result<()> {
-    LOG_PREFIX.get_or_init(|| format!("[{}] - Phase 1 -", cat_data.name.to_uppercase()));
+pub(crate) fn run_phase_1(xmatch_data: XMatchData) -> Result<()> {
+    LOG_PREFIX.get_or_init(|| {
+        format!(
+            "[{}] - Phase 1 -",
+            xmatch_data.catalogue_name.to_uppercase()
+        )
+    });
+
+    let cat_data = xmatch_data
+        .get_catalogue_model(&xmatch_data.catalogue_name)
+        .ok_or_else(|| {
+            anyhow::anyhow!("Catalogue model {} not found", xmatch_data.catalogue_name)
+        })?;
 
     let phase = if let None = cat_data.get_phase(1) {
         bail!(
@@ -57,27 +63,21 @@ pub fn run_phase_1(
     }
 
     // Process each join path.
-    for join_path in join_paths {
-        _xmatch_phase1_process_join_path(
-            &xmatch_path,
-            &xmatch_data,
-            &cat_data,
-            &join_path,
-            &xmatch_options,
-        )?;
-    }
+    join_paths.iter().for_each(|join_path| {
+        xmatch_phase1_process_join_path(&xmatch_data, join_path).unwrap();
+    });
 
     // Report the number of rows in the catalog_to_table after processing all join paths.
     let tmp_path = xmatch::tools::get_temp_dir_path(
-        xmatch_path.clone(),
+        xmatch_data.path.clone(),
         &cat_data.name,
-        &xmatch_data.version.clone(),
+        &xmatch_data.model.version.clone(),
         cat_data.run_id as usize,
         true,
     )?;
 
     let catalog_to_table_name = format!("catalog_to_{}", cat_data.name);
-    let catalog_to_table_path = xmatch::tools::get_xmatch_path_root(xmatch_path.clone())?
+    let catalog_to_table_path = xmatch::tools::get_xmatch_path_root(xmatch_data.path.clone())?
         .join(format!("{}/dataset", catalog_to_table_name));
 
     if catalog_to_table_path.exists() {
@@ -98,7 +98,7 @@ pub fn run_phase_1(
     }
 
     // Move the original catalogue files if requested.
-    if xmatch_options.move_files {
+    if xmatch_data.options.move_files {
         log::info!(
             "{} Moving temporary catalog_to_{} files to xmatch dataset.",
             LOG_PREFIX.get().unwrap(),
@@ -107,13 +107,13 @@ pub fn run_phase_1(
 
         let suffix = format!(
             "{}-{}-{}",
-            cat_data.name, xmatch_data.version, cat_data.run_id
+            cat_data.name, xmatch_data.model.version, cat_data.run_id
         );
 
         // catalog_to_table directory
         let catalog_to_table_name = format!("catalog_to_{}", cat_data.name);
 
-        let catalog_to_table_path = xmatch::tools::get_xmatch_path_root(xmatch_path.clone())?
+        let catalog_to_table_path = xmatch::tools::get_xmatch_path_root(xmatch_data.path.clone())?
             .join(format!("{}/dataset", catalog_to_table_name));
         std::fs::create_dir_all(&catalog_to_table_path)?;
 
@@ -141,13 +141,32 @@ pub fn run_phase_1(
 }
 
 // Process one join path.
-fn _xmatch_phase1_process_join_path(
-    xmatch_path: &PathBuf,
-    xmatch_data: &XMatchModel,
-    cat_data: &CatalogueModel,
+fn xmatch_phase1_process_join_path(
+    xmatch_data: &XMatchData,
     join_path_model: &JoinPathModel,
-    xmatch_options: &XMatchOptions,
 ) -> Result<()> {
+    // Validate the join path.
+    validate_join_path(xmatch_data, join_path_model)?;
+
+    if join_path_model.join_type == JoinPathType::Column {
+        xmatch_phase1_join_type_column(xmatch_data, join_path_model)?;
+    } else if join_path_model.join_type == JoinPathType::JoinTable {
+        xmatch_phase1_join_type_table(xmatch_data, join_path_model)?;
+    } else {
+        bail!(
+            "{} Join path type {:?} not supported for phase 1.",
+            LOG_PREFIX.get().unwrap(),
+            join_path_model.join_type
+        );
+    }
+
+    Ok(())
+}
+
+fn validate_join_path(xmatch_data: &XMatchData, join_path_model: &JoinPathModel) -> Result<()> {
+    let xmatch_model = &xmatch_data.model;
+
+    // Check column names.
     let re_column = Regex::new(r"^([a-zA-Z0-9_]+)$").unwrap();
 
     let left_on_column = join_path_model.left_on.clone();
@@ -169,20 +188,39 @@ fn _xmatch_phase1_process_join_path(
         );
     }
 
-    if join_path_model.join_type == JoinPathType::Column {
-        xmatch_phase1_join_type_column(
-            xmatch_path,
-            xmatch_data,
-            cat_data,
-            join_path_model,
-            xmatch_options,
-        )?;
-    } else {
+    // Confirm that the left table exists in the cross-match.
+    let left_table = join_path_model.left_catalogue.clone();
+    if xmatch_model.get_catalogue(left_table.as_str()).is_none() {
         bail!(
-            "{} Join path type {:?} not supported for phase 1.",
+            "{} Catalogue {} has not been previously cross-matched.",
             LOG_PREFIX.get().unwrap(),
-            join_path_model.join_type
+            left_table
         );
+    };
+
+    // If we are using a join table, do additional checks.
+
+    if join_path_model.join_type == JoinPathType::JoinTable {
+        if join_path_model.join_table_path.is_none() {
+            bail!(
+                "{} Join path of type 'join_table' does not have a join_table_path.",
+                LOG_PREFIX.get().unwrap(),
+            );
+        };
+
+        if join_path_model.join_table_left_on.is_none() {
+            bail!(
+                "{} Join path of type 'join_table' does not have a join_table_left_on.",
+                LOG_PREFIX.get().unwrap(),
+            );
+        };
+
+        if join_path_model.join_table_right_on.is_none() {
+            bail!(
+                "{} Join path of type 'join_table' does not have a join_table_right_on.",
+                LOG_PREFIX.get().unwrap(),
+            );
+        };
     }
 
     Ok(())

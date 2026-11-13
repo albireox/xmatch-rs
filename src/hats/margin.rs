@@ -18,6 +18,7 @@ use cdshealpix::nested::{center, get};
 use polars::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::hats::dataset::{AsDataset, Dataset, PartitionInfo};
 use crate::hats::path_providers::{file_path_provider_fn, path_provider_part};
 use crate::hats::tools as hats_tools;
 use crate::healpix::healpix_pixel_area;
@@ -98,7 +99,7 @@ pub fn create_margin_cache(
 
     // Gets the object dataset and the partition information.
     let object_dataset = hats_tools::get_dataset_directory(&collection_path.join("object"))?;
-    let partition_info = hats_tools::PartitionInfo::from_dataset(&object_dataset, true)?;
+    let partition_info = PartitionInfo::from_dataset(&object_dataset, true)?;
 
     // Create an iterator over the rows of the partition (i.e., the pixels to process).
     let pixels_iter = partition_info.clone().into_iter();
@@ -145,7 +146,6 @@ pub fn create_margin_cache(
             create_margin_cache_pixel(
                 object_dataset.clone(),
                 margin_cache_path.clone(),
-                partition_info.clone(),
                 norder,
                 npix,
                 buffer,
@@ -376,7 +376,6 @@ pub fn get_margin_bmoc(norder: u8, npix: u64, buffer: f32, moc_order: Option<u8>
 /// # Arguments
 /// * `object_dataset` - The path to the object dataset.
 /// * `output_path` - The path to the margin cache output directory.
-/// * `partition_info` - The partition information for the HATS dataset.
 /// * `norder` - The HEALPix order of the pixel.
 /// * `npix` - The HEALPix pixel number.
 /// * `buffer` - The buffer value to use for the margin cache, in arcseconds.
@@ -386,7 +385,6 @@ pub fn get_margin_bmoc(norder: u8, npix: u64, buffer: f32, moc_order: Option<u8>
 fn create_margin_cache_pixel(
     object_dataset: PathBuf,
     output_path: PathBuf,
-    partition_info: hats_tools::PartitionInfo,
     norder: u8,
     npix: u64,
     buffer: f32,
@@ -399,12 +397,8 @@ fn create_margin_cache_pixel(
     let object_dataset_path = hats_tools::get_dataset_directory(&object_dataset)?;
 
     // Get the neighbours to the cell in the HATS dataset partition.
-    let neighbours = hats_tools::get_hats_neighbours(
-        object_dataset_path.clone(),
-        norder,
-        npix,
-        Some(partition_info),
-    )?;
+    let dataset = Dataset::new(object_dataset_path.clone(), true);
+    let neighbours = dataset.get_neighbours(norder, npix, false)?;
 
     // Iterate over the neighbours and collect the targets that fall within the margin.
     let mut frames: Vec<LazyFrame> = vec![];

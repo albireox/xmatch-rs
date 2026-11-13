@@ -349,6 +349,9 @@ class XMatch:
             if skip_phases is not None and phase in skip_phases:
                 continue
 
+            if len(self.model.catalogues) == 0 and phase in [1, 2]:
+                continue
+
             phases.append(
                 PhaseModel(
                     phase=phase,
@@ -600,7 +603,7 @@ class XMatch:
             xmatch_lib.run_phase_1(
                 xmatch_path=str(self.path),
                 xmatch_model_data=self.model.model_dump_json(),
-                cat_model_data=cat_model.model_dump_json(),
+                catalogue_name=cat_model.name,
                 move_files=True,
                 progress_file=str(progress.progress_file),
             )
@@ -612,7 +615,7 @@ class XMatch:
             xmatch_lib.run_phase_2(
                 xmatch_path=str(self.path),
                 xmatch_model_data=self.model.model_dump_json(),
-                cat_model_data=cat_model.model_dump_json(),
+                catalogue_name=cat_model.name,
                 move_files=True,
                 progress_file=str(progress.progress_file),
             )
@@ -624,7 +627,7 @@ class XMatch:
             xmatch_lib.run_phase_3(
                 xmatch_path=str(self.path),
                 xmatch_model_data=self.model.model_dump_json(),
-                cat_model_data=cat_model.model_dump_json(),
+                catalogue_name=cat_model.name,
                 move_files=True,
                 progress_file=str(progress.progress_file),
             )

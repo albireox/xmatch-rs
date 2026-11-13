@@ -5,13 +5,6 @@
  *  @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
  */
 
-use anyhow::{Result, bail};
-use cdshealpix::nested::get;
-use chrono::Utc;
-use glob::glob;
-use polars::{chunked_array::cast::CastOptions, prelude::*};
-use regex::Regex;
-use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fs::{File, OpenOptions},
@@ -20,10 +13,17 @@ use std::{
     sync::{LazyLock, Mutex},
 };
 
+use anyhow::{Result, bail};
+use cdshealpix::nested::get;
+use chrono::Utc;
+use glob::glob;
+use polars::prelude::*;
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+
 use crate::{
     hats::tools::get_root_path,
-    tools::IsEmpty,
-    tools::{get_parquet_hive_schema, lf_row_count, sink_lf_to_partitioned_parquet, to_pl_path},
+    tools::{IsEmpty, lf_row_count, sink_lf_to_partitioned_parquet, to_pl_path},
     xmatch::models::{
         CATALOG_SCHEMA, CATALOG_TO_TABLE_SCHEMA, CatalogueModel, CoordUnit, EpochFormat,
         cast_and_reorder,
@@ -47,76 +47,6 @@ pub fn get_temp_dir_path(
     }
 
     Ok(temp_dir_path)
-}
-
-/// Gets the xmatch lazyframe that contains the input pixel at the xmatch order.
-pub fn scan_pixels_from_xmatch_dataset(
-    xmatch_path: PathBuf,
-    table: Option<String>,
-    xmatch_order: u8,
-    pixels: &Vec<u64>,
-) -> Result<LazyFrame> {
-    let xmatch_path = get_xmatch_path_root(xmatch_path).unwrap();
-
-    let dataset_path = if let Some(table) = table.clone() {
-        xmatch_path.join(format!("catalog_to_{}/dataset", table))
-    } else {
-        xmatch_path.join("catalog/dataset")
-    };
-
-    let schema = if let Some(_) = table {
-        // Since ctalog_to_table has the primary key column and we don't know its name or type,
-        // it's easier to just read the schema from one file in the dataset.
-        get_parquet_hive_schema(&dataset_path)?
-    } else {
-        Arc::new(CATALOG_SCHEMA.clone())
-    };
-
-    if !dataset_path.exists() {
-        bail!(
-            "Dataset path not found in xmatch product: {:?}",
-            dataset_path
-        );
-    }
-
-    if pixels.len() == 0 {
-        bail!("No pixels provided to scan from xmatch dataset.");
-    }
-
-    if pixels.len() == 1 {
-        let pixel = pixels[0];
-        let lf = LazyFrame::scan_parquet(
-            to_pl_path(dataset_path.clone())?,
-            ScanArgsParquet {
-                schema: Some(schema),
-                ..Default::default()
-            },
-        )?
-        .filter(col("Norder").eq(lit(xmatch_order)))
-        .filter(col("Npix").eq(lit(pixel)));
-
-        return Ok(lf);
-    }
-
-    // Convert the xmatch_pixels to a Series of Int64. It seems that is_in casts everything to
-    // Int128 internally and it cannot directly cast UInt64. So here we do the casting
-    // with NonStrict, which should be ok since the pixels we use are well within the range of i64.
-    let pixels_series: Series = pixels
-        .into_iter()
-        .collect::<Series>()
-        .cast_with_options(&DataType::Int64, CastOptions::NonStrict)?;
-
-    // Scan the dataset and filter it.
-    let lf = LazyFrame::scan_parquet(to_pl_path(dataset_path)?, Default::default())?
-        .filter(col("Norder").eq(lit(xmatch_order as u32)))
-        .filter(col("Npix").is_in(lit(pixels_series).implode(false), false));
-
-    Ok(lf)
-}
-
-/// Find the root of the xmatch path, looking for the `xmatch.yaml` file.
-pub fn get_xmatch_path_root(xmatch_path: PathBuf) -> Result<PathBuf> {
-    get_root_path(xmatch_path, "xmatch.yaml")
 }
 
 static RUN_ID_BIT_SHIFT: usize = 64 - 11;
@@ -266,67 +196,92 @@ pub fn get_unix_timestamp_ms() -> i64 {
 }
 
 /// Propagates RA/Dec coordinates from pmra/pmdec. Does nothing if the columns are not present.
+///
+/// Returns a `LazyFrame` with the propagated coordinates as columns `ra_epoch` and `dec_epoch`.
 pub fn propagate_coordinates(
     cat_lf: LazyFrame,
     cat_model: &CatalogueModel,
     to_epoch: f32,
 ) -> Result<LazyFrame> {
+    // Check if the catalogue has proper motion columns or reference epoch.
     if cat_model.pmra_column.is_none() || cat_model.pmdec_column.is_none() {
-        return Ok(cat_lf);
+        return Ok(cat_lf.with_columns([
+            col(&cat_model.ra_column).alias("ra_epoch"),
+            col(&cat_model.dec_column).alias("dec_epoch"),
+        ]));
     }
 
-    // If the ref_epoch values are in JD, convert them to Julian year.
-    // 2451545 is the JD for 2000.0 and a Julian year is 365.25 days.
-    let cat_lf = if cat_model.epoch_format.is_some()
-        && cat_model.epoch_format.clone().unwrap() == EpochFormat::JD
-    {
-        cat_lf.with_column(
-            ((col("ref_epoch") - lit(2451545.0)) / lit(365.25) + lit(2000.0)).alias("ref_epoch"),
-        )
-    } else {
-        cat_lf
-    };
+    if cat_model.epoch.is_none() && cat_model.epoch_column.is_none() {
+        return Ok(cat_lf.with_columns([
+            col(&cat_model.ra_column).alias("ra_epoch"),
+            col(&cat_model.dec_column).alias("dec_epoch"),
+        ]));
+    }
 
-    // cos_dec factor
-    let cos_dec = col("dec").radians().cos();
-
-    // If pmra is not a great circle angle, convert it now.
-    let cat_lf = if cat_model.pmra_is_cosdec.is_some() && !cat_model.pmra_is_cosdec.unwrap() {
-        cat_lf.with_column((col("pmra") * cos_dec.clone()).alias("pmra"))
-    } else {
-        cat_lf
-    };
+    let ra_col = cat_model.ra_column.clone();
+    let dec_col = cat_model.dec_column.clone();
+    let pmra_col = cat_model.pmra_column.clone().unwrap();
+    let pmdec_col = cat_model.pmdec_column.clone().unwrap();
 
     // Ensure RA and Dec are in degrees.
     let cat_lf = match cat_model.ra_column_unit {
-        CoordUnit::Radians => cat_lf.with_column(col("ra").degrees().alias("ra")),
-        CoordUnit::Hours => cat_lf.with_column((col("ra") * lit(15.0)).alias("ra")),
-        _ => cat_lf,
+        CoordUnit::Radians => cat_lf.with_column(col(&ra_col).degrees().alias("ra_epoch")),
+        CoordUnit::Hours => cat_lf.with_column((col(&ra_col) * lit(15.0)).alias("ra_epoch")),
+        _ => cat_lf.with_column(col(&ra_col).alias("ra_epoch")),
     };
 
     let cat_lf = match cat_model.dec_column_unit {
-        CoordUnit::Radians => cat_lf.with_column(col("dec").degrees().alias("dec")),
-        _ => cat_lf,
+        CoordUnit::Radians => cat_lf.with_column(col(&dec_col).degrees().alias("dec_epoch")),
+        _ => cat_lf.with_column(col(&dec_col).alias("dec_epoch")),
     };
 
-    // Epoch difference.
-    let epoch_diff = (lit(to_epoch) - col("ref_epoch"))
-        .fill_nan(0.0)
-        .fill_null(0.0);
+    // cos_dec factor
+    let cos_dec = col("dec_epoch").radians().cos();
 
-    // ra difference. Note that we need to convert back to on-dec angle and convert to deg/yr.
-    let ra_diff = col("pmra").fill_null(0.0).fill_null(0.0) / cos_dec.clone() * epoch_diff.clone()
+    // If pmra is not a great circle angle, convert it now.
+    let cat_lf = if cat_model.pmra_is_cosdec.is_some() && !cat_model.pmra_is_cosdec.unwrap() {
+        cat_lf.with_column(col(&pmra_col) * cos_dec.clone())
+    } else {
+        cat_lf
+    };
+
+    // Epoch difference. We have two cases to consider: either the reference epoch is a single
+    // value or a column, and it could be in Julian date or JD.
+    let ref_epoch = if let Some(ref_epoch) = &cat_model.epoch {
+        lit((*ref_epoch).clone())
+    } else if let Some(ref_epoch) = &cat_model.epoch_column {
+        col(ref_epoch)
+    } else {
+        bail!("Reference epoch is not specified");
+    };
+
+    // If the ref_epoch values are in JD, convert them to Julian year.
+    // 2451545 is the JD for 2000.0 and a Julian year is 365.25 days.
+    let ref_epoch = if cat_model.epoch_format.is_some()
+        && cat_model.epoch_format.clone().unwrap() == EpochFormat::JD
+    {
+        (ref_epoch - lit(2451545.0)) / lit(365.25) + lit(2000.0)
+    } else {
+        ref_epoch
+    };
+
+    let epoch_diff = (lit(to_epoch) - ref_epoch).fill_nan(0.0).fill_null(0.0);
+
+    // ra difference. Note that we need to convert back to on-dec angle and convert to deg.
+    let ra_diff = col(&pmra_col).fill_null(0.0).fill_null(0.0) / cos_dec.clone()
+        * epoch_diff.clone()
         / lit(3600.0)
         / lit(1000.0);
 
-    // dec difference in deg/yr.
-    let dec_diff =
-        col("pmdec").fill_null(0.0).fill_null(0.0) * epoch_diff.clone() / lit(3600.0) / lit(1000.0);
+    // dec difference in deg.
+    let dec_diff = col(&pmdec_col).fill_null(0.0).fill_null(0.0) * epoch_diff.clone()
+        / lit(3600.0)
+        / lit(1000.0);
 
     // Update RA and Dec.
     let cat_lf = cat_lf.with_columns([
-        (col("ra") + ra_diff).alias("ra"),
-        (col("dec") + dec_diff).alias("dec"),
+        (col("ra_epoch") + ra_diff).alias("ra_epoch"),
+        (col("dec_epoch") + dec_diff).alias("dec_epoch"),
     ]);
 
     Ok(cat_lf)
@@ -560,6 +515,25 @@ pub fn get_xmatch_pixels(
     Ok(out_pixels)
 }
 
+/// Find the root of the xmatch path, looking for the `xmatch.yaml` file.
+pub(crate) fn get_xmatch_path_root(xmatch_path: PathBuf) -> Result<PathBuf> {
+    get_root_path(xmatch_path, "xmatch.yaml")
+}
+
+/// Gets the path of the catalog or catalog_to datasets in the xmatch directory.
+pub(crate) fn get_xmatch_path(
+    xmatch_path: PathBuf,
+    catalogue_name: Option<String>,
+) -> Result<PathBuf> {
+    let xmatch_path = get_xmatch_path_root(xmatch_path.clone())?;
+
+    if let Some(catalogue_name) = catalogue_name {
+        Ok(xmatch_path.join(format!("catalog_to_{catalogue_name}/dataset")))
+    } else {
+        Ok(xmatch_path.join("catalog/dataset"))
+    }
+}
+
 /// Sinks the catalog_to_table lazy frame.
 pub fn write_catalog_to_table(
     catalogue_name: String,
@@ -594,7 +568,7 @@ pub fn write_catalog_to_table(
         .join(format!("Norder={}", xmatch_order));
 
     let lf = lf.clone().with_column(
-        (col("healpix_29") / lit(4_u64.pow((29 - xmatch_order) as u32)).cast(DataType::UInt64))
+        (col("_healpix_29") / lit(4_u64.pow((29 - xmatch_order) as u32)).cast(DataType::UInt64))
             .alias("healpix_xmatch"),
     );
 
@@ -747,7 +721,7 @@ pub fn sink_lazyframe_pixel(
 /// Adds the healpix_xmatch column to a lazy frame.
 pub fn add_healpix_xmatch_column(lf: LazyFrame, xmatch_order: u8) -> Result<LazyFrame> {
     let lf = lf.with_column(
-        (col("healpix_29") / lit(4_u64.pow((29 - xmatch_order) as u32)).cast(DataType::UInt64))
+        (col("_healpix_29") / lit(4_u64.pow((29 - xmatch_order) as u32)).cast(DataType::UInt64))
             .alias("healpix_xmatch"),
     );
 

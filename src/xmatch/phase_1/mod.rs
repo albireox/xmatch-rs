@@ -7,5 +7,6 @@
 
 mod phase_1;
 mod phase_1_column;
+mod phase_1_join_table;
 
-pub use phase_1::run_phase_1;
+pub(crate) use phase_1::run_phase_1;

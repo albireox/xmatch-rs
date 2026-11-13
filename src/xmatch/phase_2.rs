@@ -5,67 +5,62 @@
  *  @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
  */
 
+use std::sync::{Arc, Mutex, OnceLock};
+use std::thread::available_parallelism;
+
 use anyhow::{Result, bail};
 use num_format::Locale::en;
 use num_format::ToFormattedString;
 use polars::prelude::*;
-use std::{
-    path::PathBuf,
-    sync::{Arc, Mutex, OnceLock},
-    thread::available_parallelism,
-};
 
-use crate::{
-    hats,
-    knn::match_sky_radius,
-    tools,
-    xmatch::{
-        self,
-        models::{CATALOG_TO_TABLE_SCHEMA, CatalogueModel, XMatchModel, XMatchOptions},
-    },
+use crate::hats::dataset::{AsDataset, Dataset};
+use crate::knn::match_sky_radius;
+use crate::tools::{self, IsEmpty};
+use crate::xmatch::models::{
+    CATALOG_TO_TABLE_SCHEMA, CatalogueModel, CoordUnit, EpochFormat, XMatchData, cast_and_reorder,
 };
+use crate::xmatch::tools as xmatch_tools;
 
 static LOG_PREFIX: OnceLock<String> = OnceLock::new();
 
-pub fn run_phase_2(
-    xmatch_path: PathBuf,
-    xmatch_data: XMatchModel,
-    cat_data: CatalogueModel,
-    xmatch_options: XMatchOptions,
-) -> Result<()> {
-    LOG_PREFIX.get_or_init(|| format!("[{}] - Phase 2 -", cat_data.name.to_uppercase()));
+pub(crate) fn run_phase_2(xmatch_data: XMatchData) -> Result<()> {
+    let cat_model = xmatch_data
+        .get_catalogue_model(&xmatch_data.catalogue_name.as_str())
+        .unwrap();
 
-    let phase = if let None = cat_data.get_phase(2) {
+    LOG_PREFIX.get_or_init(|| format!("[{}] - Phase 2 -", cat_model.name.to_uppercase()));
+
+    let phase = if let None = cat_model.get_phase(2) {
         bail!(
             "{} Phase 2 is not defined for catalogue model {}",
             LOG_PREFIX.get().unwrap(),
-            cat_data.name
+            cat_model.name
         );
     } else {
-        cat_data.get_phase(2).unwrap()
+        cat_model.get_phase(2).unwrap()
     };
 
     log::info!(
         "{} Running phase 2 for catalogue {}.",
         LOG_PREFIX.get().unwrap(),
-        cat_data.name
+        cat_model.name
     );
 
-    // Get the list of pixels in the xmatch dataset. For spatial cross-marching we cross-match the
-    // xmatch catalog pixels against the catalogue pixels (catalogid -> target_id).
-    let xmatch_dataset =
-        xmatch::tools::get_xmatch_path_root(xmatch_path.clone())?.join("catalog/dataset");
-    let partition_info = hats::tools::PartitionInfo::from_dataset(&xmatch_dataset, false)?;
+    // Get the list of pixels in the new catalogue. In phase 2 we cross-match right-to-left
+    // (new catalogue to already cross-matched catalogids) because we expect catalogues to be
+    // added in order of increasing spatial resolution.
+    let cat_dataset = Dataset::new(cat_model.hats_path.clone(), true);
+    let partition_info = cat_dataset.partition();
 
     log::debug!(
-        "{} Found {} pixels in the xmatch dataset.",
+        "{} Found {} pixels in the catalogue dataset.",
         LOG_PREFIX.get().unwrap(),
         partition_info.len().to_formatted_string(&en)
     );
 
     // Prepare a progress tracker.
-    let progress_tracker = if let Some(progress_file) = &xmatch_options.progress_file {
-        Some(xmatch::tools::ProgressTracker::new(
+    let progress_tracker = if let Some(progress_file) = &xmatch_data.options.progress_file {
+        Some(crate::xmatch::tools::ProgressTracker::new(
             progress_file.clone(),
             partition_info.len() as i32,
             true,
@@ -94,10 +89,8 @@ pub fn run_phase_2(
                 _xmatch_phase2_pixel(
                     order,
                     pixel,
-                    &xmatch_path,
                     &xmatch_data,
-                    &cat_data,
-                    phase.query_radius.unwrap_or(1.0f64),
+                    phase.query_radius.unwrap_or(1.0f64) as f32,
                 )
                 .unwrap();
 
@@ -116,10 +109,8 @@ pub fn run_phase_2(
     }
 
     // Print number of rows added to catalog_to_table.
-    let catalog_to_table_name = format!("catalog_to_{}", cat_data.name);
-
-    let catalog_to_table_path = xmatch::tools::get_xmatch_path_root(xmatch_path.clone())?
-        .join(format!("{}/dataset", catalog_to_table_name));
+    let catalog_to_table_path =
+        xmatch_tools::get_xmatch_path(xmatch_data.path.clone(), Some(cat_model.name.clone()))?;
 
     if catalog_to_table_path.exists() {
         let catalog_to_lf = LazyFrame::scan_parquet(
@@ -132,38 +123,38 @@ pub fn run_phase_2(
         log::info!(
             "{} Finished phase 2 for catalogue {}. catalog_to_{} table has {} rows.",
             LOG_PREFIX.get().unwrap(),
-            cat_data.name,
-            cat_data.name,
+            cat_model.name,
+            cat_model.name,
             n_rows.to_formatted_string(&en)
         );
     }
 
     // Move the original catalogue files if requested.
-    if xmatch_options.move_files {
+    if xmatch_data.options.move_files {
         log::info!(
             "{} Moving temporary catalog_to_{} files to xmatch dataset.",
             LOG_PREFIX.get().unwrap(),
-            cat_data.name
+            cat_model.name
         );
 
-        let tmp_path = xmatch::tools::get_temp_dir_path(
-            xmatch_path.clone(),
-            &cat_data.name,
-            &xmatch_data.version,
-            cat_data.run_id as usize,
+        let tmp_path = xmatch_tools::get_temp_dir_path(
+            xmatch_data.path.clone(),
+            &cat_model.name,
+            &xmatch_data.model.version,
+            cat_model.run_id as usize,
             true,
         )?;
 
         let suffix = format!(
             "{}-{}-{}",
-            cat_data.name, xmatch_data.version, cat_data.run_id
+            cat_model.name, xmatch_data.model.version, cat_model.run_id
         );
 
         // catalog_to_table directory
-        let catalog_to_table_name = format!("catalog_to_{}", cat_data.name);
+        let catalog_to_table_name = format!("catalog_to_{}", cat_model.name);
 
-        let catalog_to_table_path = xmatch::tools::get_xmatch_path_root(xmatch_path.clone())?
-            .join(format!("{}/dataset", catalog_to_table_name));
+        let catalog_to_table_path =
+            xmatch_tools::get_xmatch_path(xmatch_data.path.clone(), Some(cat_model.name.clone()))?;
         std::fs::create_dir_all(&catalog_to_table_path)?;
 
         let tmp_catalog_to_table_path = tmp_path.join(format!("{}/dataset", catalog_to_table_name));
@@ -177,101 +168,96 @@ pub fn run_phase_2(
         );
 
         // Actually move the files.
-        xmatch::tools::move_temp_files(
+        xmatch_tools::move_temp_files(
             tmp_catalog_to_table_path.clone(),
             catalog_to_table_path.clone(),
             Some(suffix.clone()),
         )?;
 
         // Remove the temporary directory if it's empty.
-        xmatch::tools::delete_dir_if_empty(tmp_path.parent().unwrap())?;
+        xmatch_tools::delete_dir_if_empty(tmp_path.parent().unwrap())?;
     }
 
     Ok(())
 }
 
 fn _xmatch_phase2_pixel(
-    xmatch_order: u8,
-    xmatch_pixel: u64,
-    xmatch_path: &PathBuf,
-    xmatch_data: &XMatchModel,
-    cat_data: &CatalogueModel,
-    query_radius: f64,
+    order: u8,
+    pixel: u64,
+    xmatch_data: &XMatchData,
+    query_radius: f32,
 ) -> Result<()> {
-    let log_prefix = format!(
-        "{} ({}, {}):",
-        LOG_PREFIX.get().unwrap(),
-        xmatch_order,
-        xmatch_pixel
-    );
+    let log_prefix = format!("{} ({}, {}):", LOG_PREFIX.get().unwrap(), order, pixel);
 
     log::trace!(
-        "{} Processing xmatch pixel {} of order {} for catalogue {}.",
+        "{} Processing pixel {} of order {} for catalogue {}.",
         log_prefix,
-        xmatch_pixel,
-        xmatch_order,
-        cat_data.name
+        pixel,
+        order,
+        xmatch_data.catalogue_name
     );
 
-    // Get the catalogue lazyframe for the pixel to process.
-    let primary_key = cat_data.primary_key.clone();
-    let hats_dataset_path =
-        hats::tools::get_hats_path_root(cat_data.hats_path.clone())?.join("object/dataset");
-    let cat_lf = hats::tools::scan_pixel_from_hats_dataset(
-        hats_dataset_path,
-        xmatch_order,
-        xmatch_pixel,
-        false,
-    )?;
+    let cat_model = xmatch_data
+        .get_catalogue_model(xmatch_data.catalogue_name.as_str())
+        .unwrap();
 
-    let cat_lf = if let Some(cat_lf) = cat_lf {
-        cat_lf
-    } else {
+    // Get the catalogue lazyframe for the pixel to process.
+    let primary_key = cat_model.primary_key.clone();
+
+    let hats_dataset = Dataset::new(cat_model.hats_path.clone(), true);
+    let cat_lf = hats_dataset.scan_pixel(order, pixel, false)?;
+
+    if cat_lf.is_empty() {
         log::trace!(
             "{} No catalogue data found for pixel {} of order {}. Skipping.",
             log_prefix,
-            xmatch_pixel,
-            xmatch_order
+            pixel,
+            order
         );
         return Ok(());
     };
 
-    // Propagate coordinates to the epoch of the xmatch dataset.
-    let to_epoch = xmatch_data.epoch;
-
-    let xmatch_dataset_path = xmatch::tools::get_xmatch_path_root(xmatch_path.clone())?;
-
     // Need to get the catalog_to_table frame and anti-join so that we keep only the rows in the
     // xmatch catalog table that have not been matched in phase 1.
     let catalog_to_table_path =
-        xmatch_dataset_path.join(format!("catalog_to_{}/dataset", cat_data.name));
+        xmatch_tools::get_xmatch_path(xmatch_data.path.clone(), Some(cat_model.name.clone()))?;
 
     // If the catalog_to_table directory does not exist (likely because phase 1 was not run or
     // didn't produce any matches), we create an empty catalog_to_table lazyframe with the
     // needed columns.
+    let pk_dtype = cat_lf
+        .clone()
+        .collect_schema()
+        .unwrap()
+        .get(&primary_key)
+        .unwrap()
+        .clone();
+
+    let catalog_to_table_placeholder_df =
+        DataFrame::empty_with_arc_schema(Arc::new(Schema::from_iter(vec![
+            Field::new("catalogid".into(), DataType::UInt64),
+            Field::new(primary_key.clone().into(), pk_dtype),
+        ])));
+
     let catalog_to_table_lf = if catalog_to_table_path.exists() {
-        xmatch::tools::scan_pixels_from_xmatch_dataset(
-            xmatch_dataset_path.clone(),
-            Some(cat_data.name.clone()),
-            xmatch_order,
-            &vec![xmatch_pixel],
-        )?
+        let catalog_to_table_dataset = Dataset::new(catalog_to_table_path, false);
+
+        let catalog_to_table_pixels =
+            catalog_to_table_dataset.get_neighbours(order, pixel, true)?;
+
+        if catalog_to_table_pixels.is_empty() {
+            catalog_to_table_placeholder_df.clone().lazy()
+        } else {
+            let catalog_to_table_lf =
+                catalog_to_table_dataset.scan_pixels(catalog_to_table_pixels)?;
+            if catalog_to_table_lf.is_empty() {
+                catalog_to_table_placeholder_df.clone().lazy()
+            } else {
+                catalog_to_table_lf
+            }
+        }
     } else {
-        let pk_dtype = cat_lf
-            .clone()
-            .collect_schema()
-            .unwrap()
-            .get(&primary_key)
-            .unwrap()
-            .clone();
-
-        let catalog_to_table_df =
-            DataFrame::empty_with_arc_schema(Arc::new(Schema::from_iter(vec![
-                Field::new("catalogid".into(), DataType::UInt64),
-                Field::new(primary_key.clone().into(), pk_dtype),
-            ])));
-
-        catalog_to_table_df.lazy()
+        catalog_to_table_placeholder_df.clone().lazy()
     };
 
     let cat_lf = cat_lf.join(
@@ -284,25 +270,19 @@ fn _xmatch_phase2_pixel(
         },
     );
 
-    // Reference epoch column
-    let cat_lf = if let Some(ref_epoch) = &cat_data.epoch {
-        cat_lf.with_column(
-            lit((*ref_epoch).clone())
-                .cast(DataType::Float32)
-                .alias("ref_epoch"),
-        )
-    } else {
-        cat_lf.with_column(lit(Null {}).cast(DataType::Float32).alias("ref_epoch"))
-    };
+    // We need to estimate the maximum proper motion offset for the targets being cross-matched.
+    let to_epoch = xmatch_data.model.epoch;
+    let max_pm_offset = get_max_pm_offset(&cat_lf, &cat_model, to_epoch)?;
 
-    let cat_lf = xmatch::tools::propagate_coordinates(cat_lf, &cat_data, to_epoch)?;
+    // Propagate coordinates to the epoch of the xmatch dataset.
+    let cat_lf = xmatch_tools::propagate_coordinates(cat_lf, &cat_model, to_epoch)?;
 
     // Select the columns needed for the cross-match and remove nulls.
     let cat_lf = cat_lf
         .select([
             col(&primary_key),
-            col(&cat_data.ra_column).cast(DataType::Float64),
-            col(&cat_data.dec_column).cast(DataType::Float64),
+            col("ra_epoch").cast(DataType::Float64),
+            col("dec_epoch").cast(DataType::Float64),
         ])
         .drop_nans(None)
         .drop_nulls(None);
@@ -330,26 +310,23 @@ fn _xmatch_phase2_pixel(
         return Ok(());
     };
 
-    let cat_ra = cat_df
-        .column(&cat_data.ra_column)?
-        .f64()?
-        .into_no_null_iter();
-    let cat_dec = cat_df
-        .column(&cat_data.dec_column)?
-        .f64()?
-        .into_no_null_iter();
+    let cat_ra = cat_df.column("ra_epoch")?.f64()?.into_no_null_iter();
+    let cat_dec = cat_df.column("dec_epoch")?.f64()?.into_no_null_iter();
 
     let cat_coords = cat_ra.zip(cat_dec).collect::<Vec<(f64, f64)>>();
 
-    // Get the xmatch pixel frame and coordinate vectors.
-    let xmatch_dataset_path = xmatch::tools::get_xmatch_path_root(xmatch_path.clone())?;
+    // Define the buffer around the xmatch pixels as the query radius (times two just in case)
+    // plus the maximum proper motion offset.
+    let buffer = (query_radius * 2.0) + max_pm_offset;
 
-    let xmatch_lf = xmatch::tools::scan_pixels_from_xmatch_dataset(
-        xmatch_dataset_path.clone(),
-        None,
-        xmatch_order,
-        &vec![xmatch_pixel],
-    )?;
+    // Get the associated xmatch frame and coordinate vectors.
+    let xmatch_dataset = Dataset::new(
+        xmatch_tools::get_xmatch_path(xmatch_data.path.clone(), None)?,
+        false,
+    );
+
+    // Select the xmatch data within the buffer.
+    let xmatch_lf = xmatch_dataset.get_pixel_with_buffer(order, pixel, buffer)?;
 
     let xmatch_df = xmatch_lf
         .join(
@@ -361,7 +338,7 @@ fn _xmatch_phase2_pixel(
                 ..Default::default()
             },
         )
-        .select([col("catalogid"), col("healpix_29"), col("ra"), col("dec")])
+        .select([col("catalogid"), col("_healpix_29"), col("ra"), col("dec")])
         .drop_nans(None)
         .drop_nulls(None)
         .collect_with_engine(Engine::Streaming)?
@@ -399,9 +376,9 @@ fn _xmatch_phase2_pixel(
 
     // Calculate the cross-match between the catalogue and xmatch pixel coordinates.
     let matches = match_sky_radius(
-        &cat_coords_rad,
         &xmatch_coords_rad,
-        (query_radius / 3600.0f64).to_radians(),
+        &cat_coords_rad,
+        (query_radius / 3600.0f32).to_radians() as f64,
     )?;
 
     let mut matched_cids: Vec<u64> = Vec::new();
@@ -410,25 +387,29 @@ fn _xmatch_phase2_pixel(
     let mut matched_cat_pk_series =
         Series::new_empty(PlSmallStr::from("pk"), cat_pk_series.dtype());
 
-    for (cid_idx, match_) in matches.iter().enumerate() {
+    // Loop over each match. "matches" has the size of the catalogue coordinate array
+    // and each match is a vector of (distance, catalogid_index).
+    for (cat_idx, match_) in matches.iter().enumerate() {
         if match_.is_empty() {
             continue;
         }
 
-        let distances = match_
-            .iter()
-            .map(|(distance_rad, _)| distance_rad.to_degrees())
-            .collect::<Vec<f64>>();
-        let indices = match_
-            .iter()
-            .map(|(_, idx)| *idx as u32)
-            .collect::<Vec<u32>>();
+        // Get the primary key for the catalogue row. We do this using series instead of vectors
+        // because we don't know the primary key data type.
+        let cat_pk = cat_pk_series.take(&UInt32Chunked::from_vec(
+            "matched_cat_pk".into(),
+            vec![cat_idx as u32].repeat(match_.len()),
+        ))?;
+        matched_cat_pk_series.extend(&cat_pk)?;
 
-        let pks = cat_pk_series.take(&UInt32Chunked::from_vec("matched_cat_pk".into(), indices))?;
-        matched_cat_pk_series.extend(&pks)?;
+        let (distances, indices): (Vec<f64>, Vec<usize>) = match_
+            .iter()
+            .map(|(distance_rad, idx)| (distance_rad.to_degrees(), *idx as usize))
+            .unzip();
 
-        let cid_vec = std::iter::repeat(xmatch_cid[cid_idx])
-            .take(match_.len())
+        let cid_vec = indices
+            .iter()
+            .map(|&idx| xmatch_cid[idx])
             .collect::<Vec<u64>>();
         matched_cids.extend(cid_vec);
 
@@ -463,7 +444,7 @@ fn _xmatch_phase2_pixel(
     let catalog_to_table_lf = catalog_to_table_lf.join(
         xmatch_df
             .lazy()
-            .select([col("catalogid"), col("healpix_29")]),
+            .select([col("catalogid"), col("_healpix_29")]),
         [col("catalogid")],
         [col("catalogid")],
         JoinArgs {
@@ -473,36 +454,146 @@ fn _xmatch_phase2_pixel(
     );
 
     // Add other columns.
-    let added_on = xmatch::tools::get_unix_timestamp_ms();
+    let added_on = xmatch_tools::get_unix_timestamp_ms();
     let catalog_to_table_lf = catalog_to_table_lf
         .with_column(lit(2).alias("added_by_phase"))
         .with_column(lit(added_on).alias("added_on"))
-        .with_column(lit(xmatch_data.version.clone()).alias("version"));
+        .with_column(lit(xmatch_data.model.version.clone()).alias("version"));
 
-    let catalog_to_table_lf = xmatch::models::cast_and_reorder(
+    let catalog_to_table_lf = cast_and_reorder(
         catalog_to_table_lf,
         &CATALOG_TO_TABLE_SCHEMA,
         Some(primary_key),
     )?;
 
     // Write the catalog_to_table frame to the xmatch dataset.
-    let tmp_path = xmatch::tools::get_temp_dir_path(
-        xmatch_path.clone(),
-        &cat_data.name,
-        &xmatch_data.version,
-        cat_data.run_id as usize,
+    let tmp_path = xmatch_tools::get_temp_dir_path(
+        xmatch_data.path.clone(),
+        &cat_model.name.clone(),
+        &xmatch_data.model.version,
+        cat_model.run_id as usize,
         true,
     )?
-    .join(format!("catalog_to_{}", cat_data.name));
+    .join(format!("catalog_to_{}", cat_model.name));
     std::fs::create_dir_all(&tmp_path)?;
 
-    xmatch::tools::sink_lazyframe_pixel(
-        catalog_to_table_lf,
-        tmp_path.clone().join("dataset"),
-        xmatch_order,
-        xmatch_pixel,
-        true,
-    )?;
+    // The catalog_to_table frame corresponds to the new catalogue (order, pixel) but catalog_to
+    // datasets are partitioned by xmatch order.
+    let factor = 4u64.pow((29 - xmatch_data.model.pixelation_order) as u32);
+    let catalog_to_table_lf_xm = catalog_to_table_lf.with_column(
+        col("_healpix_29")
+            .true_div(lit(factor))
+            .cast(DataType::UInt64)
+            .alias("xmatch_pixel"),
+    );
+
+    let xmatch_pixel_df = catalog_to_table_lf_xm
+        .clone()
+        .select([col("xmatch_pixel")])
+        .collect()?;
+
+    let mut xmatch_pixels = xmatch_pixel_df
+        .column("xmatch_pixel")?
+        .u64()?
+        .into_no_null_iter()
+        .collect::<Vec<_>>();
+    xmatch_pixels.sort_unstable();
+    xmatch_pixels.dedup();
+
+    for xmatch_pixel in xmatch_pixels {
+        let pixel_lf = catalog_to_table_lf_xm
+            .clone()
+            .filter(col("xmatch_pixel").eq(lit(xmatch_pixel)))
+            .drop(Selector::ByName {
+                names: Arc::new(["xmatch_pixel".into()]),
+                strict: true,
+            });
+
+        xmatch_tools::sink_lazyframe_pixel(
+            pixel_lf,
+            tmp_path.clone().join("dataset"),
+            xmatch_data.model.pixelation_order,
+            xmatch_pixel,
+            true,
+        )?;
+    }
 
     Ok(())
+}
+
+// Returns the maximum offset due to proper motion in arcsec.
+fn get_max_pm_offset(cat_lf: &LazyFrame, cat_model: &CatalogueModel, to_epoch: f32) -> Result<f32> {
+    let lf = cat_lf.clone();
+
+    let pmra_col = cat_model.pmra_column.clone();
+    let pmdec_col = cat_model.pmdec_column.clone();
+
+    if pmra_col.is_none() || pmdec_col.is_none() {
+        return Ok(0.0);
+    }
+
+    let pmra_col = pmra_col.unwrap();
+    let pmdec_col = pmdec_col.unwrap();
+
+    // If pmra is not a great circle angle, convert it now.
+    let lf = if cat_model.pmra_is_cosdec.is_some() && !cat_model.pmra_is_cosdec.unwrap() {
+        // Ensure dec is in degrees.
+        let dec_col = cat_model.dec_column.clone();
+
+        let lf = match cat_model.dec_column_unit {
+            CoordUnit::Radians => lf.with_column(col(&dec_col).degrees().alias("dec")),
+            _ => lf.with_column(col(&dec_col).alias("dec")),
+        };
+
+        // cos_dec factor
+        let cos_dec = col("dec").radians().cos();
+
+        lf.with_column(col(&pmra_col) * cos_dec.clone())
+    } else {
+        lf
+    };
+
+    // Epoch difference. We have two cases to consider: either the reference epoch is a single
+    // value or a column, and it could be in Julian date or JD.
+    let ref_epoch = if let Some(ref_epoch) = &cat_model.epoch {
+        lit((*ref_epoch).clone())
+    } else if let Some(ref_epoch) = &cat_model.epoch_column {
+        col(ref_epoch)
+    } else {
+        bail!("Reference epoch is not specified");
+    };
+
+    // If the ref_epoch values are in JD, convert them to Julian year.
+    // 2451545 is the JD for 2000.0 and a Julian year is 365.25 days.
+    let ref_epoch = if cat_model.epoch_format.is_some()
+        && cat_model.epoch_format.clone().unwrap() == EpochFormat::JD
+    {
+        (ref_epoch - lit(2451545.0)) / lit(365.25) + lit(2000.0)
+    } else {
+        ref_epoch
+    };
+
+    let epoch_diff = (lit(to_epoch) - ref_epoch).fill_nan(0.0).fill_null(0.0);
+
+    // ra difference in deg
+    let ra_diff = col(&pmra_col).fill_null(0.0).fill_null(0.0) * epoch_diff.clone()
+        / lit(3600.0)
+        / lit(1000.0);
+
+    // dec difference in deg.
+    let dec_diff = col(&pmdec_col).fill_null(0.0).fill_null(0.0) * epoch_diff.clone()
+        / lit(3600.0)
+        / lit(1000.0);
+
+    // Get the maximum pm offset.
+    let max_pm_offset = lf
+        .with_columns([(ra_diff.pow(2) + dec_diff.pow(2)).sqrt().alias("pm_offset")])
+        .select([max("pm_offset").alias("max_pm_offset")])
+        .collect()?
+        .column("max_pm_offset")?
+        .get(0)?
+        .extract::<f32>()
+        .unwrap_or(0.0);
+
+    Ok(max_pm_offset * 3600.0)
 }

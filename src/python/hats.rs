@@ -15,6 +15,7 @@ pub(crate) mod py_hats {
 
     use crate::hats::{
         self,
+        dataset::{AsDataset, Dataset, PartitionInfo},
         margin::{CellSide, PointsStrategy, path_along_edge},
     };
 
@@ -30,16 +31,16 @@ pub(crate) mod py_hats {
         progress_file: Option<PathBuf>,
         keep_initial_order_directories: bool,
     ) -> Result<Vec<i64>> {
-        let options = hats::partition::HATSRepartitionOptions {
+        let options = hats::repartition::HATSRepartitionOptions {
             max_rows_per_pixel,
             max_kilobytes_per_pixel,
             n_workers,
             progress_file,
             keep_initial_order_directories,
-            ..hats::partition::HATSRepartitionOptions::default()
+            ..hats::repartition::HATSRepartitionOptions::default()
         };
 
-        hats::partition::hats_repartition(path, order_0, order_1, pixels, options)
+        hats::repartition::hats_repartition(path, order_0, order_1, pixels, options)
     }
 
     #[pyfunction(name = "rechunk")]
@@ -98,8 +99,10 @@ pub(crate) mod py_hats {
         dataset_path: PathBuf,
         norder: u8,
         npix: u64,
+        include_centre: bool,
     ) -> Result<Vec<(u8, u64)>> {
-        hats::tools::get_hats_neighbours(dataset_path, norder, npix, None)
+        let dataset = Dataset::new(dataset_path, true);
+        dataset.get_neighbours(norder, npix, include_centre)
     }
 
     #[pyfunction(name = "create_margin_cache")]
@@ -172,7 +175,7 @@ pub(crate) mod py_hats {
 
     #[pyfunction(name = "create_partition_info")]
     pub fn py_create_partition_info(dataset_path: PathBuf, dst_path: PathBuf) -> Result<()> {
-        let partition_map = hats::tools::PartitionInfo::from_dataset(&dataset_path, false)?;
+        let partition_map = PartitionInfo::from_dataset(&dataset_path, false)?;
         partition_map.to_csv(&dst_path)?;
 
         Ok(())

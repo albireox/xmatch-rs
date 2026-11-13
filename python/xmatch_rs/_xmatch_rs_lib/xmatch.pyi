@@ -100,7 +100,7 @@ def delete_catalogue_from_dataset(
 def run_phase_1(
     xmatch_path: str | pathlib.Path,
     xmatch_model_data: str,
-    cat_model_data: str,
+    catalogue_name: str,
     move_files: bool,
     progress_file: str | pathlib.Path | None,
 ):
@@ -112,8 +112,8 @@ def run_phase_1(
         The path to the cross-match dataset.
     xmatch_model_data
         A JSON string representing the cross-match model.
-    cat_model_data
-        A JSON string representing the catalogue model.
+    catalogue_name
+        The name of the catalogue to process.
     move_files
         Whether to move the data to the final output path.
     progress_file
@@ -125,7 +125,7 @@ def run_phase_1(
 def run_phase_2(
     xmatch_path: str | pathlib.Path,
     xmatch_model_data: str,
-    cat_model_data: str,
+    catalogue_name: str,
     move_files: bool,
     progress_file: str | pathlib.Path | None,
 ):
@@ -137,8 +137,8 @@ def run_phase_2(
         The path to the cross-match dataset.
     xmatch_model_data
         A JSON string representing the cross-match model.
-    cat_model_data
-        A JSON string representing the catalogue model.
+    catalogue_name
+        The name of the catalogue to process.
     move_files
         Whether to move the data to the final output path.
     progress_file
@@ -150,7 +150,7 @@ def run_phase_2(
 def run_phase_3(
     xmatch_path: str | pathlib.Path,
     xmatch_model_data: str,
-    cat_model_data: str,
+    catalogue_name: str,
     move_files: bool,
     progress_file: str | pathlib.Path | None,
 ):
@@ -162,8 +162,8 @@ def run_phase_3(
         The path to the cross-match dataset.
     xmatch_model_data
         A JSON string representing the cross-match model.
-    cat_model_data
-        A JSON string representing the catalogue model.
+    catalogue_name
+        The name of the catalogue to process.
     move_files
         Whether to move the data to the final output path.
     progress_file
