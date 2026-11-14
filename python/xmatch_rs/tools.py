@@ -238,6 +238,7 @@ def sink_to_file(
     lf: polars.LazyFrame,
     file_path: str | pathlib.Path,
     overwrite: bool = False,
+    **sink_kwargs,
 ) -> None:
     """Writes content to a file, optionally overwriting it.
 
@@ -256,9 +257,9 @@ def sink_to_file(
         raise FileExistsError("Temporary file already exists. Cannot sink.")
 
     if file_path.suffix == ".parquet":
-        lf.sink_parquet(tmp_file)
+        lf.sink_parquet(tmp_file, **sink_kwargs)
     elif file_path.suffix == ".csv":
-        lf.sink_csv(tmp_file)
+        lf.sink_csv(tmp_file, **sink_kwargs)
     else:
         raise ValueError(f"Unsupported file extension: {file_path.suffix}")
 

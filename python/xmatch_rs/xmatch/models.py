@@ -444,6 +444,11 @@ class JoinPathModel(BaseModel):
         ),
     ] = None
 
+    use_partitioning: Annotated[
+        bool,
+        Field(description="Whether to process the join path using partitioning."),
+    ] = True
+
     @field_validator(
         "left_on",
         "right_on",

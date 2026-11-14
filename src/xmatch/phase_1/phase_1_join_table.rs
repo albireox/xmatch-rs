@@ -76,8 +76,20 @@ pub(crate) fn xmatch_phase1_join_type_table(
         log::debug!(
             "{} Join table type: {:?}.",
             LOG_PREFIX.get().unwrap(),
-            join_table_type
+            serde_json::to_string(&join_table_type.unwrap_or(JoinPathTableType::Null)).unwrap()
         );
+    }
+
+    if !join_path_model.use_partitioning {
+        log::debug!(
+            "{} Partitioning is disabled. No progress bar will be shown.",
+            LOG_PREFIX.get().unwrap()
+        );
+
+        // Call the "pixel" function without a pixel, which will process all the joins without
+        // partitioning.
+        xmatch_phase1_join_type_table_pixel(None, xmatch_data, join_path_model).unwrap();
+        return Ok(());
     }
 
     // Get the list of pixels in the from catalogue.
@@ -123,8 +135,7 @@ pub(crate) fn xmatch_phase1_join_type_table(
             .par_bridge()
             .try_for_each(|(xmatch_order, xmatch_pixel)| {
                 xmatch_phase1_join_type_table_pixel(
-                    xmatch_order,
-                    xmatch_pixel,
+                    Some((xmatch_order, xmatch_pixel)),
                     xmatch_data,
                     join_path_model,
                 )
@@ -149,17 +160,21 @@ pub(crate) fn xmatch_phase1_join_type_table(
 
 // Process one pixel of the from catalogue.
 fn xmatch_phase1_join_type_table_pixel(
-    xmatch_order: u8,
-    xmatch_pixel: u64,
+    xmatch_order_pixel: Option<(u8, u64)>,
     xmatch_data: &XMatchData,
     join_path_model: &JoinPathModel,
 ) -> Result<()> {
-    log::trace!(
-        "{} Processing pixel {} (order {}).",
-        LOG_PREFIX.get().unwrap(),
-        xmatch_pixel,
-        xmatch_order
-    );
+    let use_partitioning = xmatch_order_pixel.is_some();
+    let (xmatch_order, xmatch_pixel) = xmatch_order_pixel.unwrap_or((0, 0));
+
+    if use_partitioning {
+        log::trace!(
+            "{} Processing pixel {} (order {}).",
+            LOG_PREFIX.get().unwrap(),
+            xmatch_pixel,
+            xmatch_order
+        );
+    }
 
     // Eventually we want to implement joining right to left, but for now we only support
     // joining left to right.
@@ -178,7 +193,12 @@ fn xmatch_phase1_join_type_table_pixel(
         )?,
         false,
     );
-    let catalog_to_lf = catalog_to_dataset.scan_pixel(xmatch_order, xmatch_pixel, false)?;
+
+    let catalog_to_lf = if use_partitioning {
+        catalog_to_dataset.scan_pixel(xmatch_order, xmatch_pixel, false)?
+    } else {
+        catalog_to_dataset.get_frame()?
+    };
 
     // Read the join table. We assume that the join table may not be in HATS format, so we scan
     // all the parquet files.
@@ -188,14 +208,20 @@ fn xmatch_phase1_join_type_table_pixel(
         Default::default(),
     )?;
 
-    // Read the right catalogue. We select all the neighbouring pixels to make sure we get
-    // all the rows that may match the input pixel.
+    // Read the right catalogue. When using partitioning, we select all the neighbouring pixels to
+    // make sure we get all the rows that may match the input pixel.
     let right_cat_model = xmatch_data
         .get_catalogue_model(xmatch_data.catalogue_name.as_str())
         .unwrap();
     let right_cat_dataset = Dataset::new(right_cat_model.hats_path.clone(), true);
-    let right_cat_pixels = right_cat_dataset.get_neighbours(xmatch_order, xmatch_pixel, true)?;
-    let right_cat_lf = right_cat_dataset.scan_pixels(right_cat_pixels)?;
+
+    let right_cat_lf = if use_partitioning {
+        let right_cat_pixels =
+            right_cat_dataset.get_neighbours(xmatch_order, xmatch_pixel, true)?;
+        right_cat_dataset.scan_pixels(right_cat_pixels)?
+    } else {
+        right_cat_dataset.get_frame()?
+    };
 
     // Let's do all the joins now.
     let joined_lf = catalog_to_lf
@@ -226,8 +252,14 @@ fn xmatch_phase1_join_type_table_pixel(
 
     let joined_lf = if join_path_model.left_on != left_cat_model.primary_key {
         let left_cat_dataset = Dataset::new(left_cat_model.hats_path.clone(), true);
-        let left_cat_pixels = left_cat_dataset.get_neighbours(xmatch_order, xmatch_pixel, true)?;
-        let left_cat_lf = left_cat_dataset.scan_pixels(left_cat_pixels)?;
+
+        let left_cat_lf = if use_partitioning {
+            let left_cat_pixels =
+                left_cat_dataset.get_neighbours(xmatch_order, xmatch_pixel, true)?;
+            left_cat_dataset.scan_pixels(left_cat_pixels)?
+        } else {
+            left_cat_dataset.get_frame()?
+        };
 
         left_cat_lf.join(
             joined_lf,
@@ -243,7 +275,7 @@ fn xmatch_phase1_join_type_table_pixel(
     };
 
     // Finally, we remove entries that were already cross-matched using previous join paths.
-    let joined_lf = remove_already_xmatched(joined_lf, xmatch_order, xmatch_pixel, xmatch_data)?;
+    let joined_lf = remove_already_xmatched(joined_lf, xmatch_order_pixel, xmatch_data)?;
 
     // Check the number of rows.
     let lf_nrows = crate::tools::lf_row_count(&joined_lf)?;
@@ -271,7 +303,7 @@ fn xmatch_phase1_join_type_table_pixel(
     let lf = if join_path_model
         .join_table_type
         .as_ref()
-        .is_some_and(|v| *v == JoinPathTableType::GaiaBestNeighbour)
+        .is_some_and(|v| *v == JoinPathTableType::GaiaNeighbourhood)
     {
         joined_lf.with_columns([col("score")
             .eq(col("score").max())
@@ -290,18 +322,17 @@ fn xmatch_phase1_join_type_table_pixel(
             .cast(DataType::String)
             .alias("version"),
         lit(Null {}).cast(DataType::Float64).alias("distance"),
-        lit(true).alias("best"),
+        col("best"),
         lit(1_u8).alias("added_by_phase"),
         lit(added_on).alias("added_on"),
     ]);
 
-    // Write the joined data to the catalog_to_table.
     xmatch::tools::write_catalog_to_table(
         right_cat_model.name.clone(),
         &xmatch_data.path,
         lf,
         right_cat_model.primary_key.clone(),
-        xmatch_order,
+        xmatch_data.model.pixelation_order,
         xmatch_data.model.version.clone(),
         right_cat_model.run_id,
         true,

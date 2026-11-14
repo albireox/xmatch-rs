@@ -507,6 +507,11 @@ class XMatch:
             self.model.write()
             return
 
+        if not cat_model.hats_path.exists():
+            raise FileNotFoundError(
+                f"HATS path {cat_model.hats_path!r} does not exist."
+            )
+
         if not skip_checks:
             # Check if the xmatch product catalog or catalog_to_table datasets already
             # have entries for this catalogue.

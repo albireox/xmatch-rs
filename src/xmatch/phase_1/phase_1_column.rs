@@ -43,6 +43,18 @@ pub(crate) fn xmatch_phase1_join_type_column(
         join_path_model.right_on
     );
 
+    if !join_path_model.use_partitioning {
+        log::debug!(
+            "{} Partitioning is disabled. No progress bar will be shown.",
+            LOG_PREFIX.get().unwrap()
+        );
+
+        // Call the "pixel" function without a pixel, which will process all the joins without
+        // partitioning.
+        xmatch_phase1_join_type_column_pixel(None, xmatch_data, join_path_model).unwrap();
+        return Ok(());
+    }
+
     // Determine the number of workers. Use half of the CPUs if n_workers is not specified.
     let right_cat_model = xmatch_data
         .get_catalogue_model(xmatch_data.catalogue_name.as_str())
@@ -84,8 +96,7 @@ pub(crate) fn xmatch_phase1_join_type_column(
             .par_bridge()
             .try_for_each(|(xmatch_order, xmatch_pixel)| {
                 xmatch_phase1_join_type_column_pixel(
-                    xmatch_order,
-                    xmatch_pixel,
+                    Some((xmatch_order, xmatch_pixel)),
                     xmatch_data,
                     join_path_model,
                 )
@@ -110,17 +121,25 @@ pub(crate) fn xmatch_phase1_join_type_column(
 
 // Process one pixel of the new catalogue.
 fn xmatch_phase1_join_type_column_pixel(
-    xmatch_order: u8,
-    xmatch_pixel: u64,
+    xmatch_order_pixel: Option<(u8, u64)>,
     xmatch_data: &XMatchData,
     join_path_model: &JoinPathModel,
 ) -> Result<()> {
-    log::trace!(
-        "{} Processing xmatch pixel {} (order {}).",
-        LOG_PREFIX.get().unwrap(),
-        xmatch_pixel,
-        xmatch_order
-    );
+    let use_partitioning = join_path_model.use_partitioning;
+
+    let (xmatch_order, xmatch_pixel) = if use_partitioning {
+        let (xmatch_order, xmatch_pixel) = xmatch_order_pixel.unwrap();
+        log::trace!(
+            "{} Processing xmatch pixel {} (order {}).",
+            LOG_PREFIX.get().unwrap(),
+            xmatch_pixel,
+            xmatch_order
+        );
+
+        (xmatch_order, xmatch_pixel)
+    } else {
+        (0, 0)
+    };
 
     let right_cat_model = xmatch_data
         .get_catalogue_model(xmatch_data.catalogue_name.as_str())
@@ -140,10 +159,14 @@ fn xmatch_phase1_join_type_column_pixel(
     // their neighbours to ensure we include all matching rows.
     let right_cat_dataset = Dataset::new(right_cat_model.hats_path.clone(), true);
 
-    let xmatch_right_neighbours =
-        right_cat_dataset.get_neighbours(xmatch_order, xmatch_pixel, true)?;
+    let right_lf = if use_partitioning {
+        let xmatch_right_neighbours =
+            right_cat_dataset.get_neighbours(xmatch_order, xmatch_pixel, true)?;
 
-    let right_lf = right_cat_dataset.scan_pixels(xmatch_right_neighbours)?;
+        right_cat_dataset.scan_pixels(xmatch_right_neighbours)?
+    } else {
+        right_cat_dataset.get_frame()?
+    };
 
     // Filter the right_lf dataset. Remove any rows with null values in the join column.
     let right_lf = right_lf
@@ -170,18 +193,28 @@ fn xmatch_phase1_join_type_column_pixel(
         false,
     );
 
-    let catalog_to_lf = catalog_to_dataset
-        .scan_pixel(xmatch_order, xmatch_pixel, false)?
-        .filter(col("best").eq(lit(true)));
+    let catalog_to_lf = if use_partitioning {
+        catalog_to_dataset
+            .scan_pixel(xmatch_order, xmatch_pixel, false)?
+            .filter(col("best").eq(lit(true)))
+    } else {
+        catalog_to_dataset
+            .get_frame()?
+            .filter(col("best").eq(lit(true)))
+    };
 
     // If the join column is the primary key, that will be present in the catalog_to table.
     // Otherwise, we need to join with the actual catalogue.
     let catalog_to_lf = if left_join_column != left_primary_key {
         let left_cat_dataset = Dataset::new(left_cat_model.hats_path.clone(), true);
 
-        let left_cat_neighbours =
-            left_cat_dataset.get_neighbours(xmatch_order, xmatch_pixel, true)?;
-        let mut left_cat_lf = left_cat_dataset.scan_pixels(left_cat_neighbours)?;
+        let mut left_cat_lf = if use_partitioning {
+            let left_cat_neighbours =
+                left_cat_dataset.get_neighbours(xmatch_order, xmatch_pixel, true)?;
+            left_cat_dataset.scan_pixels(left_cat_neighbours)?
+        } else {
+            left_cat_dataset.get_frame()?
+        };
 
         let left_cat_schema = left_cat_lf.collect_schema()?;
         if !left_cat_schema.contains(&left_join_column) {
@@ -258,7 +291,7 @@ fn xmatch_phase1_join_type_column_pixel(
     // from a different join path. We remove those if they exist.
     // TODO: Better than removing them, it would be good to check that they are the same
     // associations and if they are not, do something nuanced.
-    let lf = remove_already_xmatched(lf, xmatch_order, xmatch_pixel, xmatch_data)?;
+    let lf = remove_already_xmatched(lf, xmatch_order_pixel, xmatch_data)?;
 
     let lf_nrows = tools::lf_row_count(&lf)?;
 
@@ -280,13 +313,12 @@ fn xmatch_phase1_join_type_column_pixel(
         lf_nrows
     );
 
-    // Write the joined data to the catalog_to_table.
     xmatch::tools::write_catalog_to_table(
         right_cat_model.name.clone(),
         &xmatch_data.path,
         lf,
         right_primary_key.clone(),
-        xmatch_order,
+        xmatch_data.model.pixelation_order,
         xmatch_data.model.version.clone(),
         right_cat_model.run_id,
         true,
@@ -297,8 +329,7 @@ fn xmatch_phase1_join_type_column_pixel(
 
 pub(crate) fn remove_already_xmatched(
     lf: LazyFrame,
-    xmatch_order: u8,
-    xmatch_pixel: u64,
+    xmatch_order_pixel: Option<(u8, u64)>,
     xmatch_data: &XMatchData,
 ) -> Result<LazyFrame> {
     let right_cat_model = xmatch_data
@@ -317,8 +348,12 @@ pub(crate) fn remove_already_xmatched(
 
     if catalog_to_right_path.exists() {
         let catalog_to_right_dataset = Dataset::new(catalog_to_right_path.join("dataset"), false);
-        let catalog_to_right_lf =
-            catalog_to_right_dataset.scan_pixel(xmatch_order, xmatch_pixel, false)?;
+
+        let catalog_to_right_lf = if let Some((xmatch_order, xmatch_pixel)) = xmatch_order_pixel {
+            catalog_to_right_dataset.scan_pixel(xmatch_order, xmatch_pixel, false)?
+        } else {
+            catalog_to_right_dataset.get_frame()?
+        };
 
         // Anti-join the match lazy frame with the catalog_dest_right_lf to remove any rows
         // with catalogids that are already present.

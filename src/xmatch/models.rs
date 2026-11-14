@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use chrono::Utc;
 use polars::prelude::*;
 use regex::Regex;
@@ -194,6 +194,8 @@ pub enum JoinPathTableType {
     GaiaNeighbourhood,
     #[serde(rename = "gaia_best_neighbour")]
     GaiaBestNeighbour,
+    #[serde(rename = "null")]
+    Null,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -207,6 +209,7 @@ pub struct JoinPathModel {
     pub join_table_left_on: Option<String>,
     pub join_table_right_on: Option<String>,
     pub join_table_type: Option<JoinPathTableType>,
+    pub use_partitioning: bool,
 }
 
 impl JoinPathModel {
