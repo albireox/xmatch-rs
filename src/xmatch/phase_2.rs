@@ -189,7 +189,7 @@ fn _xmatch_phase2_pixel(
     query_radius: f32,
 ) -> Result<()> {
     let log_prefix = format!(
-        "[{}] - Phase 1 -",
+        "[{}] - Phase 2 -",
         xmatch_data.catalogue_name.to_uppercase()
     );
     let log_prefix = format!("{} ({}, {}):", log_prefix, order, pixel);

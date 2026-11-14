@@ -30,7 +30,7 @@ use crate::xmatch::tools::{
 
 pub(crate) fn run_phase_3(xmatch_data: XMatchData) -> Result<()> {
     let log_prefix = format!(
-        "[{}] - Phase 1 -",
+        "[{}] - Phase 3 -",
         xmatch_data.catalogue_name.to_uppercase()
     );
 

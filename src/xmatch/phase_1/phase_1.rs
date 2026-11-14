@@ -11,8 +11,6 @@ use num_format::ToFormattedString;
 use polars::prelude::*;
 use regex::Regex;
 
-use std::sync::OnceLock;
-
 use crate::tools;
 use crate::xmatch;
 use crate::xmatch::models::{JoinPathModel, JoinPathType, XMatchData};
@@ -20,15 +18,11 @@ use crate::xmatch::models::{JoinPathModel, JoinPathType, XMatchData};
 use super::phase_1_column::xmatch_phase1_join_type_column;
 use super::phase_1_join_table::xmatch_phase1_join_type_table;
 
-static LOG_PREFIX: OnceLock<String> = OnceLock::new();
-
 pub(crate) fn run_phase_1(xmatch_data: XMatchData) -> Result<()> {
-    LOG_PREFIX.get_or_init(|| {
-        format!(
-            "[{}] - Phase 1 -",
-            xmatch_data.catalogue_name.to_uppercase()
-        )
-    });
+    let log_prefix = format!(
+        "[{}] - Phase 1 -",
+        xmatch_data.catalogue_name.to_uppercase()
+    );
 
     let cat_data = xmatch_data
         .get_catalogue_model(&xmatch_data.catalogue_name)
@@ -39,7 +33,7 @@ pub(crate) fn run_phase_1(xmatch_data: XMatchData) -> Result<()> {
     let phase = if let None = cat_data.get_phase(1) {
         bail!(
             "{} Phase 1 is not defined for catalogue model {}",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             cat_data.name
         );
     } else {
@@ -48,7 +42,7 @@ pub(crate) fn run_phase_1(xmatch_data: XMatchData) -> Result<()> {
 
     log::info!(
         "{} Running phase 1 for catalogue model {}",
-        LOG_PREFIX.get().unwrap(),
+        log_prefix,
         cat_data.name
     );
 
@@ -57,7 +51,7 @@ pub(crate) fn run_phase_1(xmatch_data: XMatchData) -> Result<()> {
     if join_paths.is_empty() {
         log::info!(
             "{} No join paths defined for phase 1, skipping phase.",
-            LOG_PREFIX.get().unwrap()
+            log_prefix
         );
         return Ok(());
     }
@@ -90,7 +84,7 @@ pub(crate) fn run_phase_1(xmatch_data: XMatchData) -> Result<()> {
 
         log::info!(
             "{} Finished phase 1 for catalogue {}. catalog_to_{} table has {} rows.",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             cat_data.name,
             cat_data.name,
             n_rows.to_formatted_string(&en)
@@ -101,7 +95,7 @@ pub(crate) fn run_phase_1(xmatch_data: XMatchData) -> Result<()> {
     if xmatch_data.options.move_files {
         log::info!(
             "{} Moving temporary catalog_to_{} files to xmatch dataset.",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             cat_data.name
         );
 
@@ -121,7 +115,7 @@ pub(crate) fn run_phase_1(xmatch_data: XMatchData) -> Result<()> {
 
         log::debug!(
             "{} Moving {} dataset from {} to {}.",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             catalog_to_table_name,
             tmp_catalog_to_table_path.display(),
             catalog_to_table_path.display()
@@ -145,6 +139,11 @@ fn xmatch_phase1_process_join_path(
     xmatch_data: &XMatchData,
     join_path_model: &JoinPathModel,
 ) -> Result<()> {
+    let log_prefix = format!(
+        "[{}] - Phase 1 -",
+        xmatch_data.catalogue_name.to_uppercase()
+    );
+
     // Validate the join path.
     validate_join_path(xmatch_data, join_path_model)?;
 
@@ -155,7 +154,7 @@ fn xmatch_phase1_process_join_path(
     } else {
         bail!(
             "{} Join path type {:?} not supported for phase 1.",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             join_path_model.join_type
         );
     }
@@ -164,6 +163,11 @@ fn xmatch_phase1_process_join_path(
 }
 
 fn validate_join_path(xmatch_data: &XMatchData, join_path_model: &JoinPathModel) -> Result<()> {
+    let log_prefix = format!(
+        "[{}] - Phase 1 -",
+        xmatch_data.catalogue_name.to_uppercase()
+    );
+
     let xmatch_model = &xmatch_data.model;
 
     // Check column names.
@@ -175,7 +179,7 @@ fn validate_join_path(xmatch_data: &XMatchData, join_path_model: &JoinPathModel)
     if let None = re_column.captures(&left_on_column) {
         bail!(
             "{} Invalid left_on column format for phase 1: {}.'",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             left_on_column
         );
     }
@@ -183,7 +187,7 @@ fn validate_join_path(xmatch_data: &XMatchData, join_path_model: &JoinPathModel)
     if let None = re_column.captures(&right_on_column) {
         bail!(
             "{} Invalid right_on column format for phase 1: {}.'",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             right_on_column
         );
     }
@@ -193,7 +197,7 @@ fn validate_join_path(xmatch_data: &XMatchData, join_path_model: &JoinPathModel)
     if xmatch_model.get_catalogue(left_table.as_str()).is_none() {
         bail!(
             "{} Catalogue {} has not been previously cross-matched.",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             left_table
         );
     };
@@ -204,21 +208,21 @@ fn validate_join_path(xmatch_data: &XMatchData, join_path_model: &JoinPathModel)
         if join_path_model.join_table_path.is_none() {
             bail!(
                 "{} Join path of type 'join_table' does not have a join_table_path.",
-                LOG_PREFIX.get().unwrap(),
+                log_prefix,
             );
         };
 
         if join_path_model.join_table_left_on.is_none() {
             bail!(
                 "{} Join path of type 'join_table' does not have a join_table_left_on.",
-                LOG_PREFIX.get().unwrap(),
+                log_prefix,
             );
         };
 
         if join_path_model.join_table_right_on.is_none() {
             bail!(
                 "{} Join path of type 'join_table' does not have a join_table_right_on.",
-                LOG_PREFIX.get().unwrap(),
+                log_prefix,
             );
         };
     }
