@@ -6,7 +6,7 @@
  */
 
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 use std::thread::available_parallelism;
 
 use anyhow::{Result, bail};
@@ -28,18 +28,19 @@ use crate::xmatch::tools::{
     move_temp_files, propagate_coordinates,
 };
 
-static LOG_PREFIX: OnceLock<String> = OnceLock::new();
-
 pub(crate) fn run_phase_3(xmatch_data: XMatchData) -> Result<()> {
+    let log_prefix = format!(
+        "[{}] - Phase 1 -",
+        xmatch_data.catalogue_name.to_uppercase()
+    );
+
     let cat_model = xmatch_data
         .get_catalogue_model(&xmatch_data.catalogue_name)
         .unwrap();
 
-    LOG_PREFIX.get_or_init(|| format!("[{}] - Phase 3 -", cat_model.name.to_uppercase()));
-
     log::info!(
         "{} Running phase 3 for catalogue {}.",
-        LOG_PREFIX.get().unwrap(),
+        log_prefix,
         cat_model.name
     );
 
@@ -50,7 +51,7 @@ pub(crate) fn run_phase_3(xmatch_data: XMatchData) -> Result<()> {
     if !new_cat_dataset.path().exists() {
         bail!(
             "{} HATS dataset not found at {}.",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             new_cat_dataset.path().display()
         );
     }
@@ -71,7 +72,7 @@ pub(crate) fn run_phase_3(xmatch_data: XMatchData) -> Result<()> {
     // Ensure that the max catalogid cache is updated for this run_id.
     log::debug!(
         "{} Updating max. catalogid cache for run_id {}.",
-        LOG_PREFIX.get().unwrap(),
+        log_prefix,
         cat_model.run_id
     );
 
@@ -94,7 +95,7 @@ pub(crate) fn run_phase_3(xmatch_data: XMatchData) -> Result<()> {
     if xmatch_lf.is_empty() {
         log::info!(
             "{} XMatch dataset is empty. Processing entire catalogue dataset. No progress bar will be shown.",
-            LOG_PREFIX.get().unwrap()
+            log_prefix
         );
 
         let new_cat_lf = new_cat_dataset.get_frame()?;
@@ -109,7 +110,7 @@ pub(crate) fn run_phase_3(xmatch_data: XMatchData) -> Result<()> {
 
         log::info!(
             "{} Processing catalogue dataset in parallel with {} workers.",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             n_workers
         );
 
@@ -215,7 +216,7 @@ pub(crate) fn run_phase_3(xmatch_data: XMatchData) -> Result<()> {
 
     log::info!(
         "{} Phase 3 for catalogue {} completed. Added {} entries to catalog.",
-        LOG_PREFIX.get().unwrap(),
+        log_prefix,
         cat_model.name,
         n_rows_catalog.to_formatted_string(&Locale::en)
     );
@@ -236,7 +237,7 @@ pub(crate) fn run_phase_3(xmatch_data: XMatchData) -> Result<()> {
 
         log::debug!(
             "{} Moving catalog dataset to {}.",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             catalog_dataset_path.display()
         );
         move_temp_files(
@@ -256,7 +257,7 @@ pub(crate) fn run_phase_3(xmatch_data: XMatchData) -> Result<()> {
 
         log::debug!(
             "{} Moving catalog_to_table dataset to {}.",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             catalog_to_table_path.display()
         );
         move_temp_files(
@@ -269,7 +270,7 @@ pub(crate) fn run_phase_3(xmatch_data: XMatchData) -> Result<()> {
     } else {
         log::info!(
             "{} Move files is set to false. Leaving files in temporary path {}.",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             tmp_path.display()
         );
     }

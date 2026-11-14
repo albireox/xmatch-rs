@@ -7,7 +7,7 @@
 
 use anyhow::Result;
 use polars::prelude::*;
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 use std::thread::available_parallelism;
 
 use crate::hats::dataset::{AsDataset, Dataset};
@@ -18,8 +18,6 @@ use crate::xmatch::tools::get_xmatch_path;
 
 use super::phase_1_column::remove_already_xmatched;
 
-static LOG_PREFIX: OnceLock<String> = OnceLock::new();
-
 // Process one join path on the primary key.
 // Here "left" is the catalogue that has already been cross-matched and "right" is the
 // new catalogue being processed.
@@ -27,12 +25,10 @@ pub(crate) fn xmatch_phase1_join_type_table(
     xmatch_data: &XMatchData,
     join_path_model: &JoinPathModel,
 ) -> Result<()> {
-    LOG_PREFIX.get_or_init(|| {
-        format!(
-            "[{}] - Phase 1 -",
-            xmatch_data.catalogue_name.to_uppercase()
-        )
-    });
+    let log_prefix = format!(
+        "[{}] - Phase 1 -",
+        xmatch_data.catalogue_name.to_uppercase()
+    );
 
     // Collect join table information. We just unwrap here since we have verified that the
     // fields are not none.
@@ -44,38 +40,34 @@ pub(crate) fn xmatch_phase1_join_type_table(
     // Log the join path information.
     log::info!(
         "{} Processing join path of type 'join_table' with join table in '{}'.",
-        LOG_PREFIX.get().unwrap(),
+        log_prefix,
         join_table_path.clone().to_str().unwrap()
     );
     log::debug!(
         "{} Left table: {}.",
-        LOG_PREFIX.get().unwrap(),
+        log_prefix,
         join_path_model.left_catalogue
     );
     log::debug!(
         "{} Left join column: {}.",
-        LOG_PREFIX.get().unwrap(),
+        log_prefix,
         join_path_model.left_on
     );
     log::debug!(
         "{} Right join column: {}.",
-        LOG_PREFIX.get().unwrap(),
+        log_prefix,
         join_path_model.right_on
     );
-    log::debug!(
-        "{} Join table left_on: {}.",
-        LOG_PREFIX.get().unwrap(),
-        join_table_left_on
-    );
+    log::debug!("{} Join table left_on: {}.", log_prefix, join_table_left_on);
     log::debug!(
         "{} Join table right_on: {}.",
-        LOG_PREFIX.get().unwrap(),
+        log_prefix,
         join_table_right_on
     );
     if join_table_type.is_some() {
         log::debug!(
             "{} Join table type: {:?}.",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             serde_json::to_string(&join_table_type.unwrap_or(JoinPathTableType::Null)).unwrap()
         );
     }
@@ -83,7 +75,7 @@ pub(crate) fn xmatch_phase1_join_type_table(
     if !join_path_model.use_partitioning {
         log::debug!(
             "{} Partitioning is disabled. No progress bar will be shown.",
-            LOG_PREFIX.get().unwrap()
+            log_prefix
         );
 
         // Call the "pixel" function without a pixel, which will process all the joins without
@@ -164,13 +156,18 @@ fn xmatch_phase1_join_type_table_pixel(
     xmatch_data: &XMatchData,
     join_path_model: &JoinPathModel,
 ) -> Result<()> {
+    let log_prefix = format!(
+        "[{}] - Phase 1 -",
+        xmatch_data.catalogue_name.to_uppercase()
+    );
+
     let use_partitioning = xmatch_order_pixel.is_some();
     let (xmatch_order, xmatch_pixel) = xmatch_order_pixel.unwrap_or((0, 0));
 
     if use_partitioning {
         log::trace!(
             "{} Processing pixel {} (order {}).",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             xmatch_pixel,
             xmatch_order
         );
@@ -283,7 +280,7 @@ fn xmatch_phase1_join_type_table_pixel(
     if lf_nrows == 0 {
         log::trace!(
             "{} ({}, {}): no rows after removing duplicates, skipping.",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             xmatch_order,
             xmatch_pixel,
         );
@@ -292,7 +289,7 @@ fn xmatch_phase1_join_type_table_pixel(
 
     log::trace!(
         "{} ({}, {}): {} rows successfully joined.",
-        LOG_PREFIX.get().unwrap(),
+        log_prefix,
         xmatch_order,
         xmatch_pixel,
         lf_nrows

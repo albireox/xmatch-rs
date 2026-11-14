@@ -7,7 +7,7 @@
 
 use anyhow::{Result, bail};
 use polars::prelude::*;
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 use std::thread::available_parallelism;
 
 use crate::hats::dataset::{AsDataset, Dataset};
@@ -15,20 +15,16 @@ use crate::tools::{self, IsEmpty};
 use crate::xmatch;
 use crate::xmatch::models::{JoinPathModel, XMatchData};
 
-static LOG_PREFIX: OnceLock<String> = OnceLock::new();
-
 // Process one join path on the primary key.
 // Here "left" is the catalogue already cross-matched and "right" is the catalogue being processed.
 pub(crate) fn xmatch_phase1_join_type_column(
     xmatch_data: &XMatchData,
     join_path_model: &JoinPathModel,
 ) -> Result<()> {
-    LOG_PREFIX.get_or_init(|| {
-        format!(
-            "[{}] - Phase 1 -",
-            xmatch_data.catalogue_name.to_uppercase()
-        )
-    });
+    let log_prefix = format!(
+        "[{}] - Phase 1 -",
+        xmatch_data.catalogue_name.to_uppercase()
+    );
 
     // "Left" tablename and column for the join.
     let left_table = join_path_model.left_catalogue.clone();
@@ -36,7 +32,7 @@ pub(crate) fn xmatch_phase1_join_type_column(
 
     log::info!(
         "{} Processing join path of type 'column': {}.{} -> {}.{}",
-        LOG_PREFIX.get().unwrap(),
+        log_prefix,
         left_table,
         left_join_column,
         xmatch_data.catalogue_name,
@@ -46,7 +42,7 @@ pub(crate) fn xmatch_phase1_join_type_column(
     if !join_path_model.use_partitioning {
         log::debug!(
             "{} Partitioning is disabled. No progress bar will be shown.",
-            LOG_PREFIX.get().unwrap()
+            log_prefix
         );
 
         // Call the "pixel" function without a pixel, which will process all the joins without
@@ -125,13 +121,17 @@ fn xmatch_phase1_join_type_column_pixel(
     xmatch_data: &XMatchData,
     join_path_model: &JoinPathModel,
 ) -> Result<()> {
+    let log_prefix = format!(
+        "[{}] - Phase 1 -",
+        xmatch_data.catalogue_name.to_uppercase()
+    );
     let use_partitioning = join_path_model.use_partitioning;
 
     let (xmatch_order, xmatch_pixel) = if use_partitioning {
         let (xmatch_order, xmatch_pixel) = xmatch_order_pixel.unwrap();
         log::trace!(
             "{} Processing xmatch pixel {} (order {}).",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             xmatch_pixel,
             xmatch_order
         );
@@ -177,7 +177,7 @@ fn xmatch_phase1_join_type_column_pixel(
     if right_lf.is_empty() {
         log::trace!(
             "{} ({}, {}): no rows with non-null join column, skipping.",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             xmatch_order,
             xmatch_pixel,
         );
@@ -220,7 +220,7 @@ fn xmatch_phase1_join_type_column_pixel(
         if !left_cat_schema.contains(&left_join_column) {
             bail!(
                 "{} ({}, {}): join column {} not found in catalogue {}.",
-                LOG_PREFIX.get().unwrap(),
+                log_prefix,
                 xmatch_order,
                 xmatch_pixel,
                 left_join_column,
@@ -280,7 +280,7 @@ fn xmatch_phase1_join_type_column_pixel(
     if lf.is_empty() {
         log::trace!(
             "{} ({}, {}): no rows after join, skipping.",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             xmatch_order,
             xmatch_pixel,
         );
@@ -298,7 +298,7 @@ fn xmatch_phase1_join_type_column_pixel(
     if lf_nrows == 0 {
         log::trace!(
             "{} ({}, {}): no rows after removing duplicates, skipping.",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             xmatch_order,
             xmatch_pixel,
         );
@@ -307,7 +307,7 @@ fn xmatch_phase1_join_type_column_pixel(
 
     log::trace!(
         "{} ({}, {}): {} rows successfully joined.",
-        LOG_PREFIX.get().unwrap(),
+        log_prefix,
         xmatch_order,
         xmatch_pixel,
         lf_nrows

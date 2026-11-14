@@ -5,7 +5,7 @@
  *  @License: BSD 3-clause (http://www.opensource.org/licenses/BSD-3-Clause)
  */
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::thread::available_parallelism;
 
 use anyhow::{Result, bail};
@@ -21,19 +21,20 @@ use crate::xmatch::models::{
 };
 use crate::xmatch::tools as xmatch_tools;
 
-static LOG_PREFIX: OnceLock<String> = OnceLock::new();
-
 pub(crate) fn run_phase_2(xmatch_data: XMatchData) -> Result<()> {
+    let log_prefix = format!(
+        "[{}] - Phase 2 -",
+        xmatch_data.catalogue_name.to_uppercase()
+    );
+
     let cat_model = xmatch_data
         .get_catalogue_model(&xmatch_data.catalogue_name.as_str())
         .unwrap();
 
-    LOG_PREFIX.get_or_init(|| format!("[{}] - Phase 2 -", cat_model.name.to_uppercase()));
-
     let phase = if let None = cat_model.get_phase(2) {
         bail!(
             "{} Phase 2 is not defined for catalogue model {}",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             cat_model.name
         );
     } else {
@@ -42,7 +43,7 @@ pub(crate) fn run_phase_2(xmatch_data: XMatchData) -> Result<()> {
 
     log::info!(
         "{} Running phase 2 for catalogue {}.",
-        LOG_PREFIX.get().unwrap(),
+        log_prefix,
         cat_model.name
     );
 
@@ -54,7 +55,7 @@ pub(crate) fn run_phase_2(xmatch_data: XMatchData) -> Result<()> {
 
     log::debug!(
         "{} Found {} pixels in the catalogue dataset.",
-        LOG_PREFIX.get().unwrap(),
+        log_prefix,
         partition_info.len().to_formatted_string(&en)
     );
 
@@ -122,7 +123,7 @@ pub(crate) fn run_phase_2(xmatch_data: XMatchData) -> Result<()> {
 
         log::info!(
             "{} Finished phase 2 for catalogue {}. catalog_to_{} table has {} rows.",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             cat_model.name,
             cat_model.name,
             n_rows.to_formatted_string(&en)
@@ -133,7 +134,7 @@ pub(crate) fn run_phase_2(xmatch_data: XMatchData) -> Result<()> {
     if xmatch_data.options.move_files {
         log::info!(
             "{} Moving temporary catalog_to_{} files to xmatch dataset.",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             cat_model.name
         );
 
@@ -161,7 +162,7 @@ pub(crate) fn run_phase_2(xmatch_data: XMatchData) -> Result<()> {
 
         log::debug!(
             "{} Moving {} dataset from {} to {}.",
-            LOG_PREFIX.get().unwrap(),
+            log_prefix,
             catalog_to_table_name,
             tmp_catalog_to_table_path.display(),
             catalog_to_table_path.display()
@@ -187,7 +188,11 @@ fn _xmatch_phase2_pixel(
     xmatch_data: &XMatchData,
     query_radius: f32,
 ) -> Result<()> {
-    let log_prefix = format!("{} ({}, {}):", LOG_PREFIX.get().unwrap(), order, pixel);
+    let log_prefix = format!(
+        "[{}] - Phase 1 -",
+        xmatch_data.catalogue_name.to_uppercase()
+    );
+    let log_prefix = format!("{} ({}, {}):", log_prefix, order, pixel);
 
     log::trace!(
         "{} Processing pixel {} of order {} for catalogue {}.",
