@@ -245,7 +245,8 @@ fn xmatch_phase1_join_type_column_pixel(
     };
 
     // Keep only the catalogid and join columns.
-    let catalog_to_lf = catalog_to_lf.select([col("catalogid"), col(&left_join_column)]);
+    let catalog_to_lf =
+        catalog_to_lf.select([col("catalogid"), col(&left_join_column), col("_healpix_29")]);
 
     // Get the data type of the join column.
     let right_join_dtype = xmatch::models::get_column_dtype(&right_lf, &right_join_column)?;
