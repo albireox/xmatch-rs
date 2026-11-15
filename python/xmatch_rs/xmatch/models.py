@@ -301,6 +301,10 @@ class PhaseModel(BaseModel):
             validate_default=True,
         ),
     ] = None
+    skip: Annotated[
+        bool,
+        Field(description="Whether to skip this phase."),
+    ] = False
 
     @field_validator("join_paths", mode="before")
     @classmethod

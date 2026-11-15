@@ -27,6 +27,11 @@ pub(crate) fn run_phase_2(xmatch_data: XMatchData) -> Result<()> {
         xmatch_data.catalogue_name.to_uppercase()
     );
 
+    if xmatch_tools::should_skip(&xmatch_data, 2) {
+        log::info!("{} Skipping phase 2.", log_prefix);
+        return Ok(());
+    }
+
     let cat_model = xmatch_data
         .get_catalogue_model(&xmatch_data.catalogue_name.as_str())
         .unwrap();

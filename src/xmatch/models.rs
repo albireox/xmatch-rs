@@ -150,6 +150,7 @@ pub struct PhaseModel {
     pub join_paths: Vec<JoinPathModel>,
     pub query_radius: Option<f64>,
     pub n_workers: Option<usize>,
+    pub skip: bool,
 }
 
 impl PhaseModel {

@@ -25,7 +25,7 @@ use crate::xmatch::models::{
 use crate::xmatch::tools::{
     ProgressTracker, add_catalogid, add_healpix_xmatch_column, delete_dir_if_empty,
     get_temp_dir_path, get_unix_timestamp_ms, get_xmatch_path_root, get_xmatch_pixels,
-    move_temp_files, propagate_coordinates,
+    move_temp_files, propagate_coordinates, should_skip,
 };
 
 pub(crate) fn run_phase_3(xmatch_data: XMatchData) -> Result<()> {

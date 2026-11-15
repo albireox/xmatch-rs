@@ -26,7 +26,7 @@ use crate::{
     tools::{IsEmpty, lf_row_count, sink_lf_to_partitioned_parquet, to_pl_path},
     xmatch::models::{
         CATALOG_SCHEMA, CATALOG_TO_TABLE_SCHEMA, CatalogueModel, CoordUnit, EpochFormat,
-        cast_and_reorder,
+        XMatchData, cast_and_reorder,
     },
 };
 

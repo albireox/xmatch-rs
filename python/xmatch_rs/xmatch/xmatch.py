@@ -572,6 +572,10 @@ class XMatch:
                         self.log.info(f"Skipping complete phase {phase.phase}.")
                         continue
 
+                    if phase.skip:
+                        self.log.info(f"Skipping phase {phase.phase}.")
+                        continue
+
                     with Timer() as phase_timer:
                         if phase.phase == 1:
                             self._run_phase_1(cat_model)
