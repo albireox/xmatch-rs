@@ -383,7 +383,13 @@ pub fn delete_catalogue_from_dataset(
         )) {
             for path in paths {
                 if let Ok(path) = path {
-                    let lf = LazyFrame::scan_parquet(to_pl_path(&path)?, Default::default())?;
+                    let lf = LazyFrame::scan_parquet(
+                        to_pl_path(&path)?,
+                        ScanArgsParquet {
+                            hive_options: HiveOptions::new_disabled(),
+                            ..Default::default()
+                        },
+                    )?;
 
                     let expr = col("added_by")
                         .eq(lit(catalogue_name))
@@ -427,7 +433,13 @@ pub fn delete_catalogue_from_dataset(
     )) {
         for path in paths {
             if let Ok(path) = path {
-                let lf = LazyFrame::scan_parquet(to_pl_path(&path)?, Default::default())?;
+                let lf = LazyFrame::scan_parquet(
+                    to_pl_path(&path)?,
+                    ScanArgsParquet {
+                        hive_options: HiveOptions::new_disabled(),
+                        ..Default::default()
+                    },
+                )?;
 
                 let expr = col("version").eq(lit(version));
 
