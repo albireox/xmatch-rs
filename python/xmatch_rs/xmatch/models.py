@@ -118,6 +118,15 @@ class XMatchModel(BaseModel):
 
         return [catalogue.name for catalogue in self.catalogues]
 
+    def get_catalogue(self, catalogue_name: str) -> CatalogueModel:
+        """Returns the catalogue with the specified name."""
+
+        for catalogue in self.catalogues:
+            if catalogue.name == catalogue_name:
+                return catalogue
+
+        raise ValueError(f"Catalogue {catalogue_name!r} not found.")
+
 
 class CatalogueModel(BaseModel):
     """Pydantic model for a catalogue included in the XMatch product."""
@@ -301,6 +310,16 @@ class PhaseModel(BaseModel):
             validate_default=True,
         ),
     ] = None
+
+    phase_2_ignore: Annotated[
+        list[str],
+        Field(
+            description="List of catalogues to ignore in phase 2.",
+            default_factory=list,
+            exclude_if=lambda value: len(value) == 0,
+        ),
+    ]
+
     skip: Annotated[
         bool,
         Field(description="Whether to skip this phase."),

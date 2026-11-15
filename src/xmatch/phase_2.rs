@@ -338,7 +338,7 @@ fn _xmatch_phase2_pixel(
     // Select the xmatch data within the buffer.
     let xmatch_lf = xmatch_dataset.get_pixel_with_buffer(order, pixel, buffer)?;
 
-    let xmatch_df = xmatch_lf
+    let mut xmatch_lf = xmatch_lf
         .join(
             catalog_to_table_lf.select([col("catalogid")]),
             [col("catalogid")],
@@ -348,19 +348,35 @@ fn _xmatch_phase2_pixel(
                 ..Default::default()
             },
         )
-        .select([col("catalogid"), col("_healpix_29"), col("ra"), col("dec")])
+        .select([
+            col("catalogid"),
+            col("_healpix_29"),
+            col("ra"),
+            col("dec"),
+            col("added_by"),
+        ])
         .drop_nans(None)
-        .drop_nulls(None)
-        .collect_with_engine(Engine::Streaming)?
-        .unwrap_single();
+        .drop_nulls(None);
 
-    if xmatch_df.height() == 0 {
+    if xmatch_lf.is_empty() {
         log::trace!(
             "{} No unmatched xmatch data found for this pixel. Skipping.",
             log_prefix
         );
         return Ok(());
     }
+
+    // Reject catalogues that should be ignored in phase 2. This is useful, for example, if we have
+    // already joined with that catalogue in phase 1 and we trust that matching more than we trust
+    // a spatial cross-match.
+    let phase = cat_model.get_phase(2).unwrap();
+    for ignore_cat in &phase.phase_2_ignore {
+        xmatch_lf = xmatch_lf.filter(col("added_by").neq(lit(ignore_cat.clone())));
+    }
+
+    let xmatch_df = xmatch_lf
+        .collect_with_engine(Engine::Streaming)?
+        .unwrap_single();
 
     let xmatch_cid = xmatch_df
         .column("catalogid")?

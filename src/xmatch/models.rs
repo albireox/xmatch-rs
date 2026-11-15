@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use chrono::Utc;
 use polars::prelude::*;
 use regex::Regex;
@@ -149,6 +149,7 @@ pub struct PhaseModel {
     #[serde(default)]
     pub join_paths: Vec<JoinPathModel>,
     pub query_radius: Option<f64>,
+    pub phase_2_ignore: Vec<String>,
     pub n_workers: Option<usize>,
     pub skip: bool,
 }
