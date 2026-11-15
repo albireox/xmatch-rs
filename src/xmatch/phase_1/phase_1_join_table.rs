@@ -68,7 +68,9 @@ pub(crate) fn xmatch_phase1_join_type_table(
         log::debug!(
             "{} Join table type: {:?}.",
             log_prefix,
-            serde_json::to_string(&join_table_type.unwrap_or(JoinPathTableType::Null)).unwrap()
+            serde_json::to_string(&join_table_type.unwrap_or(JoinPathTableType::Null))
+                .unwrap()
+                .trim_matches('"')
         );
     }
 
