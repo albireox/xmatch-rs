@@ -150,10 +150,10 @@ fn xmatch_phase1_join_type_column_pixel(
 
     // Get columns for the left and right catalogues.
     let right_primary_key = right_cat_model.primary_key.clone();
-    let right_join_column = join_path_model.left_on.clone();
+    let right_join_column = join_path_model.right_on.clone();
 
     let left_primary_key = left_cat_model.primary_key.clone();
-    let left_join_column = join_path_model.right_on.clone();
+    let left_join_column = join_path_model.left_on.clone();
 
     // Scan the right catalogue data. We get the matching pixels for the xmatch-pixels and
     // their neighbours to ensure we include all matching rows.
