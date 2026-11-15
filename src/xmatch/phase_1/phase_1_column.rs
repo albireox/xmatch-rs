@@ -163,6 +163,16 @@ fn xmatch_phase1_join_type_column_pixel(
         let xmatch_right_neighbours =
             right_cat_dataset.get_neighbours(xmatch_order, xmatch_pixel, true)?;
 
+        if xmatch_right_neighbours.is_empty() {
+            log::trace!(
+                "{} ({}, {}): no neighbouring pixels, skipping.",
+                log_prefix,
+                xmatch_order,
+                xmatch_pixel,
+            );
+            return Ok(());
+        }
+
         right_cat_dataset.scan_pixels(xmatch_right_neighbours)?
     } else {
         right_cat_dataset.get_frame()?
