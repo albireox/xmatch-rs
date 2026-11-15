@@ -313,7 +313,7 @@ pub fn move_temp_files(
                     let new_path_parent = new_path.parent().unwrap();
                     let file_name = new_path.file_name().unwrap().to_str().unwrap();
 
-                    let re = Regex::new(r"^([a-z0-9]+)(\-\d+\.parquet)$").unwrap();
+                    let re = Regex::new(r"^([a-z0-9]+)(\.parquet)$").unwrap();
                     let new_file_name =
                         re.replace(file_name, format!("$1-{}$2", suffix.clone().unwrap()));
 
@@ -756,4 +756,18 @@ pub fn test_progress_tracker(progress_file: PathBuf, log_messages: bool) -> Resu
     tracker.terminate()?;
 
     Ok(())
+}
+
+/// Determines whether we should skip a phase.
+pub(crate) fn should_skip(xmatch_data: &XMatchData, phase: usize) -> bool {
+    let cat_name = &xmatch_data.catalogue_name;
+    let cat_model = xmatch_data.get_catalogue_model(cat_name.as_str()).unwrap();
+
+    let phase = cat_model.get_phase(phase as i64).clone();
+
+    if phase.is_none() {
+        return true;
+    }
+
+    phase.unwrap().skip
 }

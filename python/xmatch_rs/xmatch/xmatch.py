@@ -17,6 +17,7 @@ import shutil
 import tempfile
 import threading
 import time
+import warnings
 from logging.handlers import MemoryHandler
 from tempfile import NamedTemporaryFile
 
@@ -479,6 +480,11 @@ class XMatch:
             self.log.set_catalogue_prefix(None)
             self.log.info(f"Processing catalogue {cat_model.name!r}.")
 
+            warnings.filterwarnings(
+                "ignore",
+                message=".*POLARS_MAX_BLOCKING_THREAD_COUNT reached.*",
+            )
+
             self._process_catalogue(
                 cat_model,
                 delete_temporary=delete_temporary,
@@ -723,7 +729,12 @@ class XMatch:
             extra_columns="ignore",
         )
 
-    def delete_catalogue(self, catalogue_name: str, phase: int | None = None):
+    def delete_catalogue_data(
+        self,
+        catalogue_name: str,
+        phase: int | None = None,
+        delete_from_schema: bool = False,
+    ):
         """Deletes a catalogue from the cross-match dataset.
 
         Parameters
@@ -733,6 +744,10 @@ class XMatch:
         phase
             The phase of the cross-match process. If `None`, deletes the catalogue
             from all phases.
+        delete_from_schema
+            Whether to delete the catalogue from the schema. If `False`, the phases
+            are marked as incomplete; otherwise the entire catalogue entry is removed.
+            Ignored if ``phase`` is specified.
 
         """
 
@@ -745,13 +760,21 @@ class XMatch:
 
         # Update the XMatch model to remove the catalogue.
         if phase is None:
-            self.model.catalogues = [
-                cat for cat in self.model.catalogues if cat.name != catalogue_name
-            ]
+            if delete_from_schema:
+                self.model.catalogues = [
+                    cat for cat in self.model.catalogues if cat.name != catalogue_name
+                ]
+            else:
+                cat = self.model.get_catalogue(catalogue_name)
+                for phase_ in cat.phases:
+                    phase_.complete = False
+                cat.complete = False
         else:
-            for cat in self.model.catalogues:
-                if cat.name == catalogue_name:
-                    cat.phases = [p for p in cat.phases if p.phase != phase]
+            cat = self.model.get_catalogue(catalogue_name)
+            for phase_ in cat.phases:
+                if phase_.phase == phase:
+                    phase_.complete = False
+            cat.complete = False
 
         self.model.write()
 

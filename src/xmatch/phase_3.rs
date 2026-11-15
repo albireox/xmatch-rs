@@ -34,6 +34,11 @@ pub(crate) fn run_phase_3(xmatch_data: XMatchData) -> Result<()> {
         xmatch_data.catalogue_name.to_uppercase()
     );
 
+    if should_skip(&xmatch_data, 3) {
+        log::info!("{} Skipping phase 3.", log_prefix);
+        return Ok(());
+    }
+
     let cat_model = xmatch_data
         .get_catalogue_model(&xmatch_data.catalogue_name)
         .unwrap();
@@ -150,6 +155,7 @@ pub(crate) fn run_phase_3(xmatch_data: XMatchData) -> Result<()> {
                     // Find the associated pixels in the xmatch dataset. We include neighbours because
                     // the match may be outside the nominal pixel due to proper motion propagation.
                     // We create a vector of tuples with the pixelation order as first element.
+                    // TODO: can this be replaced with the Dataset.get_neighbours() method?
                     let xmatch_pixels =
                         get_xmatch_pixels(xmatch_data.model.pixelation_order, order, pixel, true)?
                             .iter()
@@ -165,7 +171,20 @@ pub(crate) fn run_phase_3(xmatch_data: XMatchData) -> Result<()> {
                     let catalog_to_table_lf = if catalog_to_table_path.exists() {
                         let catalog_to_table_dataset =
                             Dataset::new(catalog_to_table_path.clone(), false);
-                        catalog_to_table_dataset.scan_pixels(xmatch_pixels)?
+                        let catalog_to_table_partition = catalog_to_table_dataset.partition();
+                        let cat_to_pixels = xmatch_pixels
+                            .iter()
+                            .filter(|(oo, pp)| {
+                                catalog_to_table_partition.contains(*oo, *pp).unwrap()
+                            })
+                            .copied()
+                            .collect::<Vec<_>>();
+
+                        if cat_to_pixels.is_empty() {
+                            return Ok(());
+                        }
+
+                        catalog_to_table_dataset.scan_pixels(cat_to_pixels)?
                     } else {
                         let pk_dtype = cat_pixel_lf
                             .clone()
@@ -294,22 +313,28 @@ fn xmatch_phase3_process_lf(
 
     // If a catalog_to_table frame is passed, use it to discard sources that are already
     // in the xmatch dataset.
-    let cat_lf = if let Some(catalog_to_table_lf) = catalog_to_table_lf {
-        let primary_key = cat_model.primary_key.clone();
-        let catalog_to_table_lf = catalog_to_table_lf.clone().select([col(&primary_key)]);
+    let mut cat_lf = cat_lf.clone();
 
-        cat_lf.join(
-            catalog_to_table_lf,
-            [col(&primary_key)],
-            [col(&primary_key)],
-            JoinArgs {
-                how: JoinType::Anti,
-                ..Default::default()
-            },
-        )
-    } else {
-        cat_lf
-    };
+    if let Some(catalog_to_table_lf) = catalog_to_table_lf {
+        if !catalog_to_table_lf.is_empty() {
+            let primary_key = cat_model.primary_key.clone();
+            let catalog_to_table_lf = catalog_to_table_lf.clone().select([col(&primary_key)]);
+
+            cat_lf = cat_lf.join(
+                catalog_to_table_lf,
+                [col(&primary_key)],
+                [col(&primary_key)],
+                JoinArgs {
+                    how: JoinType::Anti,
+                    ..Default::default()
+                },
+            )
+        }
+    }
+
+    if cat_lf.is_empty() {
+        return Ok(());
+    }
 
     // Add the catalogid column. Here we rely on the catalogid cache. To prevent multiple threads
     // reading/updating the cache at the same time, we use a mutex lock.
