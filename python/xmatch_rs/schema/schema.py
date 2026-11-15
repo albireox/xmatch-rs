@@ -19,7 +19,7 @@ from pydantic import AnyUrl, BaseModel, ConfigDict, Field, field_validator
 
 from sdsstools import read_yaml_file
 
-from xmatch_rs.tools import get_polars_dtype
+from xmatch_rs.tools import PrettyDumper, get_polars_dtype
 
 
 __all__: list[str] = [
@@ -578,7 +578,15 @@ class Schema:
         path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(path, "w") as f:
-            yaml.dump(self.model.model_dump(mode="json"), f, sort_keys=False, indent=2)
+            yaml.dump(
+                self.model.model_dump(mode="json"),
+                stream=f,
+                Dumper=PrettyDumper,
+                sort_keys=False,
+                indent=2,
+                default_flow_style=False,
+                allow_unicode=True,
+            )
 
     def to_dict(self) -> dict:
         """Returns the schema as a dictionary.

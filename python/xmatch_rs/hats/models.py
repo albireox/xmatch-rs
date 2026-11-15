@@ -22,6 +22,8 @@ from pydantic import (
     model_serializer,
 )
 
+from xmatch_rs.tools import PrettyDumper
+
 
 __all__: list[str] = ["ConvertToHATSModel", "PhaseModel", "HATSPropertiesModel"]
 
@@ -146,7 +148,15 @@ class ConvertToHATSModel(BaseModel):
 
         with lock:
             with output_file.open("w") as f:
-                f.write(yaml.dump(self.model_dump(mode="json"), sort_keys=False))
+                yaml.dump(
+                    self.model_dump(mode="json"),
+                    stream=f,
+                    Dumper=PrettyDumper,
+                    sort_keys=False,
+                    indent=2,
+                    default_flow_style=False,
+                    allow_unicode=True,
+                )
 
 
 class PhaseModel(BaseModel):

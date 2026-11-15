@@ -18,6 +18,7 @@ from typing import Type
 import numpy
 import polars
 import polars._typing
+import yaml
 
 import sdsstools.logger
 
@@ -32,6 +33,7 @@ __all__: list[str] = [
     "list_files",
     "get_current_time",
     "sink_to_file",
+    "PrettyDumper",
 ]
 
 
@@ -264,3 +266,10 @@ def sink_to_file(
         raise ValueError(f"Unsupported file extension: {file_path.suffix}")
 
     tmp_file.rename(file_path)
+
+
+class PrettyDumper(yaml.SafeDumper):
+    """A PyYAML dumper that matches the Prettier formatting."""
+
+    def increase_indent(self, flow=False, indentless=False):
+        return super().increase_indent(flow, False)
