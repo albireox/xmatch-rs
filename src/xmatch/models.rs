@@ -149,6 +149,7 @@ pub struct PhaseModel {
     #[serde(default)]
     pub join_paths: Vec<JoinPathModel>,
     pub query_radius: Option<f64>,
+    #[serde(default = "Vec::new")]
     pub phase_2_ignore: Vec<String>,
     pub n_workers: Option<usize>,
     pub skip: bool,
