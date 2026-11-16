@@ -219,13 +219,9 @@ pub fn pixel_from_hats_dataset(
 ///
 /// For a given HATS dataset and order, returns a list with the number of targets in
 /// each pixel at the specified order. The list follows the RING scheme.
-pub fn get_healpix_map(hats_path: PathBuf, map_order: u8) -> Result<Vec<u32>> {
-    // Get dataset paths.
-    let hats_path = get_hats_path_root(hats_path).unwrap();
-    let dataset_path = hats_path.join("object/dataset");
-
+pub fn get_healpix_map(dataset_path: PathBuf, map_order: u8) -> Result<Vec<u32>> {
     if !dataset_path.exists() {
-        panic!("Dataset file not found in HATS path: {:?}", dataset_path);
+        panic!("Dataset directory not found: {:?}", dataset_path);
     }
 
     // Get the partition info for the dataset.

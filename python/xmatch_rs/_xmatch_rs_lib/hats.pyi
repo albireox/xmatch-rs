@@ -174,15 +174,15 @@ def create_margin_cache(
     ...
 
 def get_healpix_map(
-    hats_path: str | pathlib.Path,
+    dataset_path: str | pathlib.Path,
     map_order: int,
 ) -> list[int]:
     """Returns a HEALPix map from a HATS dataset.
 
     Parameters
     ----------
-    hats_path
-        The path to the HATS dataset.
+    dataset_path
+        The path to the HATS object dataset.
     map_order
         The order of the HEALPix map to generate.
 

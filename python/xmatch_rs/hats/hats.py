@@ -776,7 +776,7 @@ class HATS:
         if m is None:
             healpix_map = numpy.array(
                 _rs_hats.get_healpix_map(
-                    str(self.path / "object"),
+                    str(self.path / "object" / "dataset"),
                     map_order,
                 )
             )
