@@ -21,9 +21,12 @@ import warnings
 from logging.handlers import MemoryHandler
 from tempfile import NamedTemporaryFile
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal, Sequence
 
+import numpy
 import polars
+from healpy.newvisufunc import projview
+from matplotlib import pyplot as plt
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -38,6 +41,7 @@ from sdsstools import Timer
 from sdsstools.logger import SDSSLogger
 
 from xmatch_rs import console
+from xmatch_rs._xmatch_rs_lib import hats as hats_lib
 from xmatch_rs._xmatch_rs_lib import xmatch as xmatch_lib
 from xmatch_rs.hats.hats import HATS
 from xmatch_rs.tools import get_xmatch_rs_logger, lazy_frame_row_count
@@ -46,6 +50,8 @@ from xmatch_rs.xmatch.schemas import CATALOG_SCHEMA, CATALOG_TO_TABLE_SCHEMA
 
 
 if TYPE_CHECKING:
+    from numpy.typing import ArrayLike
+
     from sdsstools.logger import SDSSLogger
 
 
@@ -777,6 +783,156 @@ class XMatch:
             cat.complete = False
 
         self.model.write()
+
+    def describe(self):
+        """Returns a frame with the number of rows for each catalogue and phase."""
+
+        data: list[dict] = []
+
+        xm_path = self.path
+
+        for cat in self.model.catalogues:
+            if not cat.complete:
+                continue
+
+            cat_data: dict[str, int | str | None] = {
+                "catalogue": cat.name,
+                "n_rows": None,
+                "phase_1_entries": None,
+                "phase_1_matched": None,
+                "phase_2_entries": None,
+                "phase_2_matched": None,
+                "phase_3_entries": None,
+                "phase_3_matched": None,
+            }
+
+            cat_hats = HATS(cat.hats_path)
+            cat_lf = cat_hats.get_as_lazyframe()
+
+            n_rows = cat_lf.select(polars.len()).collect().item()
+            cat_data["n_rows"] = n_rows
+
+            catalog_to_lf = polars.scan_parquet(
+                xm_path / f"catalog_to_{cat.name}/dataset"
+            )
+
+            for phase in cat.phases:
+                if phase.skip:
+                    continue
+
+                phase_prefix = f"phase_{phase.phase}"
+
+                entries = (
+                    catalog_to_lf.filter((polars.col.added_by_phase == phase.phase))
+                    .select(polars.len())
+                    .collect()
+                    .item()
+                )
+                cat_data[f"{phase_prefix}_entries"] = entries
+
+                matches = (
+                    catalog_to_lf.filter(
+                        (polars.col.added_by_phase == phase.phase),
+                        polars.col.best,
+                    )
+                    .select(polars.col(cat.primary_key))
+                    .unique()
+                    .select(polars.len())
+                    .collect()
+                    .item()
+                )
+                cat_data[f"{phase_prefix}_matched"] = matches
+
+            data.append(cat_data)
+
+        df = polars.DataFrame(data)
+        df = df.with_columns(
+            total_entries=polars.sum_horizontal(polars.col(r"^phase_\d_entries$")),
+            total_matched=polars.sum_horizontal(polars.col(r"^phase_\d_matched$")),
+        )
+
+        return df
+
+    def create_density_map(
+        self,
+        map_order: int,
+        coord: Literal["equatorial", "galactic"] = "equatorial",
+        norm: str | None = "symlog",
+        m: Sequence[int] | None = None,
+        output_path: str | pathlib.Path | None = None,
+        **map_kwargs,
+    ) -> ArrayLike:
+        """Creates a density map for the HATS dataset.
+
+        Parameters
+        ----------
+        map_order
+            The order of the HEALPix map to generate.
+        coord
+            The coordinate system to use for the density map. Can be ``'equatorial'``
+            or ``'galactic'``.
+        norm
+            The normalization to use for the density map.
+        m
+            The map to use for the density map (must be in the RING schema).
+            If not provided it will be calculated from the HATS dataset.
+        output_path
+            The path to save the generated density map. If not provided, the map
+            will be saved to the default location in the HATS object directory.
+        map_kwargs
+            Additional keyword arguments to pass to the ``healpy.newvisufunc.projview``
+            function.
+
+        Returns
+        -------
+
+        """
+
+        if m is None:
+            healpix_map = numpy.array(
+                hats_lib.get_healpix_map(
+                    str(self.path / "catalog" / "dataset"),
+                    map_order,
+                )
+            )
+        else:
+            healpix_map = numpy.array(m)
+
+        if output_path is None:
+            output_path = self.path / f"density_map_order_{map_order}.pdf"
+        else:
+            output_path = pathlib.Path(output_path)
+
+        projview_kwargs = {
+            "coord": "C",
+            "cb_orientation": "vertical",
+            "graticule": True,
+            "graticule_labels": True,
+            "projection_type": "mollweide",
+            "unit": "Target count",
+            "xlabel": "RA",
+            "ylabel": "Dec",
+            "norm": norm,
+        }
+
+        if coord == "galactic":
+            projview_kwargs["coord"] = ["C", "G"]
+            projview_kwargs["xlabel"] = "Galactic Longitude"
+            projview_kwargs["ylabel"] = "Galactic Latitude"
+        elif coord == "equatorial":
+            pass
+        else:
+            raise ValueError(f"Unsupported coordinate system: {coord!r}")
+
+        projview_kwargs.update(map_kwargs)
+
+        with plt.ioff():
+            quad: Any = projview(m=healpix_map, **projview_kwargs)
+            quad.figure.set_size_inches((16, 9))
+            quad.figure.savefig(output_path)
+            plt.close(quad.figure)
+
+        return healpix_map
 
     def _test_progress_tracker(self, log_messages: bool = True):
         """Tests the progress tracker."""
