@@ -384,6 +384,12 @@ pub trait AsDataset {
         // Get the BMOC covering the margin around the cell.
         let bmoc = crate::hats::margin::get_margin_bmoc(order, pixel, buffer, None);
 
+        // TODO: this will fail to get all the necessary pixels if the margin is large enough to
+        // include pixels that are not direct neighbours. A better way would be to keep including
+        // concentric rings of neighbours. When none of the neighbours of a neighbour have
+        // intersection with the BMOC, we stop iteraing for that neighbour. For the purposes of
+        // creating a margin to account for proper motions, and if the pixelation order is small
+        // enough, what we do now is probably sufficient.
         let neighbours = self.get_neighbours(order, pixel, true)?;
 
         // Iterate over the neighbours and collect the targets that fall within the margin.
