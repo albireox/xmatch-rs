@@ -969,7 +969,7 @@ def _download_table_using_copy(
                 needs_rename = True
 
             copy_query = sql.SQL(
-                "COPY (SELECT {} FROM {} LIMIT 25000000) TO STDOUT WITH (FORMAT CSV, HEADER FALSE);"
+                "COPY (SELECT {} FROM {}) TO STDOUT WITH (FORMAT CSV, HEADER FALSE);"
             ).format(
                 sql.SQL(", ").join([sql.Identifier(col) for col in df_schema.keys()]),
                 sql.Identifier(schema, table_name),
