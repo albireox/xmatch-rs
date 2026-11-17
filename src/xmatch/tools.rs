@@ -203,25 +203,8 @@ pub fn propagate_coordinates(
     cat_model: &CatalogueModel,
     to_epoch: f32,
 ) -> Result<LazyFrame> {
-    // Check if the catalogue has proper motion columns or reference epoch.
-    if cat_model.pmra_column.is_none() || cat_model.pmdec_column.is_none() {
-        return Ok(cat_lf.with_columns([
-            col(&cat_model.ra_column).alias("ra_epoch"),
-            col(&cat_model.dec_column).alias("dec_epoch"),
-        ]));
-    }
-
-    if cat_model.epoch.is_none() && cat_model.epoch_column.is_none() {
-        return Ok(cat_lf.with_columns([
-            col(&cat_model.ra_column).alias("ra_epoch"),
-            col(&cat_model.dec_column).alias("dec_epoch"),
-        ]));
-    }
-
     let ra_col = cat_model.ra_column.clone();
     let dec_col = cat_model.dec_column.clone();
-    let pmra_col = cat_model.pmra_column.clone().unwrap();
-    let pmdec_col = cat_model.pmdec_column.clone().unwrap();
 
     // Ensure RA and Dec are in degrees.
     let cat_lf = match cat_model.ra_column_unit {
@@ -234,6 +217,19 @@ pub fn propagate_coordinates(
         CoordUnit::Radians => cat_lf.with_column(col(&dec_col).degrees().alias("dec_epoch")),
         _ => cat_lf.with_column(col(&dec_col).alias("dec_epoch")),
     };
+
+    // If the catalogue does not have proper motion columns, return the frame as it is now.
+    if cat_model.pmra_column.is_none() || cat_model.pmdec_column.is_none() {
+        return Ok(cat_lf);
+    }
+
+    // Same if there is not catalogue epoch information.
+    if cat_model.epoch.is_none() && cat_model.epoch_column.is_none() {
+        return Ok(cat_lf);
+    }
+
+    let pmra_col = cat_model.pmra_column.clone().unwrap();
+    let pmdec_col = cat_model.pmdec_column.clone().unwrap();
 
     // cos_dec factor
     let cos_dec = col("dec_epoch").radians().cos();

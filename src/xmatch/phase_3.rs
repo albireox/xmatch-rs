@@ -427,6 +427,50 @@ fn get_catalog_lf(
     // Propagate coordinates.
     let catalog_lf = propagate_coordinates(cat_lf, &cat_model, xmatch_data.model.epoch)?;
 
+    // If we have propagated the coordinats to the xmatch epoch, then the _healpix_29 column is
+    // no longer valid and we need to recalculate it.
+    let catalog_lf = if cat_model.pmra_column.is_none()
+        || cat_model.pmdec_column.is_none()
+        || (cat_model.epoch.is_none() && cat_model.epoch_column.is_none())
+    {
+        catalog_lf
+    } else {
+        catalog_lf
+            .drop(by_name(["_healpix_29"], true, false))
+            .with_column(
+                map_multiple(
+                    |columns| {
+                        // Create a layer for the order 29 healpix pixelation.
+                        let layer = cdshealpix::nested::get(29);
+
+                        // Extract the two Series/Columns for ra and dec.
+                        let ra = columns[0].f64()?;
+                        let dec = columns[1].f64()?;
+
+                        // Perform custom elementwise logic using ChunkedArray iterators
+                        let result: UInt64Chunked = ra
+                            .iter()
+                            .zip(dec.iter())
+                            .map(|(opt_ra, opt_dec)| match (opt_ra, opt_dec) {
+                                (Some(val_ra), Some(val_dec)) => {
+                                    Some(layer.hash(val_ra.to_radians(), val_dec.to_radians())
+                                        as u64)
+                                }
+                                _ => None,
+                            })
+                            .collect();
+
+                        Ok(result.into_column())
+                    },
+                    // Input expressions
+                    &[col("ra_epoch"), col("dec_epoch")],
+                    // Output type specification for the query planner
+                    |_schema, _fields| Ok(Field::new("_healpix_29".into(), DataType::UInt64)),
+                )
+                .alias("custom_result"),
+            )
+    };
+
     // Select columns from the catalog lf.
     let mut columns = vec![
         col("catalogid"),
