@@ -13,6 +13,7 @@ import multiprocessing
 import pathlib
 import re
 import subprocess
+import sys
 import time
 from functools import partial
 
@@ -916,21 +917,53 @@ def _download_table_using_copy(
         else:
             # We pipe the results of the COPY command into the split command
             # to create chunked CSV files.
-            split_command = (
-                "split --numeric-suffixes=1 -a 4 "
-                f"-l {chunk_size} --additional-suffix=.csv - "
-                f"{output_path / f'{table_name}_'}"
-            )
 
-            split_process = subprocess.Popen(
-                split_command,
-                shell=True,
-                stdin=subprocess.PIPE,
-            )
-            assert split_process.stdin is not None
+            # The macOS split command does not support the --additional-suffix option,
+            # so we prefer gsplit, which is the GNU version of split and can be
+            # installed via Homebrew.
+            split_cmd: str = "split"
+            if (
+                subprocess.run(
+                    ["which", "gsplit"],
+                    shell=True,
+                    capture_output=True,
+                ).returncode
+                != 0
+            ):
+                split_cmd = "gsplit"
+
+            if split_cmd == "gsplit" or sys.platform != "darwin":
+                split_command = (
+                    f"{split_cmd} --numeric-suffixes=1 -a 4 "
+                    f"-l {chunk_size} --additional-suffix=.csv - "
+                    f"{output_path / f'{table_name}_'}"
+                )
+
+                split_process = subprocess.Popen(
+                    split_command,
+                    shell=True,
+                    stdin=subprocess.PIPE,
+                )
+                assert split_process.stdin is not None
+
+                needs_rename = False
+            else:
+                # Run split without --additional-suffix and rename the files afterwards.
+                split_command = (
+                    f"split -a 4 -l {chunk_size} - {output_path / f'{table_name}_'}"
+                )
+
+                split_process = subprocess.Popen(
+                    split_command,
+                    shell=True,
+                    stdin=subprocess.PIPE,
+                )
+                assert split_process.stdin is not None
+
+                needs_rename = True
 
             copy_query = sql.SQL(
-                "COPY (SELECT {} from {}) TO STDOUT WITH (FORMAT CSV, HEADER FALSE);"
+                "COPY (SELECT {} FROM {}) TO STDOUT WITH (FORMAT CSV, HEADER FALSE);"
             ).format(
                 sql.SQL(", ").join([sql.Identifier(col) for col in df_schema.keys()]),
                 sql.Identifier(schema, table_name),
@@ -947,7 +980,7 @@ def _download_table_using_copy(
                         # and update the status.
                         if time.time() - last_check > 1:
                             last_check = time.time()
-                            i_chunk = len(list(output_path.glob(f"{table_name}_*.csv")))
+                            i_chunk = len(list(output_path.glob(f"{table_name}_*")))
                             status.update(
                                 f"COPY-ing table {schema}.{table_name} to CSV files. "
                                 f"Processing chunk {i_chunk} / {n_chunks} ..."
@@ -955,6 +988,16 @@ def _download_table_using_copy(
 
             split_process.stdin.close()
             split_process.wait()
+
+            # Rename files, if needed.
+            if needs_rename:
+                rename_process = subprocess.run(
+                    'for f in {}*; do mv "$f" "$f.csv"; done'.format(f"{table_name}_"),
+                    shell=True,
+                    capture_output=True,
+                    cwd=output_path,
+                )
+                assert rename_process.returncode == 0, "Failed to rename split chunks."
 
     console.print(
         f"[green][✔][/] Created CSV files for table [blue]{schema}.{table_name}[/] "
