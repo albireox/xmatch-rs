@@ -948,6 +948,12 @@ def _download_table_using_copy(
 
                 needs_rename = False
             else:
+                console.print(
+                    "[yellow][!][/] Use of the macOS split command is not fully "
+                    "supported. Consider installing GNU split via Homebrew "
+                    "(brew install coreutils)."
+                )
+
                 # Run split without --additional-suffix and rename the files afterwards.
                 split_command = (
                     f"split -a 4 -l {chunk_size} - {output_path / f'{table_name}_'}"
@@ -963,7 +969,7 @@ def _download_table_using_copy(
                 needs_rename = True
 
             copy_query = sql.SQL(
-                "COPY (SELECT {} FROM {}) TO STDOUT WITH (FORMAT CSV, HEADER FALSE);"
+                "COPY (SELECT {} FROM {} LIMIT 25000000) TO STDOUT WITH (FORMAT CSV, HEADER FALSE);"
             ).format(
                 sql.SQL(", ").join([sql.Identifier(col) for col in df_schema.keys()]),
                 sql.Identifier(schema, table_name),
@@ -1044,14 +1050,31 @@ def _convert_csv_to_parquet(
 ):
     """Convert a CSV file to a Parquet file using the specified schema."""
 
+    # If the schema contains boolean columns, read those firsts as string and
+    # then cast to boolean.
+    df_schema_no_bool = {}
+    for col, dtype in df_schema.items():
+        if dtype == polars.Boolean:
+            df_schema_no_bool[col] = polars.String
+        else:
+            df_schema_no_bool[col] = dtype
+
     if output_path is None:
         output_path = csv_file.with_suffix(".parquet")
 
-    (
-        polars.scan_csv(csv_file, schema=df_schema, has_header=False)
-        .cast(df_schema)  # type: ignore
-        .sink_parquet(output_path, engine="streaming")
-    )
+    lf = polars.scan_csv(csv_file, schema=df_schema_no_bool, has_header=False)
+
+    # Convert t/f to boolean if needed.
+    for col, dtype in df_schema.items():
+        if dtype == polars.Boolean:
+            lf = lf.with_columns(
+                polars.when(polars.col(col).is_in(["t", "true", "1"]))
+                .then(True)
+                .otherwise(False)
+                .alias(col)
+            )
+
+    lf.cast(df_schema).sink_parquet(output_path, engine="streaming")  # ty: ignore[invalid-argument-type]
 
 
 PG_TO_POLARS_TYPES: dict[str, polars.DataType | type[polars.DataType]] = {
