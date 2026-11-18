@@ -928,7 +928,7 @@ def _download_table_using_copy(
                     shell=True,
                     capture_output=True,
                 ).returncode
-                != 0
+                == 0
             ):
                 split_cmd = "gsplit"
 
